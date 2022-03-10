@@ -21,8 +21,17 @@
 
 """Main entry point to the mesoscopy CLI"""
 import click
+import mesoscopy.preprocess as preprocess
+import mesoscopy.process as process
+import mesoscopy.postprocess as postprocess
 
 
-@click.command()
+@click.group()
 def cli():
+    """Widefield calcium imaging analysis pipeline."""
     click.echo("Hello!")
+
+
+cli.add_command(preprocess.preprocess)
+cli.add_command(process.process)
+cli.add_command(postprocess.postprocess)
