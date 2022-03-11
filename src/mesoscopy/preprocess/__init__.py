@@ -25,4 +25,9 @@ import click
 
 @click.command()
 def preprocess():
+    """Preprocessing to extract deltaF from a single session.
+
+    Preprocessing separates the two channels, applies the haemodynamic correction,
+    realigns the images to a common coordinate space (ABA) and extracts the delta F signal.
+    """
     click.echo("Preprocessing")
