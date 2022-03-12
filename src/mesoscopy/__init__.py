@@ -33,7 +33,7 @@ from matplotlib import pyplot as plt
 @click.group()
 def cli():
     """Widefield calcium imaging analysis pipeline."""
-    click.echo("Hello!")
+    pass
 
 
 @cli.command()
