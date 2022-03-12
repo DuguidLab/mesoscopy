@@ -20,16 +20,40 @@
 #  SOFTWARE.
 
 """Main entry point to the mesoscopy CLI"""
+import os
 import click
+import tables
 import mesoscopy.preprocess as preprocess
 import mesoscopy.process as process
 import mesoscopy.postprocess as postprocess
+
+from matplotlib import pyplot as plt
 
 
 @click.group()
 def cli():
     """Widefield calcium imaging analysis pipeline."""
     click.echo("Hello!")
+
+
+@cli.command()
+@click.argument("path", type=click.Path(exists=True))
+@click.argument("out_dir", type=click.Path(dir_okay=True))
+@click.option("--index", default=0, show_default=True, help="Index of frame to sample.")
+def sample(path, out_dir, index):
+    """Sample an image frame from an HDF5 file and export it as a PNG."""
+    click.echo("Sampling {} at index {}.".format(path, index))
+
+    data = tables.open_file(path, "r")
+    os.makedirs(out_dir, exist_ok=True)
+    outpath = (
+        out_dir
+        + os.sep
+        + path.split("/")[-1].replace(".h5", "_sample-{}.png".format(index))
+    )
+
+    plt.imsave(outpath, data.root.frames[index])
+    click.echo("Saved sample at {}".format(outpath))
 
 
 cli.add_command(preprocess.preprocess)
