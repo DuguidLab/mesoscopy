@@ -17,6 +17,8 @@ from matplotlib import pyplot as plt
 
 matplotlib.rcParams["figure.dpi"] = 150
 
+from timeit import default_timer as timer  # Debugging performance
+
 
 def main():
     parser = argparse.ArgumentParser(description="Preprocess mesoscope data")
@@ -73,7 +75,10 @@ def main():
     interim_hdf5 = tables.open_file(interim_path, "w", title=animal_id)
     print("Interim HDF5 file at {}".format(interim_path))
 
+    start = timer()
     frame_means = np.mean(raw.root.frames[:100], axis=(1, 2))
+    end = timer()
+    print("Frame means took {} s".format(end - start))
 
     plt.clf()
     plt.hist(frame_means)
@@ -85,7 +90,10 @@ def main():
     print("Saved histogram for first 100 frames at {}".format(outpath))
 
     print("Separating channels...")
+    start = timer()
     channel_threshold = frame_means.mean()
+    end = timer()
+    print("Calculating channel threshold took {} s".format(end - start))
 
     gcamp_frames = interim_hdf5.create_earray(
         interim_hdf5.root,
@@ -102,6 +110,7 @@ def main():
         expectedrows=raw.root.frames.shape[0] / 2,
     )
 
+    start = timer()
     gcamp_timestamps = []
     for idx, frame in enumerate(raw.root.frames.iterrows()):
         if np.mean(frame, axis=(0, 1)) > channel_threshold:
@@ -110,9 +119,15 @@ def main():
         else:
             gcamp_frames.append([frame])
             gcamp_timestamps.append(raw.root.timestamps[idx])
+    end = timer()
+    print("Separating channels took {} s".format(end - start))
 
     print("Generating average isosbestic frame...")
+
+    start = timer()
     isosb_mean = np.mean(isosb_frames[:7500], axis=0)
+    end = timer()
+    print("Calculating mean isosb frame took {} s".format(end - start))
 
     isosb_frames.remove()
     interim_hdf5.flush()
@@ -129,8 +144,12 @@ def main():
         shape=(0, raw.root.frames.shape[1], raw.root.frames.shape[2]),
         expectedrows=raw.root.frames.shape[0] / 2,
     )
+
+    start = timer()
     for frame in gcamp_frames.iterrows():
         hb_corrected.append([frame / isosb_mean])
+    end = timer()
+    print("frame / isosb_mean took {} s".format(end - start))
 
     print("Corrected array has shape {}".format(hb_corrected.shape))
 
@@ -148,8 +167,12 @@ def main():
         shape=(0, raw.root.frames.shape[1], raw.root.frames.shape[2]),
         expectedrows=raw.root.frames.shape[0] / 2,
     )
+
+    start = timer()
     for frame in hb_corrected.iterrows():
         filtered.append([ndi.gaussian_filter(frame, 3)])
+    end = timer()
+    print("Filtering took {} s".format(end - start))
 
     outpath = args.path.replace("raw", "interim").replace(
         ".h5", "_gaussian-filter-sample-frame.png"
@@ -172,6 +195,8 @@ def main():
         shape=(0, raw.root.frames.shape[1], raw.root.frames.shape[2]),
         expectedrows=raw.root.frames.shape[0] / 2,
     )
+
+    start = timer()
     for frame in filtered.iterrows():
         realigned.append(
             [
@@ -181,6 +206,9 @@ def main():
                 )
             ]
         )
+    end = timer()
+    print("Realigning took {} s".format(end - start))
+
     outpath = args.path.replace("raw", "interim").replace(
         ".h5", "_realigned-sample-frame.png"
     )
@@ -191,7 +219,10 @@ def main():
     interim_hdf5.flush()
 
     print("Calculating F0...")
+    start = timer()
     f0 = np.percentile(realigned[:7500], 5, axis=0)
+    end = timer()
+    print("Calculating F0 took {} s".format(end - start))
 
     print("Calculating delta F / F0")
     outpath = args.path.replace("raw", "preprocessed")
@@ -212,9 +243,12 @@ def main():
         expectedrows=gcamp_frames.shape[0],
     )
 
+    start = timer()
     for frame in realigned.iterrows():
         deltaF.append([(frame - f0) / (f0 + 1)])
     timestamps.append(gcamp_timestamps)
+    end = timer()
+    print("DeltaF took {} s".format(end - start))
 
     outpath = args.path.replace("raw", "interim").replace(
         ".h5", "_deltaf-sample-frame.png"
