@@ -20,14 +20,53 @@
 #  SOFTWARE.
 
 """Preprocessing submodule."""
+import os
 import click
+import h5py
+import dask
+
+from timeit import default_timer as timer  # Debugging performance
 
 
 @click.command()
-def preprocess():
+@click.argument("raw_path", type=click.Path(exists=True))
+@click.argument("out_dir", type=click.Path(dir_okay=True))
+def preprocess(raw_path, out_dir, channels):
     """Preprocessing to extract deltaF from a single session.
 
     Preprocessing separates the two channels, applies the haemodynamic correction,
     realigns the images to a common coordinate space (ABA) and extracts the delta F signal.
+
+    Args:
+        raw: Path to raw HDF5 file
+        out_dir: Path to output directory for preprocessed data. This directory doesn't have to exist.
+
     """
-    click.echo("Preprocessing")
+    click.echo("Preprocessing file {}.".format(raw_path))
+
+    session_id = raw_path.split("/")[-1].replace(".h5", "")
+    os.makedirs(out_dir, exist_ok=True)
+
+
+def separate_channels():
+    pass
+
+
+def mean_frame():
+    pass
+
+
+def haemodynamic_correction():
+    pass
+
+
+def register_to_frame():
+    pass
+
+
+def realign():
+    pass
+
+
+def extract_signal():
+    pass
