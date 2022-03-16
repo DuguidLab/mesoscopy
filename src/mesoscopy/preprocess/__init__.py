@@ -115,33 +115,49 @@ def preprocess(raw_path, out_dir):
     plt.savefig(outpath)
     click.echo("Saved channel means at {}".format(outpath))
 
-    # Generate the mean isosbestic frame
+    # Generate the mean gcamp frame and its std
     start = time.time()
-    isosb_mean_frame = raw_frames[frame_stds < std_threshold].mean(axis=0).compute()
+    gcamp_mean_frame, gcamp_std_frame = dask.compute(
+        raw_frames[frame_stds > std_threshold].mean(axis=0),
+        raw_frames[frame_stds > std_threshold].std(axis=0),
+    )
     end = time.time()
-    click.echo("Isosbestic average frame calculated in {} s".format(end - start))
+    click.echo("GCaMP average frame and std calculated in {} s".format(end - start))
+
+    plt.clf()
+    outpath = qa_dir + os.sep + session_id + "_qa_gcamp_mean.png"
+    plt.imsave(outpath, gcamp_mean_frame)
+    click.echo("Saved gcamp average frame at {}".format(outpath))
+
+    plt.clf()
+    outpath = qa_dir + os.sep + session_id + "_qa_gcamp_std.png"
+    plt.imsave(outpath, gcamp_std_frame)
+    click.echo("Saved gcamp standard deviation frame at {}".format(outpath))
+
+    # Generate the mean isosbestic frame and its std
+    start = time.time()
+    isosb_mean_frame, isosb_std_frame = dask.compute(
+        raw_frames[frame_stds < std_threshold].mean(axis=0),
+        raw_frames[frame_stds < std_threshold].std(axis=0),
+    )
+    end = time.time()
+    click.echo(
+        "Isosbestic average frame and std calculated in {} s".format(end - start)
+    )
 
     plt.clf()
     outpath = qa_dir + os.sep + session_id + "_qa_isosb_mean.png"
     plt.imsave(outpath, isosb_mean_frame)
     click.echo("Saved isosbestic average frame at {}".format(outpath))
 
+    plt.clf()
+    outpath = qa_dir + os.sep + session_id + "_qa_isosb_std.png"
+    plt.imsave(outpath, isosb_std_frame)
+    click.echo("Saved isosbestic standard deviation frame at {}".format(outpath))
 
-def separate_channels():
-    pass
+    gcamp_isosb_mean_ratio = gcamp_mean_frame / isosb_mean_frame
 
-
-def haemodynamic_correction():
-    pass
-
-
-def register_to_frame():
-    pass
-
-
-def realign():
-    pass
-
-
-def extract_signal():
-    pass
+    plt.clf()
+    outpath = qa_dir + os.sep + session_id + "_qa_gcamp_isosb_mean_ratio.png"
+    plt.imsave(outpath, gcamp_isosb_mean_ratio)
+    click.echo("Saved mean gcamp:isosb ratio frame at {}".format(outpath))
