@@ -76,7 +76,7 @@ def main():
     print("Interim HDF5 file at {}".format(interim_path))
 
     start = timer()
-    frame_means = np.mean(raw.root.frames[:100], axis=(1, 2))
+    frame_means = np.mean(raw.root.frames, axis=(1, 2))
     end = timer()
     print("Frame means took {} s".format(end - start))
 
