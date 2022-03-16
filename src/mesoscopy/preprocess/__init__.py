@@ -24,14 +24,18 @@ import os
 import click
 import h5py
 import dask
+import numba
 
-from timeit import default_timer as timer  # Debugging performance
+import time
+
+from dask import array as da
+from matplotlib import pyplot as plt
 
 
 @click.command()
 @click.argument("raw_path", type=click.Path(exists=True))
 @click.argument("out_dir", type=click.Path(dir_okay=True))
-def preprocess(raw_path, out_dir, channels):
+def preprocess(raw_path, out_dir):
     """Preprocessing to extract deltaF from a single session.
 
     Preprocessing separates the two channels, applies the haemodynamic correction,
@@ -47,12 +51,83 @@ def preprocess(raw_path, out_dir, channels):
     session_id = raw_path.split("/")[-1].replace(".h5", "")
     os.makedirs(out_dir, exist_ok=True)
 
+    qa_dir = out_dir + os.sep + "qa"
+    os.makedirs(qa_dir, exist_ok=True)
+
+    # Lazy-load the data into a dask array
+    f = h5py.File(raw_path)
+    d = f["/frames"]
+
+    raw_frames = da.from_array(d, chunks="auto")
+
+    # Channel separation
+    # Get the global mean and std values for each frame
+    start = time.time()
+    frame_means, frame_stds = dask.compute(
+        raw_frames.mean(axis=(1, 2)), raw_frames.std(axis=(1, 2))
+    )
+    end = time.time()
+    click.echo(
+        "Frame means & standard deviations calculated in {} s".format(end - start)
+    )
+
+    plt.clf()
+    plt.hist(frame_means)
+    outpath = qa_dir + os.sep + session_id + "_qa_frame_means_histogram.png"
+    plt.savefig(outpath)
+    click.echo("Saved histogram for frame means at {}".format(outpath))
+
+    plt.clf()
+    plt.plot(frame_means)
+    outpath = qa_dir + os.sep + session_id + "_qa_frame_means_line.png"
+    plt.savefig(outpath)
+    click.echo("Saved lineplot for frame means at {}".format(outpath))
+
+    plt.clf()
+    plt.hist(frame_stds)
+    outpath = qa_dir + os.sep + session_id + "_qa_frame_std_histogram.png"
+    plt.savefig(outpath)
+    click.echo("Saved histogram for frame std at {}".format(outpath))
+
+    plt.clf()
+    plt.plot(frame_stds)
+    outpath = qa_dir + os.sep + session_id + "_qa_frame_std_line.png"
+    plt.savefig(outpath)
+    click.echo("Saved lineplot for frame std at {}".format(outpath))
+
+    # Threshold based on standard deviation - 470nm frames have a higher std than 405nm ones
+    std_threshold = frame_stds.mean()
+    click.echo("Standard deviation threshold is {}".format(std_threshold))
+
+    # Check that the separation works
+    start = time.time()
+    gcamp_mean, isosb_mean = dask.compute(
+        raw_frames[frame_stds > std_threshold].mean(axis=(1, 2)),
+        raw_frames[frame_stds < std_threshold].mean(axis=(1, 2)),
+    )
+    end = time.time()
+    click.echo("Channel means calculated in {} s".format(end - start))
+
+    plt.clf()
+    plt.plot(gcamp_mean)
+    plt.plot(isosb_mean)
+    outpath = qa_dir + os.sep + session_id + "_qa_channel_means.png"
+    plt.savefig(outpath)
+    click.echo("Saved channel means at {}".format(outpath))
+
+    # Generate the mean isosbestic frame
+    start = time.time()
+    isosb_mean_frame = raw_frames[frame_stds < std_threshold].mean(axis=0).compute()
+    end = time.time()
+    click.echo("Isosbestic average frame calculated in {} s".format(end - start))
+
+    plt.clf()
+    outpath = qa_dir + os.sep + session_id + "_qa_isosb_mean.png"
+    plt.imsave(outpath, isosb_mean_frame)
+    click.echo("Saved isosbestic average frame at {}".format(outpath))
+
 
 def separate_channels():
-    pass
-
-
-def mean_frame():
     pass
 
 
