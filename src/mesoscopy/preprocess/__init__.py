@@ -190,9 +190,6 @@ def preprocess(raw_path, out_dir):
         filename=qa_dir + os.sep + session_id + "_calc_f_signal_graph.png"
     )
 
-    print(f_signal.dtype)
-    print(f_signal.shape)
-    print(raw_frames.dtype)
     outpath = out_dir + os.sep + session_id + "_preprocessed.h5"
     start = time.time()
     da.to_hdf5(outpath, "/F", f_signal, compression="lzf")
