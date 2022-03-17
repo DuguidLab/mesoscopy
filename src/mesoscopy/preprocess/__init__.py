@@ -50,6 +50,8 @@ def preprocess(raw_path, out_dir):
     """
     click.echo("Preprocessing file {}.".format(raw_path))
 
+    preprocessing_start = time.time()
+
     session_id = raw_path.split("/")[-1].replace(".h5", "")
     os.makedirs(out_dir, exist_ok=True)
 
@@ -60,7 +62,7 @@ def preprocess(raw_path, out_dir):
     f = h5py.File(raw_path)
     d = f["/frames"]
 
-    raw_frames = da.from_array(d, chunks="auto")
+    raw_frames = da.from_array(d, chunks=(100, 600, 608))
 
     # Channel separation
     # Get the global mean and std values for each frame
@@ -175,22 +177,25 @@ def preprocess(raw_path, out_dir):
     max_idx = min(len(gcamp_mean), len(isosb_mean))
 
     f_signal = da.true_divide(
-        raw_frames[gcamp_filter][:max_idx],
-        raw_frames[isosb_filter][:max_idx],
-        dtype=np.float32,
+        raw_frames[gcamp_filter][:max_idx], raw_frames[isosb_filter][:max_idx],
     )
 
+    f_signal = f_signal - gcamp_isosb_mean_ratio
+
     f_signal = da.true_divide(f_signal, gcamp_isosb_mean_ratio, dtype=np.float32)
+
+    f_signal = difilters.gaussian_filter(f_signal, sigma=[0, 3, 3])
 
     f_signal.visualize(
         filename=qa_dir + os.sep + session_id + "_calc_f_signal_graph.png"
     )
 
     print(f_signal.dtype)
+    print(f_signal.shape)
     print(raw_frames.dtype)
     outpath = out_dir + os.sep + session_id + "_preprocessed.h5"
     start = time.time()
-    da.to_hdf5(outpath, "/F", f_signal)
+    da.to_hdf5(outpath, "/F", f_signal, compression="lzf")
     end = time.time()
     click.echo("F signal calculated in {} s".format(end - start))
     click.echo("Saved F signal at {}".format(outpath))
@@ -207,3 +212,10 @@ def preprocess(raw_path, out_dir):
     outpath = qa_dir + os.sep + session_id + "_qa_f_signal_mean.png"
     plt.savefig(outpath)
     click.echo("Saved lineplot for F signal {}".format(outpath))
+
+    preprocessing_end = time.time()
+    click.echo(
+        "Preprocessing took a total of {} mins.".format(
+            (preprocessing_end - preprocessing_start) / 60
+        )
+    )
