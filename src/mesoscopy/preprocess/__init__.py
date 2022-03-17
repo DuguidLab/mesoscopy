@@ -24,9 +24,11 @@ import os
 import click
 import h5py
 import dask
-import numba
 
 import time
+
+import numpy as np
+import dask_image.ndfilters as difilters
 
 from dask import array as da
 from matplotlib import pyplot as plt
@@ -99,11 +101,14 @@ def preprocess(raw_path, out_dir):
     std_threshold = frame_stds.mean()
     click.echo("Standard deviation threshold is {}".format(std_threshold))
 
+    gcamp_filter = frame_stds > std_threshold
+    isosb_filter = frame_stds < std_threshold
+
     # Check that the separation works
     start = time.time()
     gcamp_mean, isosb_mean = dask.compute(
-        raw_frames[frame_stds > std_threshold].mean(axis=(1, 2)),
-        raw_frames[frame_stds < std_threshold].mean(axis=(1, 2)),
+        raw_frames[gcamp_filter].mean(axis=(1, 2)),
+        raw_frames[isosb_filter].mean(axis=(1, 2)),
     )
     end = time.time()
     click.echo("Channel means calculated in {} s".format(end - start))
@@ -118,8 +123,7 @@ def preprocess(raw_path, out_dir):
     # Generate the mean gcamp frame and its std
     start = time.time()
     gcamp_mean_frame, gcamp_std_frame = dask.compute(
-        raw_frames[frame_stds > std_threshold].mean(axis=0),
-        raw_frames[frame_stds > std_threshold].std(axis=0),
+        raw_frames[gcamp_filter].mean(axis=0), raw_frames[gcamp_filter].std(axis=0),
     )
     end = time.time()
     click.echo("GCaMP average frame and std calculated in {} s".format(end - start))
@@ -137,8 +141,7 @@ def preprocess(raw_path, out_dir):
     # Generate the mean isosbestic frame and its std
     start = time.time()
     isosb_mean_frame, isosb_std_frame = dask.compute(
-        raw_frames[frame_stds < std_threshold].mean(axis=0),
-        raw_frames[frame_stds < std_threshold].std(axis=0),
+        raw_frames[isosb_filter].mean(axis=0), raw_frames[isosb_filter].std(axis=0),
     )
     end = time.time()
     click.echo(
@@ -155,9 +158,52 @@ def preprocess(raw_path, out_dir):
     plt.imsave(outpath, isosb_std_frame)
     click.echo("Saved isosbestic standard deviation frame at {}".format(outpath))
 
+    # Calculate the mean gcamp:isosb ratio frame
+    start = time.time()
     gcamp_isosb_mean_ratio = gcamp_mean_frame / isosb_mean_frame
+    end = time.time()
+    click.echo("Mean GCaMP:Isosb ratio calculated in {} s".format(end - start))
 
     plt.clf()
     outpath = qa_dir + os.sep + session_id + "_qa_gcamp_isosb_mean_ratio.png"
     plt.imsave(outpath, gcamp_isosb_mean_ratio)
     click.echo("Saved mean gcamp:isosb ratio frame at {}".format(outpath))
+
+    # Max common index (to avoid array overflow)
+    if len(gcamp_mean) != len(isosb_mean):
+        click.echo("WARNING: GCaMP & Isosb channels have mismatching indexes")
+    max_idx = min(len(gcamp_mean), len(isosb_mean))
+
+    f_signal = da.true_divide(
+        raw_frames[gcamp_filter][:max_idx],
+        raw_frames[isosb_filter][:max_idx],
+        dtype=np.float32,
+    )
+
+    f_signal = da.true_divide(f_signal, gcamp_isosb_mean_ratio, dtype=np.float32)
+
+    f_signal.visualize(
+        filename=qa_dir + os.sep + session_id + "_calc_f_signal_graph.png"
+    )
+
+    print(f_signal.dtype)
+    print(raw_frames.dtype)
+    outpath = out_dir + os.sep + session_id + "_preprocessed.h5"
+    start = time.time()
+    da.to_hdf5(outpath, "/F", f_signal)
+    end = time.time()
+    click.echo("F signal calculated in {} s".format(end - start))
+    click.echo("Saved F signal at {}".format(outpath))
+
+    plt.clf()
+    outpath = qa_dir + os.sep + session_id + "_qa_f_example.png"
+    plt.imsave(outpath, f_signal[200])
+    click.echo("Saved F example at {}".format(outpath))
+
+    f_signal_mean = f_signal.mean(axis=(1, 2)).compute()
+
+    plt.clf()
+    plt.plot(f_signal_mean)
+    outpath = qa_dir + os.sep + session_id + "_qa_f_signal_mean.png"
+    plt.savefig(outpath)
+    click.echo("Saved lineplot for F signal {}".format(outpath))
