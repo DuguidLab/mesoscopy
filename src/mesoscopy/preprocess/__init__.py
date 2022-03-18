@@ -62,7 +62,18 @@ def preprocess(raw_path, out_dir):
     f = h5py.File(raw_path)
     d = f["/frames"]
 
-    raw_frames = da.from_array(d, chunks=(100, 600, 608))
+    raw_frames = da.from_array(d, chunks=(100, d.shape[1], d.shape[2]))
+
+    # 2x2 binning
+    raw_frames = raw_frames.reshape(
+        d.shape[0],
+        1,
+        d.shape[1] / 2,
+        d.shape[1] // (d.shape[1] / 2),
+        d.shape[2] / 2,
+        d.shape[2] // (d.shape[2] / 2),
+    ).mean(axis=(-1, 1, 3))
+    print(raw_frames.shape)
 
     # Channel separation
     # Get the global mean and std values for each frame
@@ -216,3 +227,13 @@ def preprocess(raw_path, out_dir):
             (preprocessing_end - preprocessing_start) / 60
         )
     )
+
+
+def rebin(arr, new_shape):
+    shape = (
+        new_shape[0],
+        arr.shape[0] // new_shape[0],
+        new_shape[1],
+        arr.shape[1] // new_shape[1],
+    )
+    return arr.reshape(shape).mean(-1).mean(1)
