@@ -139,7 +139,7 @@ def preprocess(raw_path, out_dir, chunks):
     click.echo("Saved channel means at {}".format(outpath))
 
     # Generate the mean gcamp frame and its std
-    click.echo("c")
+    click.echo("Generating mean gcamp frame and its maximum intensity projection...")
     start = time.time()
     gcamp_mean_frame, gcamp_std_frame, gcamp_maxip = dask.compute(
         raw_frames[gcamp_filter].mean(axis=0),
