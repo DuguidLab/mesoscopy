@@ -135,12 +135,17 @@ def preprocess(raw_path, out_dir):
 
     # Generate the mean gcamp frame and its std
     start = time.time()
-    gcamp_mean_frame, gcamp_std_frame = dask.compute(
+    gcamp_mean_frame, gcamp_std_frame, gcamp_maxip = dask.compute(
         raw_frames[gcamp_filter].mean(axis=0),
         raw_frames[gcamp_filter].std(axis=0),
+        raw_frames[gcamp_filter].max(axis=0),
     )
     end = time.time()
-    click.echo("GCaMP average frame and std calculated in {} s".format(end - start))
+    click.echo(
+        "GCaMP average frame, std and maximum intensity projection calculated in {} s".format(
+            end - start
+        )
+    )
 
     plt.clf()
     outpath = qa_dir + os.sep + session_id + "_qa_gcamp_mean.png"
@@ -152,15 +157,23 @@ def preprocess(raw_path, out_dir):
     plt.imsave(outpath, gcamp_std_frame)
     click.echo("Saved gcamp standard deviation frame at {}".format(outpath))
 
+    plt.clf()
+    outpath = qa_dir + os.sep + session_id + "_qa_gcamp_maxip.png"
+    plt.imsave(outpath, gcamp_maxip)
+    click.echo("Saved gcamp maximum intensity projection at {}".format(outpath))
+
     # Generate the mean isosbestic frame and its std
     start = time.time()
-    isosb_mean_frame, isosb_std_frame = dask.compute(
+    isosb_mean_frame, isosb_std_frame, isosb_maxip = dask.compute(
         raw_frames[isosb_filter].mean(axis=0),
         raw_frames[isosb_filter].std(axis=0),
+        raw_frames[isosb_filter].max(axis=0),
     )
     end = time.time()
     click.echo(
-        "Isosbestic average frame and std calculated in {} s".format(end - start)
+        "Isosbestic average frame, std and maximum intensity projection calculated in {} s".format(
+            end - start
+        )
     )
 
     plt.clf()
@@ -172,6 +185,11 @@ def preprocess(raw_path, out_dir):
     outpath = qa_dir + os.sep + session_id + "_qa_isosb_std.png"
     plt.imsave(outpath, isosb_std_frame)
     click.echo("Saved isosbestic standard deviation frame at {}".format(outpath))
+
+    plt.clf()
+    outpath = qa_dir + os.sep + session_id + "_qa_isosb_maxip.png"
+    plt.imsave(outpath, isosb_maxip)
+    click.echo("Saved isosbestic maximum intensity projection at {}".format(outpath))
 
     # Calculate the mean gcamp:isosb ratio frame
     start = time.time()
