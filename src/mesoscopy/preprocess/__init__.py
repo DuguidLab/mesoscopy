@@ -59,6 +59,8 @@ def preprocess(raw_path, out_dir, chunks):
     qa_dir = out_dir + os.sep + "qa"
     os.makedirs(qa_dir, exist_ok=True)
 
+    click.echo("Loading data...")
+
     # Lazy-load the data into a dask array
     f = h5py.File(raw_path)
     d = f["/frames"]
@@ -74,10 +76,11 @@ def preprocess(raw_path, out_dir, chunks):
         d.shape[2] / 2,
         d.shape[2] // (d.shape[2] / 2),
     ).mean(axis=(-1, 1, 3))
-    print(raw_frames.shape)
+    click.echo("2x2 binning to shape {}".format(raw_frames.shape))
 
     # Channel separation
     # Get the global mean and std values for each frame
+    click.echo("Calculating frame means & standard deviations...")
     start = time.time()
     frame_means, frame_stds = dask.compute(
         raw_frames.mean(axis=(1, 2)), raw_frames.std(axis=(1, 2))
@@ -119,6 +122,7 @@ def preprocess(raw_path, out_dir, chunks):
     isosb_filter = frame_stds < std_threshold
 
     # Check that the separation works
+    click.echo("Separating channels...")
     start = time.time()
     gcamp_mean, isosb_mean = dask.compute(
         raw_frames[gcamp_filter].mean(axis=(1, 2)),
@@ -135,6 +139,7 @@ def preprocess(raw_path, out_dir, chunks):
     click.echo("Saved channel means at {}".format(outpath))
 
     # Generate the mean gcamp frame and its std
+    click.echo("c")
     start = time.time()
     gcamp_mean_frame, gcamp_std_frame, gcamp_maxip = dask.compute(
         raw_frames[gcamp_filter].mean(axis=0),
@@ -164,6 +169,9 @@ def preprocess(raw_path, out_dir, chunks):
     click.echo("Saved gcamp maximum intensity projection at {}".format(outpath))
 
     # Generate the mean isosbestic frame and its std
+    click.echo(
+        "Generating mean isosbestic frame and its maximum intensity projection..."
+    )
     start = time.time()
     isosb_mean_frame, isosb_std_frame, isosb_maxip = dask.compute(
         raw_frames[isosb_filter].mean(axis=0),
@@ -208,6 +216,7 @@ def preprocess(raw_path, out_dir, chunks):
         click.echo("WARNING: GCaMP & Isosb channels have mismatching indexes")
     max_idx = min(len(gcamp_mean), len(isosb_mean))
 
+    click.echo("Extracting F signal per pixel and smoothing with a 3x3 Gaussian...")
     f_signal = da.true_divide(
         raw_frames[gcamp_filter][:max_idx],
         raw_frames[isosb_filter][:max_idx],
@@ -235,6 +244,7 @@ def preprocess(raw_path, out_dir, chunks):
     plt.imsave(outpath, f_signal[200])
     click.echo("Saved F example at {}".format(outpath))
 
+    click.echo("Calculating mean F per frame...")
     f_signal_mean = f_signal.mean(axis=(1, 2)).compute()
 
     plt.clf()
