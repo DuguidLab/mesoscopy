@@ -41,7 +41,7 @@ def preprocess(raw_path, out_dir):
     """Preprocessing to extract deltaF from a single session.
 
     Preprocessing separates the two channels, applies the haemodynamic correction,
-    realigns the images to a common coordinate space (ABA) and extracts the delta F signal.
+    and extracts the delta F signal.
 
     Args:
         raw: Path to raw HDF5 file
@@ -136,7 +136,8 @@ def preprocess(raw_path, out_dir):
     # Generate the mean gcamp frame and its std
     start = time.time()
     gcamp_mean_frame, gcamp_std_frame = dask.compute(
-        raw_frames[gcamp_filter].mean(axis=0), raw_frames[gcamp_filter].std(axis=0),
+        raw_frames[gcamp_filter].mean(axis=0),
+        raw_frames[gcamp_filter].std(axis=0),
     )
     end = time.time()
     click.echo("GCaMP average frame and std calculated in {} s".format(end - start))
@@ -154,7 +155,8 @@ def preprocess(raw_path, out_dir):
     # Generate the mean isosbestic frame and its std
     start = time.time()
     isosb_mean_frame, isosb_std_frame = dask.compute(
-        raw_frames[isosb_filter].mean(axis=0), raw_frames[isosb_filter].std(axis=0),
+        raw_frames[isosb_filter].mean(axis=0),
+        raw_frames[isosb_filter].std(axis=0),
     )
     end = time.time()
     click.echo(
@@ -188,7 +190,8 @@ def preprocess(raw_path, out_dir):
     max_idx = min(len(gcamp_mean), len(isosb_mean))
 
     f_signal = da.true_divide(
-        raw_frames[gcamp_filter][:max_idx], raw_frames[isosb_filter][:max_idx],
+        raw_frames[gcamp_filter][:max_idx],
+        raw_frames[isosb_filter][:max_idx],
     )
 
     f_signal = f_signal - gcamp_isosb_mean_ratio
