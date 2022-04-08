@@ -18,3 +18,12 @@
 #  IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
+import click
+
+
+@click.command()
+@click.argument("recording_path", type=click.Path(exists=True))
+@click.argument("out_dir", type=click.Path(dir_okay=True))
+def register(recording_path, out_dir, recording_landmarks, template_landmarks):
+    """Register a recording to a template."""
+    pass
