@@ -37,7 +37,8 @@ from matplotlib import pyplot as plt
 @click.command()
 @click.argument("raw_path", type=click.Path(exists=True))
 @click.argument("out_dir", type=click.Path(dir_okay=True))
-def preprocess(raw_path, out_dir):
+@click.option("--chunks", default=100, help="Number of chunks to load in memory.")
+def preprocess(raw_path, out_dir, chunks):
     """Preprocessing to extract deltaF from a single session.
 
     Preprocessing separates the two channels, applies the haemodynamic correction,
@@ -62,7 +63,7 @@ def preprocess(raw_path, out_dir):
     f = h5py.File(raw_path)
     d = f["/frames"]
 
-    raw_frames = da.from_array(d, chunks=(1000, d.shape[1], d.shape[2]))
+    raw_frames = da.from_array(d, chunks=(chunks, d.shape[1], d.shape[2]))
 
     # 2x2 binning
     raw_frames = raw_frames.reshape(
