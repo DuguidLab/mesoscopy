@@ -27,8 +27,8 @@ set -e
 version="$1"
 
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-if [[ "$BRANCH" != "master" ]]; then
-  echo 'The release script should only be run on the master branch. Aborting...';
+if [[ "$BRANCH" != "main" ]]; then
+  echo 'The release script should only be run on the main branch. Aborting...';
   exit 1;
 fi
 
