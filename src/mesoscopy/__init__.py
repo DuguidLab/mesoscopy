@@ -29,6 +29,14 @@ import mesoscopy.postprocess as postprocess
 
 from matplotlib import pyplot as plt
 
+from pkg_resources import get_distribution, DistributionNotFound
+
+try:
+    __version__ = get_distribution("visiomode").version
+except DistributionNotFound:
+    # package is not installed
+    __version__ = "debug"
+
 
 @click.group()
 def cli():
