@@ -38,7 +38,8 @@ from matplotlib import pyplot as plt
 @click.argument("raw_path", type=click.Path(exists=True))
 @click.argument("out_dir", type=click.Path(dir_okay=True))
 @click.option("--chunks", default=100, help="Number of chunks to load in memory.")
-def preprocess(raw_path, out_dir, chunks):
+@click.option("--channel-means-only", is_flag=True, show_default=True, default=False)
+def preprocess(raw_path, out_dir, chunks=100, channel_means_only=False):
     """Preprocessing to extract deltaF from a single session.
 
     Preprocessing separates the two channels, applies the haemodynamic correction,
@@ -137,6 +138,17 @@ def preprocess(raw_path, out_dir, chunks):
     outpath = qa_dir + os.sep + session_id + "_qa_channel_means.png"
     plt.savefig(outpath)
     click.echo("Saved channel means at {}".format(outpath))
+
+    gcamp_mean.tofile(
+        qa_dir + os.sep + session_id + "_qa_gcamp_channel_means.txt", sep=","
+    )
+    isosb_mean.tofile(
+        qa_dir + os.sep + session_id + "_qa_isosb_channel_means.txt", sep=","
+    )
+
+    if channel_means_only:
+        click.echo("Channel means saved as txt files. Exiting.")
+        return
 
     # Generate the mean gcamp frame and its std
     click.echo("Generating mean gcamp frame and its maximum intensity projection...")
