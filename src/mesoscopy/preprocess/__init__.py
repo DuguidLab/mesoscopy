@@ -70,8 +70,8 @@ def preprocess(raw_path, out_dir, chunks=100, channel_means_only=False, crop=0):
     raw_frames = da.from_array(d, chunks=(chunks, d.shape[1], d.shape[2]))
 
     if crop > 0:
-        raw_frames = raw_frames[:, crop:-crop, crop:-crop]
-        raw_frames.rechunk(chunks=(chunks, raw_frames.shape[1], raw_frames.shape[2]))
+        # Crop by setting edges to zero, instead of changing shape
+        raw_frames[:, crop:-crop, crop:-crop] = 0
 
     # 2x2 binning
     raw_frames = raw_frames.reshape(
