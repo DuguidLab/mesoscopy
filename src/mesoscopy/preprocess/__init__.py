@@ -71,7 +71,7 @@ def preprocess(raw_path, out_dir, chunks=100, channel_means_only=False, crop=0):
 
     if crop > 0:
         # Crop by setting edges to zero, instead of changing shape
-        raw_frames[:, crop:-crop, crop:-crop] = 0
+        raw_frames[:, crop:-crop, crop:-crop] = np.NaN
 
     # 2x2 binning
     raw_frames = raw_frames.reshape(
