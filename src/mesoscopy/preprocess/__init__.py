@@ -39,8 +39,8 @@ from matplotlib import pyplot as plt
 @click.argument("out_dir", type=click.Path(dir_okay=True))
 @click.option("--chunks", default=100, help="Number of chunks to load in memory.")
 @click.option("--channel-means-only", is_flag=True, show_default=True, default=False)
-@click.option("--mask", default=0)
-def preprocess(raw_path, out_dir, chunks=100, channel_means_only=False, mask=0):
+@click.option("--crop", default=0)
+def preprocess(raw_path, out_dir, chunks=100, channel_means_only=False, crop=0):
     """Preprocessing to extract deltaF from a single session.
 
     Preprocessing separates the two channels, applies the haemodynamic correction,
@@ -65,15 +65,9 @@ def preprocess(raw_path, out_dir, chunks=100, channel_means_only=False, mask=0):
 
     # Lazy-load the data into a dask array
     f = h5py.File(raw_path)
-    d = f["/frames"]
+    d = f["/frames"][:, crop:-crop, crop:-crop]
 
     raw_frames = da.from_array(d, chunks=(chunks, d.shape[1], d.shape[2]))
-
-    if mask > 0:
-        raw_frames[:, 0:mask, :] = np.ma.masked
-        raw_frames[:, :, 0:mask] = np.ma.masked
-        raw_frames[:, -mask:-1, :] = np.ma.masked
-        raw_frames[:, -mask:-1, :] = np.ma.masked
 
     # 2x2 binning
     raw_frames = raw_frames.reshape(
@@ -146,12 +140,20 @@ def preprocess(raw_path, out_dir, chunks=100, channel_means_only=False, mask=0):
     plt.savefig(outpath)
     click.echo("Saved channel means at {}".format(outpath))
 
-    gcamp_mean.tofile(
-        qa_dir + os.sep + session_id + "_qa_gcamp_channel_means.txt", sep=","
-    )
-    isosb_mean.tofile(
-        qa_dir + os.sep + session_id + "_qa_isosb_channel_means.txt", sep=","
-    )
+    try:
+        gcamp_mean.tofile(
+            qa_dir + os.sep + session_id + "_qa_gcamp_channel_means.txt", sep=","
+        )
+        isosb_mean.tofile(
+            qa_dir + os.sep + session_id + "_qa_isosb_channel_means.txt", sep=","
+        )
+    except NotImplementedError:
+        np.array(gcamp_mean.tolist()).tofile(
+            qa_dir + os.sep + session_id + "_qa_gcamp_channel_means.txt", sep=","
+        )
+        np.array(isosb_mean.tolist()).tofile(
+            qa_dir + os.sep + session_id + "_qa_isosb_channel_means.txt", sep=","
+        )
 
     if channel_means_only:
         click.echo("Channel means saved as txt files. Exiting.")
