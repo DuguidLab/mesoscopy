@@ -77,8 +77,11 @@ def preprocess(raw_path, out_dir, chunks=100, channel_means_only=False, crop=0):
         d.shape[1] // (d.shape[1] / 2),
         d.shape[2] / 2,
         d.shape[2] // (d.shape[2] / 2),
-    ).mean(axis=(-1, 1, 3))[:, crop:-crop, crop:-crop]
+    ).mean(axis=(-1, 1, 3))
     click.echo("2x2 binning to shape {}".format(raw_frames.shape))
+
+    if crop > 0:
+        raw_frames = raw_frames[:, crop:-crop, crop:-crop]
 
     # Channel separation
     # Get the global mean and std values for each frame
