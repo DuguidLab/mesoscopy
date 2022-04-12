@@ -82,6 +82,7 @@ def preprocess(raw_path, out_dir, chunks=100, channel_means_only=False, crop=0):
 
     if crop > 0:
         raw_frames = raw_frames[:, crop:-crop, crop:-crop]
+        raw_frames.rechunk(chunks=(chunks, raw_frames.shape[1], raw_frames.shape[2]))
 
     # Channel separation
     # Get the global mean and std values for each frame
