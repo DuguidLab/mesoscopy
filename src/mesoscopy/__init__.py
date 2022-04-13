@@ -48,7 +48,8 @@ def cli():
 @click.argument("path", type=click.Path(exists=True))
 @click.argument("out_dir", type=click.Path(dir_okay=True))
 @click.option("--index", default=0, show_default=True, help="Index of frame to sample.")
-def sample(path, out_dir, index):
+@click.option("--crop", default=0)
+def sample(path, out_dir, index, crop=0):
     """Sample an image frame from an HDF5 file and export it as a PNG."""
     click.echo("Sampling {} at index {}.".format(path, index))
 
@@ -60,7 +61,7 @@ def sample(path, out_dir, index):
         + path.split("/")[-1].replace(".h5", "_sample-{}.png".format(index))
     )
 
-    plt.imsave(outpath, data.root.frames[index])
+    plt.imsave(outpath, data.root.frames[index, crop:-crop, crop:-crop])
     click.echo("Saved sample at {}".format(outpath))
 
 
