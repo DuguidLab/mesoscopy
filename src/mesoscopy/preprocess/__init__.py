@@ -38,9 +38,18 @@ from matplotlib import pyplot as plt
 @click.argument("raw_path", type=click.Path(exists=True))
 @click.argument("out_dir", type=click.Path(dir_okay=True))
 @click.option("--chunks", default=100, help="Number of chunks to load in memory.")
-@click.option("--channel-means-only", is_flag=True, show_default=True, default=False)
 @click.option("--crop", default=0)
-def preprocess(raw_path, out_dir, chunks=100, channel_means_only=False, crop=0):
+@click.option("--channel-means-only", is_flag=True, show_default=True, default=False)
+@click.option(
+    "--use-means",
+    is_flag=True,
+    show_default=True,
+    default=False,
+    help="Separate channels using means histogram instead of standard deviation.",
+)
+def preprocess(
+    raw_path, out_dir, chunks=100, crop=0, channel_means_only=False, use_means=False
+):
     """Preprocessing to extract deltaF from a single session.
 
     Preprocessing separates the two channels, applies the haemodynamic correction,
@@ -122,6 +131,13 @@ def preprocess(raw_path, out_dir, chunks=100, channel_means_only=False, crop=0):
 
     gcamp_filter = frame_stds > std_threshold
     isosb_filter = frame_stds < std_threshold
+
+    if use_means:
+        click.echo("Using means threshold...")
+        means_threshold = frame_means.mean()
+        click.echo("Means threshold is {}".format(std_threshold))
+        gcamp_filter = frame_stds > means_threshold
+        isosb_filter = frame_stds < means_threshold
 
     # Check that the separation works
     click.echo("Separating channels...")
