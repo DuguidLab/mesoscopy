@@ -39,6 +39,11 @@ from matplotlib import pyplot as plt
 @click.argument("out_dir", type=click.Path(dir_okay=True))
 @click.option("--chunks", default=100, help="Number of chunks to load in memory.")
 @click.option("--crop", default=0)
+@click.option("--photobleaching-threshold", default=0.005)
+@click.option("--photobleaching-frames", default=4000)
+@click.option(
+    "--skip-photobleaching-check", is_flag=True, show_default=True, default=False
+)
 @click.option("--channel-means-only", is_flag=True, show_default=True, default=False)
 @click.option(
     "--use-means",
@@ -48,7 +53,15 @@ from matplotlib import pyplot as plt
     help="Separate channels using means histogram instead of standard deviation.",
 )
 def preprocess(
-    raw_path, out_dir, chunks=100, crop=0, channel_means_only=False, use_means=False
+    raw_path,
+    out_dir,
+    chunks=100,
+    crop=0,
+    photobleaching_threshold=0.005,
+    photobleaching_frames=4000,
+    skip_photobleaching_check=False,
+    channel_means_only=False,
+    use_means=False,
 ):
     """Preprocessing to extract deltaF from a single session.
 
@@ -170,6 +183,32 @@ def preprocess(
         np.array(isosb_mean.tolist()).tofile(
             qa_dir + os.sep + session_id + "_qa_isosb_channel_means.txt", sep=","
         )
+
+    # Photobleaching check
+    if not skip_photobleaching_check:
+        photobleaching = (
+            True
+            if (
+                np.mean(gcamp_mean[photobleaching_frames:])
+                - np.mean(gcamp_mean[:photobleaching_frames])
+            )
+            / np.mean(gcamp_mean[photobleaching_frames:])
+            < -photobleaching_threshold
+            else False
+        )
+
+        if photobleaching:
+            click.echo(
+                "Photobleaching detected! (sampled {} gcamp frames, threshold -{})".format(
+                    photobleaching_frames, photobleaching_threshold
+                )
+            )
+        else:
+            click.echo(
+                "No photobleaching detected (sampled {} gcamp frames, threshold -{})".format(
+                    photobleaching_frames, photobleaching_threshold
+                )
+            )
 
     if channel_means_only:
         click.echo("Channel means saved as txt files. Exiting.")
