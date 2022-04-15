@@ -95,14 +95,18 @@ def preprocess(
     raw_frames = da.from_array(d, chunks=(chunks, shape[1], shape[2]))
 
     # 2x2 binning
-    raw_frames = raw_frames.reshape(
-        shape[0],
-        1,
-        shape[1] / 2,
-        shape[1] // (shape[1] / 2),
-        shape[2] / 2,
-        shape[2] // (shape[2] / 2),
-    ).mean(axis=(-1, 1, 3))
+    raw_frames = (
+        raw_frames[:, crop:-crop, crop:-crop]
+        .reshape(
+            shape[0],
+            1,
+            shape[1] / 2,
+            shape[1] // (shape[1] / 2),
+            shape[2] / 2,
+            shape[2] // (shape[2] / 2),
+        )
+        .mean(axis=(-1, 1, 3))
+    )
     click.echo("2x2 binning to shape {}".format(raw_frames.shape))
 
     # Channel separation
