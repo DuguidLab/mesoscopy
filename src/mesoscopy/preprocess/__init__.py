@@ -88,19 +88,23 @@ def preprocess(
 
     # Lazy-load the data into a dask array
     f = h5py.File(raw_path)
-    d = f["/frames"][:, crop:-crop, crop:-crop]
+    d = f["/frames"]
 
     raw_frames = da.from_array(d, chunks=(chunks, d.shape[1], d.shape[2]))
 
     # 2x2 binning
-    raw_frames = raw_frames.reshape(
-        d.shape[0],
-        1,
-        d.shape[1] / 2,
-        d.shape[1] // (d.shape[1] / 2),
-        d.shape[2] / 2,
-        d.shape[2] // (d.shape[2] / 2),
-    ).mean(axis=(-1, 1, 3))
+    raw_frames = (
+        raw_frames[:, crop:-crop, crop:-crop]
+        .reshape(
+            d.shape[0],
+            1,
+            d.shape[1] / 2,
+            d.shape[1] // (d.shape[1] / 2),
+            d.shape[2] / 2,
+            d.shape[2] // (d.shape[2] / 2),
+        )
+        .mean(axis=(-1, 1, 3))
+    )
     click.echo("2x2 binning to shape {}".format(raw_frames.shape))
 
     # Channel separation
