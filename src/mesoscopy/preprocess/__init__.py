@@ -198,8 +198,8 @@ def preprocess(
             )
 
             # An exponent and another exponent
-            def exp_decay(xt, a, k, b, c):
-                return a * np.exp(xt * k) + b * np.exp(xt * k) + c
+            def exp_decay(xt, a, k1, b, k2, c):
+                return (a * np.exp(xt * k1)) + (b * np.exp(xt * k2)) + c
 
             # Correct isosbestic channel
             click.echo("Correcting isosbestic channel...")
@@ -209,25 +209,32 @@ def preprocess(
             # The same initial guesses can hold true for both exponential terms
             init_a = isosb_mean[0] + 10
             init_b = isosb_mean[0] + 10
-            init_k = -0.5
-            init_c = max(isosb_mean)
+            init_k1 = -0.5
+            init_k2 = -0.5
+            init_c = min(isosb_mean)
 
             popt, pcov = scopt.curve_fit(
-                exp_decay, isosb_ts, isosb_mean, p0=[init_a, init_k, init_b, init_c]
+                exp_decay,
+                isosb_ts,
+                isosb_mean,
+                p0=[init_a, init_k1, init_b, init_k2, init_c],
             )
 
-            fit_a, fit_k, fit_b, fit_c = popt
+            fit_a, fit_k1, fit_b, fit_k2, fit_c = popt
 
             click.echo(
                 "Isosbestic channel biexponential function parameters: "
                 "\n initial_1 = {}"
                 "\n initial_2 = {}"
                 "\n intercept = {}"
-                "\n tau (both exponents) = {}"
-                "\n covariance matrix => \n {}".format(fit_a, fit_b, fit_c, fit_k, pcov)
+                "\n tau_1 = {}"
+                "\n tau_2 = {}"
+                "\n covariance matrix => \n {}".format(
+                    fit_a, fit_b, fit_c, fit_k1, fit_k2, pcov
+                )
             )
 
-            isosb_fit = exp_decay(isosb_mean, fit_a, fit_k, fit_b, fit_c)
+            isosb_fit = exp_decay(isosb_ts, fit_a, fit_k1, fit_b, fit_k2, fit_c)
 
             plt.clf()
             plt.plot(isosb_mean, color="darkorange")
@@ -249,7 +256,7 @@ def preprocess(
 
             raw_frames[isosb_filter] = (
                 raw_frames[isosb_filter].transpose()
-                - exp_decay(isosb_mean, fit_a, fit_k, fit_b, 0)
+                - exp_decay(isosb_mean, fit_a, fit_k1, fit_b, fit_k2, 0)
             ).transpose()
 
             # Same deal for the gcamp channel
@@ -260,16 +267,32 @@ def preprocess(
             # The same initial guesses can hold true for both exponential terms
             init_a = gcamp_mean[0] + 10
             init_b = gcamp_mean[0] + 10
-            init_k = -0.5
-            init_c = max(gcamp_mean)
+            init_k1 = -0.5
+            init_k2 = -0.5
+            init_c = min(gcamp_mean)
 
             popt, pcov = scopt.curve_fit(
-                exp_decay, gcamp_ts, gcamp_mean, p0=[init_a, init_k, init_b, init_c]
+                exp_decay,
+                gcamp_ts,
+                gcamp_mean,
+                p0=[init_a, init_k1, init_b, init_k2, init_c],
             )
 
-            fit_a, fit_k, fit_b, fit_c = popt
+            fit_a, fit_k1, fit_b, fit_k2, fit_c = popt
 
-            gcamp_fit = exp_decay(gcamp_mean, fit_a, fit_k, fit_b, fit_c)
+            click.echo(
+                "GCaMP channel biexponential function parameters: "
+                "\n initial_1 = {}"
+                "\n initial_2 = {}"
+                "\n intercept = {}"
+                "\n tau_1 = {}"
+                "\n tau_2 = {}"
+                "\n covariance matrix => \n {}".format(
+                    fit_a, fit_b, fit_c, fit_k1, fit_k2, pcov
+                )
+            )
+
+            gcamp_fit = exp_decay(gcamp_ts, fit_a, fit_k1, fit_b, fit_k2, fit_c)
 
             plt.clf()
             plt.plot(gcamp_mean)
@@ -291,7 +314,7 @@ def preprocess(
 
             raw_frames[gcamp_filter] = (
                 raw_frames[gcamp_filter].transpose()
-                - exp_decay(gcamp_mean, fit_a, fit_k, fit_b, 0)
+                - exp_decay(gcamp_mean, fit_a, fit_k1, fit_b, fit_k2, 0)
             ).transpose()
 
             click.echo("Recalculating channel means...")
