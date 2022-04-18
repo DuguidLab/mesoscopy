@@ -92,22 +92,25 @@ def preprocess(
 
     shape = d.shape[0], d.shape[1] - (crop * 2), d.shape[2] - (crop * 2)
 
-    raw_frames = da.from_array(d, chunks=(chunks, shape[1], shape[2]))
+    raw_frames = da.from_array(d, chunks=(chunks, d.shape[1], d.shape[2]))
+
+    raw_frames = raw_frames[:, crop:-crop, crop:-crop]
 
     # 2x2 binning
-    raw_frames = (
-        raw_frames[:, crop:-crop, crop:-crop]
-        .reshape(
-            shape[0],
-            1,
-            shape[1] / 2,
-            shape[1] // (shape[1] / 2),
-            shape[2] / 2,
-            shape[2] // (shape[2] / 2),
-        )
-        .mean(axis=(-1, 1, 3))
-    )
+    raw_frames = raw_frames.reshape(
+        raw_frames.shape[0],
+        1,
+        raw_frames.shape[1] / 2,
+        raw_frames.shape[1] // (shape[1] / 2),
+        raw_frames.shape[2] / 2,
+        raw_frames.shape[2] // (raw_frames.shape[2] / 2),
+    ).mean(axis=(-1, 1, 3))
     click.echo("2x2 binning to shape {}".format(raw_frames.shape))
+
+    # Rechunking
+    raw_frames = raw_frames.rechunk(
+        chunks=(chunks, raw_frames.shape[1], raw_frames.shape[2])
+    )
 
     # Channel separation
     # Get the global mean and std values for each frame
