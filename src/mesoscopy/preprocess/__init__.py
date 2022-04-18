@@ -104,7 +104,6 @@ def preprocess(
             shape=raw_frames.shape,
             dtype=raw_frames.dtype,
             chunks=(chunks, raw_frames.shape[1], raw_frames.shape[2]),
-            overwrite=True,
         )
 
         raw_frames = raw_frames.store(z_interim, return_stored=True, compute=True)
