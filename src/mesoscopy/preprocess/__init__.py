@@ -95,7 +95,11 @@ def preprocess(
 
     if crop > 0:
         click.echo("Cropping...")
-        raw_frames = raw_frames[:, crop:-crop, crop:-crop]
+        raw_frames = raw_frames.map_blocks(
+            lambda x: x[:, crop:-crop, crop:-crop],
+            chunks=(chunks, d.shape[1] - (crop * 2), d.shape[2] - (crop * 2)),
+            # new_axis=[d.shape[0], d.shape[1] - (crop * 2), d.shape[2] - (crop * 2)],
+        )
 
         interim_path = out_dir + os.sep + session_id + "__interim.zarr"
 
