@@ -95,25 +95,9 @@ def preprocess(
     f = h5py.File(raw_path)
     d = f["/frames"]
 
-    raw_frames = da.from_array(d, chunks=(chunks, d.shape[1], d.shape[2]))
-
-    if crop > 0:
-        click.echo("Cropping...")
-        start = time.time()
-        raw_frames = raw_frames[:, crop:-crop, crop:-crop]
-
-        interim_path = interim_dir + os.sep + session_id + "_interim.zarr"
-
-        z_interim = zarr.open_array(
-            interim_path,
-            shape=raw_frames.shape,
-            dtype=raw_frames.dtype,
-            chunks=(chunks, raw_frames.shape[1], raw_frames.shape[2]),
-        )
-
-        raw_frames = raw_frames.store(z_interim, return_stored=True, compute=True)
-        end = time.time()
-        click.echo("Cropping completed in {} s".format(end - start))
+    raw_frames = da.from_array(
+        d[:, crop:-crop, crop:-crop], chunks=(chunks, d.shape[1], d.shape[2])
+    )
 
     # 2x2 binning
     raw_frames = raw_frames.reshape(
@@ -208,6 +192,7 @@ def preprocess(
         print(np.mean(gcamp_mean[:photobleaching_frames]))
 
         if photobleaching:
+            pb_start = time.time()
             click.echo(
                 "Photobleaching detected! ({}% drop, sampled {} gcamp frames, threshold -{})".format(
                     fluorescence_drop, photobleaching_frames, photobleaching_threshold
@@ -334,6 +319,22 @@ def preprocess(
                 - exp_decay(gcamp_mean, fit_a, fit_k1, fit_b, fit_k2, 0)
             ).transpose()
 
+            # Save corrected
+            interim_path = interim_dir + os.sep + session_id + "_interim.zarr"
+
+            z_interim = zarr.open_array(
+                interim_path,
+                shape=raw_frames.shape,
+                dtype=raw_frames.dtype,
+                chunks=(chunks, raw_frames.shape[1], raw_frames.shape[2]),
+            )
+
+            click.echo("Saving corrected array...")
+            start = time.time()
+            raw_frames = raw_frames.store(z_interim, return_stored=True, compute=True)
+            end = time.time()
+            click.echo("Corrected array saved in {} s".format(end - start))
+
             click.echo("Recalculating channel means...")
             start = time.time()
             gcamp_mean, isosb_mean = dask.compute(
@@ -354,6 +355,9 @@ def preprocess(
             )
             plt.savefig(outpath)
             click.echo("Saved corrected channel means at {}".format(outpath))
+
+            pb_end = time.time()
+            click.echo("Photobleaching corrected in {} s".format(pb_end - pb_start))
         else:
             click.echo(
                 "No photobleaching detected (sampled {} gcamp frames, threshold -{})".format(
