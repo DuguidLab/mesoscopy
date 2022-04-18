@@ -54,7 +54,7 @@ from matplotlib import pyplot as plt
     default=False,
     help="Separate channels using means histogram instead of standard deviation.",
 )
-@click.argument("--interim_dir", type=click.Path(dir_okay=True))
+@click.option("--interim_dir", type=click.Path(dir_okay=True), default="interim/")
 def preprocess(
     raw_path,
     out_dir,
@@ -73,7 +73,7 @@ def preprocess(
     and extracts the delta F signal.
 
     Args:
-        raw: Path to raw HDF5 file
+        raw_path: Path to raw HDF5 file
         out_dir: Path to output directory for preprocessed data. This directory doesn't have to exist.
 
     """
@@ -87,7 +87,7 @@ def preprocess(
     qa_dir = out_dir + os.sep + "qa"
     os.makedirs(qa_dir, exist_ok=True)
 
-    os.makedirs(interim_dir, exists_ok=True)
+    os.makedirs(interim_dir, exist_ok=True)
 
     click.echo("Loading data...")
 
