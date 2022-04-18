@@ -54,6 +54,7 @@ from matplotlib import pyplot as plt
     default=False,
     help="Separate channels using means histogram instead of standard deviation.",
 )
+@click.argument("--interim_dir", type=click.Path(dir_okay=True))
 def preprocess(
     raw_path,
     out_dir,
@@ -64,6 +65,7 @@ def preprocess(
     skip_photobleaching_check=False,
     channel_means_only=False,
     use_means=False,
+    interim_dir="interim/",
 ):
     """Preprocessing to extract deltaF from a single session.
 
@@ -85,6 +87,8 @@ def preprocess(
     qa_dir = out_dir + os.sep + "qa"
     os.makedirs(qa_dir, exist_ok=True)
 
+    os.makedirs(interim_dir, exists_ok=True)
+
     click.echo("Loading data...")
 
     # Lazy-load the data into a dask array
@@ -95,13 +99,9 @@ def preprocess(
 
     if crop > 0:
         click.echo("Cropping...")
-        raw_frames = raw_frames.map_blocks(
-            lambda x: x[:, crop:-crop, crop:-crop],
-            chunks=(chunks, d.shape[1] - (crop * 2), d.shape[2] - (crop * 2)),
-            # new_axis=[d.shape[0], d.shape[1] - (crop * 2), d.shape[2] - (crop * 2)],
-        )
+        raw_frames = raw_frames[:, crop:-crop, crop:-crop]
 
-        interim_path = out_dir + os.sep + session_id + "__interim.zarr"
+        interim_path = interim_dir + os.sep + session_id + "_interim.zarr"
 
         z_interim = zarr.open_array(
             interim_path,
