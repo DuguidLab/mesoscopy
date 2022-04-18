@@ -24,6 +24,7 @@ import os
 import click
 import h5py
 import dask
+import zarr
 
 import time
 
@@ -92,7 +93,21 @@ def preprocess(
 
     raw_frames = da.from_array(d, chunks=(chunks, d.shape[1], d.shape[2]))
 
-    raw_frames = raw_frames[:, crop:-crop, crop:-crop]
+    if crop > 0:
+        click.echo("Cropping...")
+        raw_frames = raw_frames[:, crop:-crop, crop:-crop]
+
+        interim_path = out_dir + os.sep + session_id + "__interim.zarr"
+
+        z_interim = zarr.open_array(
+            interim_path,
+            shape=raw_frames.shape,
+            dtype=raw_frames.dtype,
+            chunks=(chunks, raw_frames.shape[1], raw_frames.shape[2]),
+            overwrite=True,
+        )
+
+        raw_frames = raw_frames.store(z_interim, return_stored=True, compute=True)
 
     # 2x2 binning
     raw_frames = raw_frames.reshape(
@@ -104,11 +119,6 @@ def preprocess(
         raw_frames.shape[2] // (raw_frames.shape[2] / 2),
     ).mean(axis=(-1, 1, 3))
     click.echo("2x2 binning to shape {}".format(raw_frames.shape))
-
-    # Rechunking
-    raw_frames = raw_frames.rechunk(
-        chunks=(chunks, raw_frames.shape[1], raw_frames.shape[2])
-    )
 
     # Channel separation
     # Get the global mean and std values for each frame
