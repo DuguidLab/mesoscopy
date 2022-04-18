@@ -41,7 +41,7 @@ except DistributionNotFound:
 @click.group()
 def cli():
     """Widefield calcium imaging analysis pipeline."""
-    pass
+    click.echo("Mesoscopy version {}".__version__)
 
 
 @cli.command()
