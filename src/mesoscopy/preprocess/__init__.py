@@ -99,6 +99,7 @@ def preprocess(
 
     if crop > 0:
         click.echo("Cropping...")
+        start = time.time()
         raw_frames = raw_frames[:, crop:-crop, crop:-crop]
 
         interim_path = interim_dir + os.sep + session_id + "_interim.zarr"
@@ -111,6 +112,8 @@ def preprocess(
         )
 
         raw_frames = raw_frames.store(z_interim, return_stored=True, compute=True)
+        end = time.time()
+        click.echo("Cropping completed in {} s".format(end - start))
 
     # 2x2 binning
     raw_frames = raw_frames.reshape(
