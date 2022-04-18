@@ -90,8 +90,6 @@ def preprocess(
     f = h5py.File(raw_path)
     d = f["/frames"]
 
-    shape = d.shape[0], d.shape[1] - (crop * 2), d.shape[2] - (crop * 2)
-
     raw_frames = da.from_array(d, chunks=(chunks, d.shape[1], d.shape[2]))
 
     raw_frames = raw_frames[:, crop:-crop, crop:-crop]
@@ -101,7 +99,7 @@ def preprocess(
         raw_frames.shape[0],
         1,
         raw_frames.shape[1] / 2,
-        raw_frames.shape[1] // (shape[1] / 2),
+        raw_frames.shape[1] // (raw_frames.shape[1] / 2),
         raw_frames.shape[2] / 2,
         raw_frames.shape[2] // (raw_frames.shape[2] / 2),
     ).mean(axis=(-1, 1, 3))
