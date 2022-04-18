@@ -95,9 +95,9 @@ def preprocess(
     f = h5py.File(raw_path)
     d = f["/frames"]
 
-    raw_frames = da.from_array(
-        d[:, crop:-crop, crop:-crop], chunks=(chunks, d.shape[1], d.shape[2])
-    )
+    raw_frames = da.from_array(d, chunks=(chunks, d.shape[1], d.shape[2]))
+
+    raw_frames = raw_frames[:, crop:-crop, crop:-crop]
 
     # 2x2 binning
     raw_frames = raw_frames.reshape(
