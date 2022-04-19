@@ -273,9 +273,9 @@ def preprocess(
             )
 
             raw_frames[isosb_filter] = (
-                raw_frames[isosb_filter].transpose()
-                - exp_decay(isosb_mean, fit_a, fit_k1, fit_b, fit_k2, 0)
-            ).transpose()
+                raw_frames[isosb_filter]
+                - exp_decay(isosb_ts, fit_a, fit_k1, fit_b, fit_k2, 0)[:, None, None]
+            )
 
             # Same deal for the gcamp channel
             click.echo("Correcting gcamp channel...")
@@ -331,9 +331,9 @@ def preprocess(
             )
 
             raw_frames[gcamp_filter] = (
-                raw_frames[gcamp_filter].transpose()
-                - exp_decay(gcamp_mean, fit_a, fit_k1, fit_b, fit_k2, 0)
-            ).transpose()
+                raw_frames[gcamp_filter]
+                - exp_decay(gcamp_ts, fit_a, fit_k1, fit_b, fit_k2, 0)[:, None, None]
+            )
 
             # Save corrected
             click.echo("Saving corrected array...")
