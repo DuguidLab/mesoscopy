@@ -211,7 +211,9 @@ def preprocess(
             pb_start = time.time()
             click.echo(
                 "Photobleaching detected! ({}% drop, sampled {} gcamp frames, threshold -{})".format(
-                    fluorescence_drop, photobleaching_frames, photobleaching_threshold
+                    fluorescence_drop * 100,
+                    photobleaching_frames,
+                    photobleaching_threshold,
                 )
             )
 
