@@ -108,7 +108,7 @@ def preprocess(
         raw_frames.shape[1] // (raw_frames.shape[1] / 2),
         raw_frames.shape[2] / 2,
         raw_frames.shape[2] // (raw_frames.shape[2] / 2),
-    ).mean(axis=(-1, 1, 3), dtype=np.uint8)
+    ).mean(axis=(-1, 1, 3), dtype=np.float32)
     click.echo("2x2 binning to shape {}".format(raw_frames.shape))
 
     # Save binned
@@ -119,12 +119,6 @@ def preprocess(
         dtype=raw_frames.dtype,
         chunks=(chunks, raw_frames.shape[1], raw_frames.shape[2]),
     )
-
-    click.echo("Saving binned array...")
-    start = time.time()
-    raw_frames = raw_frames.store(z_interim, return_stored=True, compute=True)
-    end = time.time()
-    click.echo("Binned array saved in {} s".format(end - start))
 
     # Channel separation
     # Get the global mean and std values for each frame
