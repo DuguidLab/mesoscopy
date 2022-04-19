@@ -117,7 +117,7 @@ def preprocess(
         interim_path,
         shape=raw_frames.shape,
         dtype=raw_frames.dtype,
-        chunks=(chunks, raw_frames.shape[1], raw_frames.shape[2]),
+        chunks=(500, raw_frames.shape[1], raw_frames.shape[2]),
     )
 
     # Channel separation
