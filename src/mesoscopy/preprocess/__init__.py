@@ -125,7 +125,8 @@ def preprocess(
     click.echo("Calculating frame means & standard deviations...")
     start = time.time()
     frame_means, frame_stds = dask.compute(
-        raw_frames.mean(axis=(1, 2)), raw_frames.std(axis=(1, 2))
+        raw_frames.mean(axis=(1, 2), dtype=np.float32),
+        raw_frames.std(axis=(1, 2), dtype=np.float32),
     )
     end = time.time()
     click.echo(
@@ -174,8 +175,8 @@ def preprocess(
     click.echo("Separating channels...")
     start = time.time()
     gcamp_mean, isosb_mean = dask.compute(
-        raw_frames[gcamp_filter].mean(axis=(1, 2)),
-        raw_frames[isosb_filter].mean(axis=(1, 2)),
+        raw_frames[gcamp_filter].mean(axis=(1, 2), dtype=np.float32),
+        raw_frames[isosb_filter].mean(axis=(1, 2), dtype=np.float32),
     )
     end = time.time()
     click.echo("Channel means calculated in {} s".format(end - start))
@@ -232,6 +233,7 @@ def preprocess(
                 isosb_ts,
                 isosb_mean,
                 p0=[init_a, init_k1, init_b, init_k2, init_c],
+                max_nfev=5000,
             )
 
             fit_a, fit_k1, fit_b, fit_k2, fit_c = popt
@@ -291,6 +293,7 @@ def preprocess(
                 gcamp_ts,
                 gcamp_mean,
                 p0=[init_a, init_k1, init_b, init_k2, init_c],
+                max_nfev=5000,
             )
 
             fit_a, fit_k1, fit_b, fit_k2, fit_c = popt
@@ -343,8 +346,8 @@ def preprocess(
             click.echo("Recalculating channel means...")
             start = time.time()
             gcamp_mean, isosb_mean = dask.compute(
-                raw_frames[gcamp_filter].mean(axis=(1, 2)),
-                raw_frames[isosb_filter].mean(axis=(1, 2)),
+                raw_frames[gcamp_filter].mean(axis=(1, 2), dtype=np.float32),
+                raw_frames[isosb_filter].mean(axis=(1, 2), dtype=np.float32),
             )
             end = time.time()
             click.echo("Channel means calculated in {} s".format(end - start))
@@ -385,9 +388,9 @@ def preprocess(
     click.echo("Generating mean gcamp frame and its maximum intensity projection...")
     start = time.time()
     gcamp_mean_frame, gcamp_std_frame, gcamp_maxip = dask.compute(
-        raw_frames[gcamp_filter].mean(axis=0),
-        raw_frames[gcamp_filter].std(axis=0),
-        raw_frames[gcamp_filter].max(axis=0),
+        raw_frames[gcamp_filter].mean(axis=0, dtype=np.float32),
+        raw_frames[gcamp_filter].std(axis=0, dtype=np.float32),
+        raw_frames[gcamp_filter].max(axis=0, dtype=np.float32),
     )
     end = time.time()
     click.echo(
@@ -417,9 +420,9 @@ def preprocess(
     )
     start = time.time()
     isosb_mean_frame, isosb_std_frame, isosb_maxip = dask.compute(
-        raw_frames[isosb_filter].mean(axis=0),
-        raw_frames[isosb_filter].std(axis=0),
-        raw_frames[isosb_filter].max(axis=0),
+        raw_frames[isosb_filter].mean(axis=0, dtype=np.float32),
+        raw_frames[isosb_filter].std(axis=0, dtype=np.float32),
+        raw_frames[isosb_filter].max(axis=0, dtype=np.float32),
     )
     end = time.time()
     click.echo(
@@ -463,9 +466,10 @@ def preprocess(
     f_signal = da.true_divide(
         raw_frames[gcamp_filter][:max_idx],
         raw_frames[isosb_filter][:max_idx],
+        dtype=np.float32,
     )
 
-    f_signal = f_signal - gcamp_isosb_mean_ratio
+    f_signal = da.subtract(f_signal, gcamp_isosb_mean_ratio, dtype=np.float32)
 
     f_signal = da.true_divide(f_signal, gcamp_isosb_mean_ratio, dtype=np.float32)
 
