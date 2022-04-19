@@ -108,7 +108,7 @@ def preprocess(
         raw_frames.shape[1] // (raw_frames.shape[1] / 2),
         raw_frames.shape[2] / 2,
         raw_frames.shape[2] // (raw_frames.shape[2] / 2),
-    ).mean(axis=(-1, 1, 3))
+    ).mean(axis=(-1, 1, 3), dtype=np.uint8)
     click.echo("2x2 binning to shape {}".format(raw_frames.shape))
 
     # Save binned
