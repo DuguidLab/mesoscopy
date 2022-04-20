@@ -99,6 +99,7 @@ def preprocess(
 
     if crop > 0:
         raw_frames = raw_frames[:, crop:-crop, crop:-crop]
+        click.echo("Cropping to shape {}".format(raw_frames.shape))
 
     # 2x2 binning
     raw_frames = raw_frames.reshape(
@@ -119,6 +120,11 @@ def preprocess(
         dtype=raw_frames.dtype,
         chunks=(500, raw_frames.shape[1], raw_frames.shape[2]),
     )
+    click.echo("Saving binned frames to interim...")
+    start = time.time()
+    raw_frames = raw_frames.store(z_interim, return_stored=True)
+    end = time.time()
+    click.echo("Binned frames saved in {} s".format(end - start))
 
     # Channel separation
     # Get the global mean and std values for each frame
@@ -233,7 +239,7 @@ def preprocess(
                 isosb_ts,
                 isosb_mean,
                 p0=[init_a, init_k1, init_b, init_k2, init_c],
-                max_nfev=5000,
+                maxfev=10000,
             )
 
             fit_a, fit_k1, fit_b, fit_k2, fit_c = popt
@@ -273,7 +279,6 @@ def preprocess(
             raw_frames[isosb_filter] = da.subtract(
                 raw_frames[isosb_filter],
                 exp_decay(isosb_ts, fit_a, fit_k1, fit_b, fit_k2, 0)[:, None, None],
-                dtype=np.float32,
             )
 
             # Same deal for the gcamp channel
@@ -293,7 +298,7 @@ def preprocess(
                 gcamp_ts,
                 gcamp_mean,
                 p0=[init_a, init_k1, init_b, init_k2, init_c],
-                max_nfev=5000,
+                maxfev=10000,
             )
 
             fit_a, fit_k1, fit_b, fit_k2, fit_c = popt
@@ -333,7 +338,6 @@ def preprocess(
             raw_frames[gcamp_filter] = da.subtract(
                 raw_frames[gcamp_filter],
                 exp_decay(gcamp_ts, fit_a, fit_k1, fit_b, fit_k2, 0)[:, None, None],
-                dtype=np.float32,
             )
 
             # Save corrected
@@ -346,8 +350,8 @@ def preprocess(
             click.echo("Recalculating channel means...")
             start = time.time()
             gcamp_mean, isosb_mean = dask.compute(
-                raw_frames[gcamp_filter].mean(axis=(1, 2), dtype=np.float32),
-                raw_frames[isosb_filter].mean(axis=(1, 2), dtype=np.float32),
+                raw_frames[gcamp_filter].mean(axis=(1, 2)),
+                raw_frames[isosb_filter].mean(axis=(1, 2)),
             )
             end = time.time()
             click.echo("Channel means calculated in {} s".format(end - start))
@@ -388,9 +392,9 @@ def preprocess(
     click.echo("Generating mean gcamp frame and its maximum intensity projection...")
     start = time.time()
     gcamp_mean_frame, gcamp_std_frame, gcamp_maxip = dask.compute(
-        raw_frames[gcamp_filter].mean(axis=0, dtype=np.float32),
-        raw_frames[gcamp_filter].std(axis=0, dtype=np.float32),
-        raw_frames[gcamp_filter].max(axis=0, dtype=np.float32),
+        raw_frames[gcamp_filter].mean(axis=0),
+        raw_frames[gcamp_filter].std(axis=0),
+        raw_frames[gcamp_filter].max(axis=0),
     )
     end = time.time()
     click.echo(
@@ -420,9 +424,9 @@ def preprocess(
     )
     start = time.time()
     isosb_mean_frame, isosb_std_frame, isosb_maxip = dask.compute(
-        raw_frames[isosb_filter].mean(axis=0, dtype=np.float32),
-        raw_frames[isosb_filter].std(axis=0, dtype=np.float32),
-        raw_frames[isosb_filter].max(axis=0, dtype=np.float32),
+        raw_frames[isosb_filter].mean(axis=0),
+        raw_frames[isosb_filter].std(axis=0),
+        raw_frames[isosb_filter].max(axis=0),
     )
     end = time.time()
     click.echo(
@@ -466,10 +470,9 @@ def preprocess(
     f_signal = da.true_divide(
         raw_frames[gcamp_filter][:max_idx],
         raw_frames[isosb_filter][:max_idx],
-        dtype=np.float32,
     )
 
-    f_signal = da.subtract(f_signal, gcamp_isosb_mean_ratio, dtype=np.float32)
+    f_signal = f_signal - gcamp_isosb_mean_ratio
 
     f_signal = da.true_divide(f_signal, gcamp_isosb_mean_ratio, dtype=np.float32)
 
