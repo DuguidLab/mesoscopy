@@ -279,6 +279,7 @@ def preprocess(
             raw_frames[isosb_filter] = da.subtract(
                 raw_frames[isosb_filter],
                 exp_decay(isosb_ts, fit_a, fit_k1, fit_b, fit_k2, 0)[:, None, None],
+                dtype=np.float32,
             )
 
             # Same deal for the gcamp channel
@@ -338,6 +339,7 @@ def preprocess(
             raw_frames[gcamp_filter] = da.subtract(
                 raw_frames[gcamp_filter],
                 exp_decay(gcamp_ts, fit_a, fit_k1, fit_b, fit_k2, 0)[:, None, None],
+                dtype=np.float32,
             )
 
             # Save corrected
