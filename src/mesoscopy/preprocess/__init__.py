@@ -94,7 +94,9 @@ def preprocess(
     f = h5py.File(raw_path)
     d = f["/frames"]
 
-    raw_frames = da.from_array(d, chunks=(chunks, d.shape[1], d.shape[2]))
+    raw_frames = da.from_array(d, chunks="auto")
+    if chunks > 0:
+        raw_frames = raw_frames.rechunk(chunks=(chunks, d.shape[1], d.shape[2]))
 
     if crop > 0:
         raw_frames = raw_frames[:, crop:-crop, crop:-crop]
