@@ -228,15 +228,9 @@ def preprocess(
         isosb_dff[:max_idx],
     )
 
-    f_signal = f_signal - gcamp_isosb_mean_ratio
-
-    f_signal = da.true_divide(f_signal, gcamp_isosb_mean_ratio, dtype=np.float32)
-
-    f_signal = difilters.gaussian_filter(f_signal, sigma=[0, 3, 3])
-
-    f_signal.visualize(
-        filename=qa_dir + os.sep + session_id + "_calc_f_signal_graph.png"
-    )
+    # f_signal.visualize(
+    #     filename=qa_dir + os.sep + session_id + "_calc_f_signal_graph.png"
+    # )
 
     outpath = out_dir + os.sep + session_id + "_preprocessed.h5"
     start = time.time()
