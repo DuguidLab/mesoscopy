@@ -21,6 +21,7 @@
 
 """Preprocessing submodule."""
 import os
+import shutil
 import click
 import h5py
 import dask
@@ -253,12 +254,20 @@ def preprocess(
     plt.savefig(outpath)
     click.echo("Saved lineplot for F signal {}".format(outpath))
 
+    # Save timestamps
+    outpath = out_dir + os.sep + session_id + "_preprocessed.h5"
+    click.echo("Appending timestamps to {}".format(outpath))
+    timestamps = da.from_array(f["/timestamps"][gcamp_filter], chunks="auto")
+    da.to_hdf5(outpath, "/ts", timestamps)
+
     preprocessing_end = time.time()
     click.echo(
         "Preprocessing took a total of {} mins.".format(
             (preprocessing_end - preprocessing_start) / 60
         )
     )
+
+    shutil.rmtree(interim_dir)
 
 
 def bin(array, bins, interim_dir=".", session_id="null"):
