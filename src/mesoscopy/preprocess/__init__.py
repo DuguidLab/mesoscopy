@@ -41,6 +41,7 @@ from matplotlib import pyplot as plt
 @click.argument("out_dir", type=click.Path(dir_okay=True))
 @click.option("--chunks", default=100, help="Number of chunks to load in memory.")
 @click.option("--crop", default=0)
+@click.option("--bins", default=2, help="Binning.")
 @click.option("--photobleaching-threshold", default=0.005)
 @click.option("--photobleaching-frames", default=4000)
 @click.option(
@@ -60,6 +61,7 @@ def preprocess(
     out_dir,
     chunks=100,
     crop=0,
+    bins=2,
     photobleaching_threshold=0.005,
     photobleaching_frames=4000,
     skip_photobleaching_check=False,
@@ -513,11 +515,34 @@ def preprocess(
     )
 
 
-def rebin(arr, new_shape):
-    shape = (
-        new_shape[0],
-        arr.shape[0] // new_shape[0],
-        new_shape[1],
-        arr.shape[1] // new_shape[1],
+def bin(array, bins, interim_dir=".", session_id="null"):
+    binned_array = array.reshape(
+        array.shape[0],
+        1,
+        array.shape[1] / bins,
+        array.shape[1] // (array.shape[1] / bins),
+        array.shape[2] / bins,
+        array.shape[2] // (array.shape[2] / bins),
+    ).mean(axis=(-1, 1, 3), dtype=np.float32)
+    interim_path = interim_dir + os.sep + session_id + "_binned.zarr"
+    return store_interim(binned_array, interim_path)
+
+
+def store_interim(array, interim_path, compute=True, chunks=500):
+    z_interim = zarr.open_array(
+        interim_path,
+        shape=array.shape,
+        dtype=array.dtype,
+        chunks=(chunks, array.shape[1], array.shape[2]),
+    )
+    return array.store(z_interim, return_stored=True, compute=compute)
+
+
+def calc_channel_filters(
+    array, qa_dir=".", session_id="null", use_means=False, interim_dir=None
+):
+    frame_means, frame_stds = dask.compute(
+        array.mean(axis=(1, 2), dtype=np.float32),
+        array.std(axis=(1, 2), dtype=np.float32),
     )
     return arr.reshape(shape).mean(-1).mean(1)
