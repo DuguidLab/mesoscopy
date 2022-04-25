@@ -103,26 +103,12 @@ def preprocess(
         raw_frames = raw_frames[:, crop:-crop, crop:-crop]
         click.echo("Cropping to shape {}".format(raw_frames.shape))
 
-    # 2x2 binning
-    raw_frames = raw_frames.reshape(
-        raw_frames.shape[0],
-        1,
-        raw_frames.shape[1] / 2,
-        raw_frames.shape[1] // (raw_frames.shape[1] / 2),
-        raw_frames.shape[2] / 2,
-        raw_frames.shape[2] // (raw_frames.shape[2] / 2),
-    ).mean(axis=(-1, 1, 3), dtype=np.float32)
-    click.echo("2x2 binning to shape {}".format(raw_frames.shape))
-
-    # Save binned
-    interim_path = interim_dir + os.sep + session_id + "_interim.zarr"
-    z_interim = zarr.open_array(
-        interim_path,
-        shape=raw_frames.shape,
-        dtype=raw_frames.dtype,
-        chunks=(500, raw_frames.shape[1], raw_frames.shape[2]),
+    # Binning
+    click.echo(
+        "{}x{} binning to shape {} by {}".format(
+            bins, bins, raw_frames.shape[1] // bins, raw_frames.shape[2] // bins
+        )
     )
-    click.echo("Saving binned frames to interim...")
     start = time.time()
     raw_frames = raw_frames.store(z_interim, return_stored=True)
     end = time.time()
