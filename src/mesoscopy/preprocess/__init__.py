@@ -338,4 +338,122 @@ def calc_channel_filters(
         array.mean(axis=(1, 2), dtype=np.float32),
         array.std(axis=(1, 2), dtype=np.float32),
     )
-    return arr.reshape(shape).mean(-1).mean(1)
+
+    outpath = qa_dir + os.sep + session_id + "_qa_frame_means_histogram.png"
+    msg = "Saved histogram for frame means at {}".format(outpath)
+    plot_hist(frame_means, outpath, message=msg)
+
+    outpath = qa_dir + os.sep + session_id + "_qa_frame_means_line.png"
+    msg = "Saved lineplot for frame means at {}".format(outpath)
+    plot_line(frame_means, outpath, message=msg)
+
+    outpath = qa_dir + os.sep + session_id + "_qa_frame_std_histogram.png"
+    msg = "Saved histogram for frame means at {}".format(outpath)
+    plot_hist(frame_stds, outpath, message=msg)
+
+    outpath = qa_dir + os.sep + session_id + "_qa_frame_std_line.png"
+    msg = "Saved lineplot for frame means at {}".format(outpath)
+    plot_line(frame_stds, outpath, message=msg)
+
+    threshold = frame_stds.mean()
+    gcamp_filter = frame_stds > threshold
+    isosb_filter = frame_stds < threshold
+
+    if use_means:
+        threshold = frame_means.mean()
+        gcamp_filter = frame_means > threshold
+        isosb_filter = frame_means < threshold
+
+    return gcamp_filter, isosb_filter
+
+
+def channel_qa(array, channel_filter, qa_dir=".", session_id="null"):
+    mean_frame, std_frame, maxip = dask.compute(
+        array[channel_filter].mean(axis=0),
+        array[channel_filter].std(axis=0),
+        array[channel_filter].max(axis=0),
+    )
+
+    plt.clf()
+    outpath = qa_dir + os.sep + session_id + "_qa_gcamp_mean.png"
+    plt.imsave(outpath, mean_frame)
+
+    plt.clf()
+    outpath = qa_dir + os.sep + session_id + "_qa_gcamp_std.png"
+    plt.imsave(outpath, std_frame)
+
+    plt.clf()
+    outpath = qa_dir + os.sep + session_id + "_qa_gcamp_maxip.png"
+    plt.imsave(outpath, maxip)
+
+
+def channel_dff(
+    array,
+    channel_filter,
+    window_width,
+    channel_name="null",
+    interim_dir=".",
+    session_id="null",
+):
+    cumsum_vec = da.cumsum(
+        da.insert(array[channel_filter], 0, 0, axis=0), dtype=np.uint32, axis=0
+    )
+
+    interim_path = (
+        interim_dir + os.sep + session_id + "_" + channel_name + "_cumsum.zarr"
+    )
+    cumsum_vec = store_interim(cumsum_vec, interim_path)
+
+    f0 = da.true_divide(
+        (cumsum_vec[window_width:] - cumsum_vec[:-window_width]),
+        window_width,
+        dtype=np.float32,
+    )
+
+    interim_path = interim_dir + os.sep + session_id + "_" + channel_name + "_f0.zarr"
+    f0 = store_interim(f0, interim_path)
+
+    f0_start = da.mean(f0[: int(window_width / 2)]).compute()
+    f0_end = da.mean(f0[-int(window_width / 2) :]).compute()
+
+    f0 = da.insert(
+        f0,
+        da.arange(0, int(window_width / 2) - 1),
+        f0_start,
+        axis=0,
+    )
+
+    f0 = da.insert(
+        f0,
+        da.arange(f0.shape[0] - int(window_width / 2), f0.shape[0]),
+        f0_end,
+        axis=0,
+    )
+
+    interim_path = (
+        interim_dir + os.sep + session_id + "_" + channel_name + "_f0_appended.zarr"
+    )
+    f0 = store_interim(f0, interim_path)
+
+    dff = da.true_divide(da.subtract(array[channel_filter], f0), f0, dtype=np.float32)
+
+    interim_path = interim_dir + os.sep + session_id + "_" + channel_name + "_dff.zarr"
+
+    return store_interim(dff, interim_path)
+
+
+def plot_line(array, outpath, message=None):
+    plt.clf()
+    plt.plot(array)
+    plt.savefig(outpath)
+    if message:
+        click.echo(message)
+
+
+def plot_hist(array, outpath, message=None):
+    plt.clf()
+    plt.hist(array)
+    plt.savefig(outpath)
+    if message:
+        click.echo(message)
+    pass
