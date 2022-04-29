@@ -40,11 +40,6 @@ from matplotlib import pyplot as plt
 @click.option("--chunks", default=100, help="Number of chunks to load in memory.")
 @click.option("--crop", default=0)
 @click.option("--bins", default=2, help="Binning.")
-@click.option("--photobleaching-threshold", default=0.005)
-@click.option("--photobleaching-frames", default=4000)
-@click.option(
-    "--skip-photobleaching-check", is_flag=True, show_default=True, default=False
-)
 @click.option("--channel-means-only", is_flag=True, show_default=True, default=False)
 @click.option(
     "--use-means",
@@ -60,9 +55,6 @@ def preprocess(
     chunks=100,
     crop=0,
     bins=2,
-    photobleaching_threshold=0.005,
-    photobleaching_frames=4000,
-    skip_photobleaching_check=False,
     channel_means_only=False,
     use_means=False,
     interim_dir="interim/",
