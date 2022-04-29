@@ -114,7 +114,9 @@ def preprocess(
     # Get the global mean and std values for each frame
     click.echo("Calculating frame means & standard deviations...")
     start = time.time()
-    gcamp_filter, isosb_filter = calc_channel_filters(binned_frames)
+    gcamp_filter, isosb_filter = calc_channel_filters(
+        binned_frames, use_means=use_means
+    )
     end = time.time()
     click.echo(
         "Frame means & standard deviations calculated in {} s".format(end - start)
