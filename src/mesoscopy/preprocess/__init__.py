@@ -115,7 +115,7 @@ def preprocess(
     click.echo("Calculating frame means & standard deviations...")
     start = time.time()
     gcamp_filter, isosb_filter = calc_channel_filters(
-        binned_frames, use_means=use_means
+        binned_frames, session_id=session_id, use_means=use_means
     )
     end = time.time()
     click.echo(
