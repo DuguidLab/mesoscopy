@@ -39,6 +39,7 @@ except DistributionNotFound:
 
 
 @click.group()
+@click.version_option(__version__)
 def cli():
     """Widefield calcium imaging analysis pipeline."""
     pass
