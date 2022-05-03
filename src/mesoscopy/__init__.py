@@ -32,7 +32,7 @@ from matplotlib import pyplot as plt
 from pkg_resources import get_distribution, DistributionNotFound
 
 try:
-    __version__ = get_distribution("visiomode").version
+    __version__ = get_distribution("mesoscopy").version
 except DistributionNotFound:
     # package is not installed
     __version__ = "debug"
