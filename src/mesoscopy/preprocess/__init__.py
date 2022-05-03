@@ -115,7 +115,10 @@ def preprocess(
     click.echo("Calculating frame means & standard deviations...")
     start = time.time()
     gcamp_filter, isosb_filter = calc_channel_filters(
-        binned_frames, session_id=session_id, use_means=use_means
+        binned_frames,
+        session_id=session_id,
+        use_means=use_means,
+        qa_dir=qa_dir,
     )
     end = time.time()
     click.echo(
@@ -146,7 +149,13 @@ def preprocess(
     # Generate the mean gcamp frame and its std
     click.echo("Generating mean gcamp frame and its maximum intensity projection...")
     start = time.time()
-    channel_qa(binned_frames, gcamp_filter, qa_dir=qa_dir, session_id=session_id)
+    channel_qa(
+        binned_frames,
+        gcamp_filter,
+        qa_dir=qa_dir,
+        session_id=session_id,
+        channel="gcamp",
+    )
     end = time.time()
     click.echo(
         "GCaMP average frame, std and maximum intensity projection calculated in {} s".format(
@@ -159,7 +168,13 @@ def preprocess(
         "Generating mean isosbestic frame and its maximum intensity projection..."
     )
     start = time.time()
-    channel_qa(binned_frames, isosb_filter, qa_dir=qa_dir, session_id=session_id)
+    channel_qa(
+        binned_frames,
+        isosb_filter,
+        qa_dir=qa_dir,
+        session_id=session_id,
+        channel="isosb",
+    )
     end = time.time()
     click.echo(
         "Isosbestic average frame, std and maximum intensity projection calculated in {} s".format(
@@ -323,7 +338,7 @@ def calc_channel_filters(
     return gcamp_filter, isosb_filter
 
 
-def channel_qa(array, channel_filter, qa_dir=".", session_id="null"):
+def channel_qa(array, channel_filter, qa_dir=".", session_id="null", channel="null"):
     mean_frame, std_frame, maxip = dask.compute(
         array[channel_filter].mean(axis=0),
         array[channel_filter].std(axis=0),
@@ -331,15 +346,15 @@ def channel_qa(array, channel_filter, qa_dir=".", session_id="null"):
     )
 
     plt.clf()
-    outpath = qa_dir + os.sep + session_id + "_qa_gcamp_mean.png"
+    outpath = qa_dir + os.sep + session_id + "_qa_{}_mean.png".format(channel)
     plt.imsave(outpath, mean_frame)
 
     plt.clf()
-    outpath = qa_dir + os.sep + session_id + "_qa_gcamp_std.png"
+    outpath = qa_dir + os.sep + session_id + "_qa_{}_std.png".format(channel)
     plt.imsave(outpath, std_frame)
 
     plt.clf()
-    outpath = qa_dir + os.sep + session_id + "_qa_gcamp_maxip.png"
+    outpath = qa_dir + os.sep + session_id + "_qa_{}_maxip.png".format(channel)
     plt.imsave(outpath, maxip)
 
 
