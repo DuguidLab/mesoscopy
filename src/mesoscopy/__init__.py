@@ -24,6 +24,7 @@ import os
 import click
 import tables
 import mesoscopy.preprocess as preprocess
+import mesoscopy.register as register
 import mesoscopy.process as process
 import mesoscopy.postprocess as postprocess
 
@@ -69,3 +70,4 @@ def sample(path, out_dir, index, crop=0):
 cli.add_command(preprocess.preprocess)
 cli.add_command(process.process)
 cli.add_command(postprocess.postprocess)
+cli.add_command(register.register)
