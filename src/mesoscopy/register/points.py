@@ -18,14 +18,12 @@
 #  IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
+"""Points registration CLI."""
 import click
-import mesoscopy.register.points as pts
 
 
-@click.group()
-def register():
-    """Register a recording to a template."""
+@click.command()
+@click.argument("recording_path", type=click.Path(exists=True))
+@click.argument("out_dir", type=click.Path(dir_okay=True))
+def points(recording_path, out_dir, recording_landmarks, template_landmarks):
     pass
-
-
-register.add_command(pts.points)
