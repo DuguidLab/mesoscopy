@@ -19,7 +19,7 @@
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
 import click
-import mesoscopy.register.points as pts
+import mesoscopy.register.landmarks as lnd
 
 
 @click.group()
@@ -28,4 +28,4 @@ def register():
     pass
 
 
-register.add_command(pts.points)
+register.add_command(lnd.landmarks)
