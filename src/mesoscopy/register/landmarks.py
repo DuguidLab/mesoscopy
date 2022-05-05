@@ -20,10 +20,30 @@
 #  SOFTWARE.
 """Points registration CLI."""
 import click
+import xmltodict
+import numpy as np
+from collections import OrderedDict
+import matplotlib.pyplot as plt
+from skimage import transform as trf
 
 
 @click.command()
 @click.argument("recording_path", type=click.Path(exists=True))
 @click.argument("out_dir", type=click.Path(dir_okay=True))
-def points(recording_path, out_dir, recording_landmarks, template_landmarks):
-    pass
+def landmarks(recording_path, out_dir, recording_points, template_points):
+    """Register a recording to a template based on manually predefined landmarks."""
+    template_landmarks = get_landmarks(template_points)
+    recording_landmarks = get_landmarks(recording_points)
+
+
+def get_landmarks(points_path):
+    with open(points_path, "r") as fp:
+        pts = xmltodict.parse(fp.read())
+        pts = OrderedDict(
+            {
+                point["@name"]: (point["@x"], point["@y"])
+                for point in pts["namedpointset"]["pointworld"]
+            }
+        )
+
+    return np.array(list(pts.values()), dtype=np.float32)
