@@ -63,9 +63,22 @@ def landmarks(recording_path, out_dir, recording_points, template_points):
     plt.xlim(0, frames.shape[2])
     plt.ylim(frames.shape[1], 0)
     plt.legend(["template", "recording"])
-    outpath = qa_dir + os.sep + session_id + "_qa_registration_landmarks.png"
+    outpath = (
+        qa_dir + os.sep + session_id + "_qa_registration_unregistered-landmarks.png"
+    )
     plt.savefig(outpath)
-    click.echo("Saved scatter of pre-registered landmarks at {}".format(outpath))
+    click.echo("Saved scatter of unregistered landmarks at {}".format(outpath))
+
+    plt.clf()
+    plt.imshow(frames[100])
+    plt.scatter(
+        recording_landmarks[:, 0],
+        recording_landmarks[:, 1],
+        color="purple",
+    )
+    outpath = qa_dir + os.sep + session_id + "_qa_registration_unregistered-frame.png"
+    plt.savefig(outpath)
+    click.echo("Saved frame overlay of unregistered landmarks at {}".format(outpath))
 
     click.echo("Estimating transform...")
     start = time.time()
@@ -83,7 +96,7 @@ def landmarks(recording_path, out_dir, recording_points, template_points):
     plt.xlim(0, frames.shape[2])
     plt.ylim(frames.shape[1], 0)
     plt.legend(["template", "registered"])
-    outpath = qa_dir + os.sep + session_id + "_qa_registration_landmarks-registered.png"
+    outpath = qa_dir + os.sep + session_id + "_qa_registration_registered-landmarks.png"
     plt.savefig(outpath)
     click.echo("Saved scatter of registered landmarks at {}".format(outpath))
 
@@ -98,11 +111,26 @@ def landmarks(recording_path, out_dir, recording_points, template_points):
     end = time.time()
     click.echo("Session registered in {} s".format(end - start))
 
+    plt.clf()
+    plt.imshow(warped[100])
+    plt.scatter(template_landmarks[:, 0], template_landmarks[:, 1], color="darkorange")
+    plt.scatter(
+        tform.inverse(recording_landmarks)[:, 0],
+        tform.inverse(recording_landmarks)[:, 1],
+        color="green",
+    )
+    plt.xlim(0, frames.shape[2])
+    plt.ylim(frames.shape[1], 0)
+    plt.legend(["template", "registered"])
+    outpath = qa_dir + os.sep + session_id + "_qa_registration_registered-frame.png"
+    plt.savefig(outpath)
+    click.echo("Saved frame overlay of registered landmarks at {}".format(outpath))
+
     # Save warped frames and timestamps
     outpath = out_dir + os.sep + session_id + "_preprocessed-registered.h5"
     with h5py.File(outpath, "w") as hf:
         hf.create_dataset("F", data=warped)
-        hf.create_dataset("ts", data=f["ts"])
+        hf.create_dataset("ts", data=f["ts"][:])
     click.echo("Saved registered frames at {}".format(outpath))
 
     registration_end = time.time()
