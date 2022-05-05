@@ -19,21 +19,98 @@
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
 """Points registration CLI."""
+import os
 import click
 import xmltodict
 import numpy as np
 from collections import OrderedDict
+import h5py
+
+import time
+
 import matplotlib.pyplot as plt
 from skimage import transform as trf
 
 
 @click.command()
 @click.argument("recording_path", type=click.Path(exists=True))
-@click.argument("out_dir", type=click.Path(dir_okay=True))
+@click.option("-o", "--out_dir", type=click.Path(dir_okay=True), default="./")
+@click.option("-r", "--recording-points", type=click.Path(dir_okay=False))
+@click.option("-t", "--template-points", type=click.Path(dir_okay=False))
 def landmarks(recording_path, out_dir, recording_points, template_points):
     """Register a recording to a template based on manually predefined landmarks."""
+    click.echo("Registering recording {} to template.".format(recording_path))
+
+    registration_start = time.time()
+
+    session_id = recording_path.split("/")[-1].replace(".h5", "")
+    os.makedirs(out_dir, exist_ok=True)
+
+    qa_dir = out_dir + os.sep + "qa"
+    os.makedirs(qa_dir, exist_ok=True)
+
+    click.echo("Loading imaging data...")
+    f = h5py.File(recording_path)
+    frames = f["/F"]
+
+    click.echo("Loading landmarks...")
     template_landmarks = get_landmarks(template_points)
     recording_landmarks = get_landmarks(recording_points)
+
+    plt.clf()
+    plt.scatter(template_landmarks[:, 0], template_landmarks[:, 1], color="darkorange")
+    plt.scatter(recording_landmarks[:, 0], recording_landmarks[:, 1], color="purple")
+    plt.xlim(0, frames.shape[2])
+    plt.ylim(frames.shape[1], 0)
+    plt.legend(["template", "recording"])
+    outpath = qa_dir + os.sep + session_id + "_qa_registration_landmarks.png"
+    plt.savefig(outpath)
+    click.echo("Saved scatter of pre-registered landmarks at {}".format(outpath))
+
+    click.echo("Estimating transform...")
+    start = time.time()
+    tform = trf.estimate_transform("affine", template_landmarks, recording_landmarks)
+    end = time.time()
+    click.echo("Transform estimated in {} s".format(end - start))
+
+    plt.clf()
+    plt.scatter(template_landmarks[:, 0], template_landmarks[:, 1], color="darkorange")
+    plt.scatter(
+        tform.inverse(recording_landmarks)[:, 0],
+        tform.inverse(recording_landmarks)[:, 1],
+        color="green",
+    )
+    plt.xlim(0, frames.shape[2])
+    plt.ylim(frames.shape[1], 0)
+    plt.legend(["template", "registered"])
+    outpath = qa_dir + os.sep + session_id + "_qa_registration_landmarks-registered.png"
+    plt.savefig(outpath)
+    click.echo("Saved scatter of registered landmarks at {}".format(outpath))
+
+    start = time.time()
+    warped = []
+    with click.progressbar(
+        range(frames.shape[0]), label="Registering recording to template..."
+    ) as frame_ids:
+        for idx in frame_ids:
+            warped.append(trf.warp(frames[idx], tform, order=3))
+    warped = np.array(warped)
+    end = time.time()
+    click.echo("Session registered in {} s".format(end - start))
+
+    # Save warped frames and timestamps
+    outpath = out_dir + os.sep + session_id + "_preprocessed-registered.h5"
+    with h5py.File(outpath, "w") as hf:
+        hf.create_dataset("F", data=warped)
+        hf.create_dataset("ts", data=f["ts"])
+    click.echo("Saved registered frames at {}".format(outpath))
+
+    registration_end = time.time()
+    click.echo(
+        "Registration took a total of {} mins.".format(
+            (registration_end - registration_start) / 60
+        )
+    )
 
 
 def get_landmarks(points_path):
