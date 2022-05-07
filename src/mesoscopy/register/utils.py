@@ -35,10 +35,7 @@ def utils():
 @click.argument("images", type=click.Path(exists=True), nargs=-1)
 @click.option("-o", "--out_dir", type=click.Path(dir_okay=True), default="./")
 def average_anatomy(images, out_dir):
-    image_array = []
-    for image in images:
-        image_array.append(imageio.imread(image, as_gray=True))
-    image_array = np.array(image_array)
+    image_array = np.array([imageio.imread(image, as_gray=True) for image in images])
 
     outpath = out_dir + os.sep + "average_anatomy.png"
     imageio.imsave(outpath, image_array.mean(axis=0).astype(np.uint8))
