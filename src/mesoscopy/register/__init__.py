@@ -20,6 +20,7 @@
 #  SOFTWARE.
 import click
 import mesoscopy.register.landmarks as lnd
+import mesoscopy.register.utils as utils
 
 
 @click.group()
@@ -29,3 +30,4 @@ def register():
 
 
 register.add_command(lnd.landmarks)
+register.add_command(utils.utils)
