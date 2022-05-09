@@ -20,7 +20,6 @@
 #  SOFTWARE.
 """Preprocessing submodule."""
 import os
-import shutil
 import click
 import h5py
 import imageio
@@ -29,7 +28,6 @@ import time
 
 import numpy as np
 import pandas as pd
-from matplotlib import pyplot as plt
 
 
 @click.command()
