@@ -95,7 +95,7 @@ def aba(recording_path, atlas, annotations, out_dir):
                         "area": "L_" + area.acronym,
                         "mean": np.ma.mean(l_mask),
                         "std": np.ma.std(l_mask),
-                        "timestamp": str(ts[idx]),
+                        "timestamp": ts[idx],
                     }
                 )
                 activity.append(
@@ -104,7 +104,7 @@ def aba(recording_path, atlas, annotations, out_dir):
                         "area": "R_" + area.acronym,
                         "mean": np.ma.mean(r_mask),
                         "std": np.ma.std(r_mask),
-                        "timestamp": str(ts[idx]),
+                        "timestamp": ts[idx],
                     }
                 )
 
