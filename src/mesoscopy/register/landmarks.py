@@ -127,7 +127,7 @@ def landmarks(recording_path, out_dir, recording_points, template_points):
     click.echo("Saved frame overlay of registered landmarks at {}".format(outpath))
 
     # Save warped frames and timestamps
-    outpath = out_dir + os.sep + session_id + "_preprocessed-registered.h5"
+    outpath = out_dir + os.sep + session_id + "-registered.h5"
     with h5py.File(outpath, "w") as hf:
         hf.create_dataset("F", data=warped)
         hf.create_dataset("ts", data=f["ts"][:])
