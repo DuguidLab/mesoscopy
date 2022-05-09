@@ -21,8 +21,12 @@
 
 """Processing submodule."""
 import click
+import mesoscopy.process.aba as aba
 
 
-@click.command()
+@click.group()
 def process():
-    click.echo("Processing")
+    pass
+
+
+process.add_command(aba.aba)
