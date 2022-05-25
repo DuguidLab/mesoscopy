@@ -48,6 +48,13 @@ from matplotlib import pyplot as plt
     default=False,
     help="Separate channels using means histogram instead of standard deviation.",
 )
+@click.option(
+    "--flip-channels",
+    is_flag=True,
+    show_default=True,
+    default=False,
+    help="Flip channel order.",
+)
 @click.option("--interim_dir", type=click.Path(dir_okay=True), default="interim/")
 def preprocess(
     raw_path,
@@ -57,6 +64,7 @@ def preprocess(
     bins=2,
     channel_means_only=False,
     use_means=False,
+    flip_channels=False,
     interim_dir="interim/",
 ):
     """Preprocessing to extract deltaF from a single session.
@@ -118,6 +126,7 @@ def preprocess(
         binned_frames,
         session_id=session_id,
         use_means=use_means,
+        flip_channels=flip_channels,
         qa_dir=qa_dir,
     )
     end = time.time()
@@ -303,7 +312,12 @@ def store_interim(array, interim_path, compute=True, chunks=500):
 
 
 def calc_channel_filters(
-    array, qa_dir=".", session_id="null", use_means=False, interim_dir=None
+    array,
+    qa_dir=".",
+    session_id="null",
+    use_means=False,
+    flip_channels=False,
+    interim_dir=None,
 ):
     frame_means, frame_stds = dask.compute(
         array.mean(axis=(1, 2), dtype=np.float32),
@@ -334,6 +348,9 @@ def calc_channel_filters(
         threshold = frame_means.mean()
         gcamp_filter = frame_means > threshold
         isosb_filter = frame_means < threshold
+
+    if flip_channels:
+        return isosb_filter, gcamp_filter
 
     return gcamp_filter, isosb_filter
 
