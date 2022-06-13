@@ -37,7 +37,16 @@ from skimage import transform as trf
 @click.option("-o", "--out_dir", type=click.Path(dir_okay=True), default="./")
 @click.option("-r", "--recording-points", type=click.Path(dir_okay=False))
 @click.option("-t", "--template-points", type=click.Path(dir_okay=False))
-def landmarks(recording_path, out_dir, recording_points, template_points):
+@click.option("--crop-x", default=0, help="Crop recording along the x-axis.")
+@click.option("--crop-y", default=0, help="Crop recording along the y-axis.")
+def landmarks(
+    recording_path,
+    out_dir,
+    recording_points,
+    template_points,
+    crop_x=0,
+    crop_y=0,
+):
     """Register a recording to a template based on manually predefined landmarks."""
     click.echo("Registering recording {} to template.".format(recording_path))
 
@@ -106,7 +115,7 @@ def landmarks(recording_path, out_dir, recording_points, template_points):
         range(frames.shape[0]), label="Registering recording to template..."
     ) as frame_ids:
         for idx in frame_ids:
-            warped.append(trf.warp(frames[idx], tform, order=3))
+            warped.append(trf.warp(frames[idx, :crop_y, :crop_x], tform, order=3))
     warped = np.array(warped)
     end = time.time()
     click.echo("Session registered in {} s".format(end - start))
@@ -119,8 +128,8 @@ def landmarks(recording_path, out_dir, recording_points, template_points):
         tform.inverse(recording_landmarks)[:, 1],
         color="green",
     )
-    plt.xlim(0, frames.shape[2])
-    plt.ylim(frames.shape[1], 0)
+    plt.xlim(0, warped.shape[2])
+    plt.ylim(warped.shape[1], 0)
     plt.legend(["template", "registered"])
     outpath = qa_dir + os.sep + session_id + "_qa_registration_registered-frame.png"
     plt.savefig(outpath)
