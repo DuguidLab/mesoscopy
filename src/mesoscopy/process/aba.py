@@ -115,7 +115,7 @@ def activity(recording_path, atlas, annotations, out_dir):
                     }
                 )
 
-    outpath = out_dir + os.sep + session_id + "_area_activity.csv"
+    outpath = out_dir + os.sep + session_id + "_area-activity.csv"
     print("Saving to {}".format(outpath))
     df = pd.DataFrame(activity)
     df.to_csv(outpath)
