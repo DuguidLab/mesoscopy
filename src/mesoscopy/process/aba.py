@@ -42,7 +42,17 @@ def aba():
 @click.option("-o", "--out_dir", type=click.Path(dir_okay=True), default="./")
 @click.option("-a", "--atlas", type=click.Path(dir_okay=False))
 @click.option("-n", "--annotations", type=click.Path(dir_okay=False))
-def activity(recording_path, atlas, annotations, out_dir):
+@click.option(
+    "--skip-start",
+    default=0,
+    help="Number of frames to skip at the start of the recording.",
+)
+@click.option(
+    "--skip-end",
+    default=0,
+    help="Number of frames to skip at the end of the recording.",
+)
+def activity(recording_path, atlas, annotations, out_dir, skip_start=0, skip_end=0):
     """Extract area responses based on the Allen Brain Atlas"""
     click.echo("Processing file {}.".format(recording_path))
 
@@ -60,8 +70,8 @@ def activity(recording_path, atlas, annotations, out_dir):
 
     click.echo("Loading recording file...")
     f = h5py.File(recording_path)
-    d = f["/F"]
-    ts = f["/ts"]
+    d = f["/F"][skip_start:-skip_end]
+    ts = f["/ts"][skip_start:-skip_end]
 
     click.echo("Loading ABA mask...")
     annotations = pd.read_csv(annotations, delimiter=", ", engine="python")
@@ -175,8 +185,16 @@ def connectivity(activity_path, annotations, out_dir):
                     "p": corr[1],
                 }
             )
+            areas_personsr.append(
+                {
+                    "stim": pair[1],
+                    "resp": pair[0],
+                    "r": corr[0],
+                    "p": corr[1],
+                }
+            )
 
-    outpath = out_dir + os.sep + session_id + "_connectivity.csv"
+    outpath = out_dir + os.sep + session_id + "_area-connectivity.csv"
     print("Saving to {}".format(outpath))
     df_pearsons = pd.DataFrame(areas_personsr)
     df_pearsons.to_csv(outpath)
