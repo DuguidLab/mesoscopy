@@ -115,7 +115,10 @@ def landmarks(
         range(frames.shape[0]), label="Registering recording to template..."
     ) as frame_ids:
         for idx in frame_ids:
-            warped.append(trf.warp(frames[idx, :crop_y, :crop_x], tform, order=3))
+            if crop_x > 0 or crop_y > 0:
+                warped.append(trf.warp(frames[idx, :crop_y, :crop_x], tform, order=3))
+            else:
+                warped.append(trf.warp(frames[idx], tform, order=3))
     warped = np.array(warped)
     end = time.time()
     click.echo("Session registered in {} s".format(end - start))
