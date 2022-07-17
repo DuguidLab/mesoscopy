@@ -29,7 +29,8 @@ import time
 
 import numpy as np
 import pandas as pd
-import scipy.stats as stat
+import scipy.stats as stats
+import matplotlib.pyplot as plt
 
 
 @click.group()
@@ -128,6 +129,7 @@ def activity(recording_path, atlas, annotations, out_dir, skip_start=0, skip_end
     outpath = out_dir + os.sep + session_id + "_area-activity.csv"
     print("Saving to {}".format(outpath))
     df = pd.DataFrame(activity)
+    df["z_score"] = df.groupby("area")["mean"].apply(stats.zscore)
     df.to_csv(outpath)
 
 
