@@ -111,7 +111,7 @@ def activity(recording_path, atlas, annotations, out_dir, skip_start=0, skip_end
                     {
                         "frame": idx,
                         "area": "L_" + area.acronym,
-                        "mean": np.ma.mean(l_mask),
+                        "F": np.ma.mean(l_mask),
                         "std": np.ma.std(l_mask),
                         "timestamp": ts[idx],
                     }
@@ -120,7 +120,7 @@ def activity(recording_path, atlas, annotations, out_dir, skip_start=0, skip_end
                     {
                         "frame": idx,
                         "area": "R_" + area.acronym,
-                        "mean": np.ma.mean(r_mask),
+                        "F": np.ma.mean(r_mask),
                         "std": np.ma.std(r_mask),
                         "timestamp": ts[idx],
                     }
@@ -129,7 +129,7 @@ def activity(recording_path, atlas, annotations, out_dir, skip_start=0, skip_end
     outpath = out_dir + os.sep + session_id + "_area-activity.csv"
     print("Saving to {}".format(outpath))
     df = pd.DataFrame(activity)
-    df["z_score"] = df.groupby("area")["mean"].apply(stats.zscore)
+    df["z_score"] = df.groupby("area")["F"].apply(stats.zscore)
     df.to_csv(outpath)
 
     processing_end = time.time()
@@ -304,8 +304,8 @@ def connectivity(activity_path, annotations, out_dir, epoch=None):
         for pair in pairs:
             if pair[0] == pair[1]:
                 continue
-            stim = df[df.area == pair[0]]["mean"].to_numpy()
-            resp = df[df.area == pair[1]]["mean"].to_numpy()
+            stim = df[df.area == pair[0]]["F"].to_numpy()
+            resp = df[df.area == pair[1]]["F"].to_numpy()
             corr = stats.pearsonr(stim, resp)
             areas_personsr.append(
                 {
