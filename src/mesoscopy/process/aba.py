@@ -132,15 +132,143 @@ def activity(recording_path, atlas, annotations, out_dir, skip_start=0, skip_end
     df["z_score"] = df.groupby("area")["mean"].apply(stats.zscore)
     df.to_csv(outpath)
 
+    processing_end = time.time()
+    click.echo(
+        "Processing took a total of {} mins.".format(
+            (processing_end - processing_start) / 60
+        )
+    )
+
 
 @aba.command()
 @click.argument("activity_path", type=click.Path(exists=True))
 @click.option("-o", "--out_dir", type=click.Path(dir_okay=True), default="./")
-@click.option("-n", "--annotations", type=click.Path(dir_okay=False))
-def connectivity(activity_path, annotations, out_dir):
+@click.option("-b", "--behaviour_path", type=click.Path(exists=True))
+def sync_behaviour(activity_path, behaviour_path, out_dir):
+    click.echo("Labelling epochs for {} from {}.".format(activity_path, behaviour_path))
+    processing_start = time.time()
+
+    session_id = activity_path.split("/")[-1].replace("_area-activity.csv", "")
+    os.makedirs(out_dir, exist_ok=True)
+
+    behaviour_df = pd.read_csv(behaviour_path, parse_dates=["timestamp"])
+    behaviour_df.loc[behaviour_df.response_time < 0, "response_time"] = 0
+    behaviour_df["timestamp_end"] = (
+        behaviour_df.timestamp
+        + pd.to_timedelta(behaviour_df.iti, unit="s")
+        + pd.to_timedelta(behaviour_df["response_time"], unit="s")
+    )
+
+    img_df = pd.read_csv(activity_path)
+    img_df["timestamp"] = pd.to_datetime(img_df.timestamp.str.strip("b'"))
+
+    session_df = behaviour_df[
+        (behaviour_df.session_date == str(img_df.timestamp[0].date()))
+    ]
+
+    trials = []
+
+    for idx, row in session_df[(session_df.response_time > 0)].reset_index().iterrows():
+
+        if idx < 5:
+            continue
+
+        trial_start = row.timestamp
+        trial_end = row.timestamp_end
+
+        trial = img_df[
+            (img_df.timestamp > trial_start)
+            & (img_df.timestamp < trial_end + pd.Timedelta(seconds=1))
+        ].drop("Unnamed: 0", axis=1)
+
+        if trial.empty:
+            continue
+
+        trial["epoch"] = ""
+
+        trial.loc[
+            trial.timestamp < (trial_start + pd.Timedelta(seconds=row.iti)), "epoch"
+        ] = "iti"
+        trial.loc[
+            trial.timestamp >= (trial_start + pd.Timedelta(seconds=row.iti)), "epoch"
+        ] = "cue_response"
+        trial.loc[trial.timestamp >= trial_end, "epoch"] = (
+            "reward" if row.outcome == "correct" else "post_trial"
+        )
+
+        if trial.loc[trial.epoch == "cue_response"].empty:
+            continue
+
+        cue_onset = trial.loc[trial.epoch == "cue_response"].iloc[0].timestamp
+        trial["cue_offset"] = (
+            (trial.timestamp - cue_onset)
+            .dt.total_seconds()
+            .apply(lambda x: 0.040 * round(float(x) / 0.040))
+        )
+        trial["idx"] = idx
+        trial["trial_type"] = "hit" if row.outcome == "correct" else "false_alarm"
+        trial["correction"] = row.correction
+
+        trial["warped_offset"] = pd.Series(
+            np.interp(
+                trial.loc[trial.epoch == "cue_response"].cue_offset,
+                (0, trial.loc[trial.epoch == "cue_response"].cue_offset.max()),
+                (0, +1),
+            ),
+            index=trial[trial.epoch == "cue_response"].index,
+        ).apply(lambda x: 0.040 * round(float(x) / 0.040))
+        trial.loc[trial.epoch == "iti", "warped_offset"] = pd.Series(
+            np.interp(
+                trial.loc[trial.epoch == "iti"].cue_offset,
+                (
+                    trial.loc[trial.epoch == "iti"].cue_offset.min(),
+                    0,
+                ),
+                (-5, 0),
+            ),
+            index=trial[trial.epoch == "iti"].index,
+        ).apply(lambda x: 0.040 * round(float(x) / 0.040))
+        trial.loc[trial.epoch == "reward", "warped_offset"] = pd.Series(
+            np.interp(
+                trial.loc[trial.epoch == "reward"].cue_offset,
+                (
+                    trial.loc[trial.epoch == "reward"].cue_offset.min(),
+                    trial.loc[trial.epoch == "reward"].cue_offset.max(),
+                ),
+                (1, 1.5),
+            ),
+            index=trial[trial.epoch == "reward"].index,
+        ).apply(lambda x: 0.040 * round(float(x) / 0.040))
+
+        trials.append(trial)
+
+    df = pd.concat(trials)
+
+    outpath = out_dir + os.sep + session_id + "_area-activity-epochs.csv"
+    print("Saving to {}".format(outpath))
+    df.to_csv(outpath)
+
+    processing_end = time.time()
+    click.echo(
+        "Processing took a total of {} mins.".format(
+            (processing_end - processing_start) / 60
+        )
+    )
+
+
+@aba.command()
+@click.argument("activity_path", type=click.Path(exists=True))
+@click.option("-o", "--out_dir", type=click.Path(dir_okay=True), default="./")
+@click.option("-a", "--annotations", type=click.Path(dir_okay=False))
+@click.option("--epoch", type=str, default=None)
+def connectivity(activity_path, annotations, out_dir, epoch=None):
+    click.echo("Generating connectivity for {}...".format(activity_path))
     processing_start = time.time()
 
     df = pd.read_csv(activity_path)
+
+    if epoch:
+        df = df.loc[df.epoch == epoch]
 
     session_id = activity_path.split("/")[-1].replace("_area-activity.csv", "")
     os.makedirs(out_dir, exist_ok=True)
@@ -178,7 +306,7 @@ def connectivity(activity_path, annotations, out_dir):
                 continue
             stim = df[df.area == pair[0]]["mean"].to_numpy()
             resp = df[df.area == pair[1]]["mean"].to_numpy()
-            corr = stat.pearsonr(stim, resp)
+            corr = stats.pearsonr(stim, resp)
             areas_personsr.append(
                 {
                     "stim": pair[0],
@@ -200,6 +328,97 @@ def connectivity(activity_path, annotations, out_dir):
     print("Saving to {}".format(outpath))
     df_pearsons = pd.DataFrame(areas_personsr)
     df_pearsons.to_csv(outpath)
+
+    processing_end = time.time()
+    click.echo(
+        "Processing took a total of {} mins.".format(
+            (processing_end - processing_start) / 60
+        )
+    )
+
+
+@aba.command()
+@click.argument("epochs_path", type=click.Path(exists=True))
+@click.option("-o", "--out_dir", type=click.Path(dir_okay=True), default="./")
+@click.option("--trial", type=str)
+def average_trial(epochs_path, out_dir, trial):
+    click.echo(
+        "Generating average warped timeseries for trial type '{}'...".format(trial)
+    )
+    processing_start = time.time()
+
+    session_id = epochs_path.split("/")[-1].replace("_area-activity-epochs.csv", "")
+    os.makedirs(out_dir, exist_ok=True)
+
+    df = pd.read_csv(epochs_path)
+
+    df = (
+        df[df.trial_type == trial]
+        .groupby(["area", "warped_offset"])
+        .mean()
+        .reset_index()
+        .drop(["correction", "idx", "Unnamed: 0", "frame"], axis=1)
+    )
+
+    outpath = (
+        out_dir
+        + os.sep
+        + session_id
+        + "_area-activity-epochs-avg_trial-{}.csv".format(trial)
+    )
+    print("Saving to {}".format(outpath))
+    df.to_csv(outpath)
+
+    processing_end = time.time()
+    click.echo(
+        "Processing took a total of {} mins.".format(
+            (processing_end - processing_start) / 60
+        )
+    )
+
+
+@aba.command()
+@click.argument("recording_path", type=click.Path(exists=True))
+@click.option("-o", "--out_dir", type=click.Path(dir_okay=True), default="./")
+@click.option("-e", "--epochs-path", type=click.Path(dir_okay=False))
+@click.option("--trial-type", type=str, default="hit")
+@click.option("--vmin", type=float, default=0)
+@click.option("--vmax", type=float, default=0.10)
+def trial_average_map(recording_path, out_dir, epochs_path, trial_type, vmin, vmax):
+    click.echo("Processing file {}.".format(recording_path))
+
+    processing_start = time.time()
+
+    session_id = (
+        recording_path.split("/")[-1]
+        .replace(".h5", "")
+        .replace("_preprocessed-registered", "")
+    )
+    os.makedirs(out_dir, exist_ok=True)
+
+    click.echo("Loading recording file...")
+    f = h5py.File(recording_path)
+    d = f["/F"]
+
+    df = pd.read_csv(epochs_path)
+
+    with click.progressbar(
+        sorted(df[df.trial_type == trial_type].cue_offset.unique())
+    ) as offsets:
+        for idx, offset in enumerate(offsets):
+            frame_ids = (
+                df[(df.cue_offset == offset) & (df.trial_type == trial_type)]
+                .frame.unique()
+                .tolist()
+            )
+            frame = d[frame_ids].mean(axis=0)
+
+            out_path = (
+                out_dir
+                + os.sep
+                + "{}_frame{:04d}_offset_{:.2f}.png".format(session_id, idx, offset)
+            )
+            plt.imsave(out_path, frame, cmap="jet", vmin=vmin, vmax=vmax)
 
     processing_end = time.time()
     click.echo(
