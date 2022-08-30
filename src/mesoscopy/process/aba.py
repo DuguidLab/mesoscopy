@@ -144,7 +144,8 @@ def activity(recording_path, atlas, annotations, out_dir, skip_start=0, skip_end
 @click.argument("activity_path", type=click.Path(exists=True))
 @click.option("-o", "--out_dir", type=click.Path(dir_okay=True), default="./")
 @click.option("-b", "--behaviour_path", type=click.Path(exists=True))
-def sync_behaviour(activity_path, behaviour_path, out_dir):
+@click.option("--stimulus_interval", type=float, default=4.0)
+def sync_behaviour(activity_path, behaviour_path, out_dir, stimulus_interval=4):
     click.echo("Labelling epochs for {} from {}.".format(activity_path, behaviour_path))
     processing_start = time.time()
 
@@ -152,7 +153,7 @@ def sync_behaviour(activity_path, behaviour_path, out_dir):
     os.makedirs(out_dir, exist_ok=True)
 
     behaviour_df = pd.read_csv(behaviour_path, parse_dates=["timestamp"])
-    behaviour_df.loc[behaviour_df.response_time < 0, "response_time"] = 0
+    behaviour_df.loc[behaviour_df.response_time < 0, "response_time"] = stimulus_interval
     behaviour_df["timestamp_end"] = (
         behaviour_df.timestamp
         + pd.to_timedelta(behaviour_df.iti, unit="s")
@@ -168,7 +169,7 @@ def sync_behaviour(activity_path, behaviour_path, out_dir):
 
     trials = []
 
-    for idx, row in session_df[(session_df.response_time > 0)].reset_index().iterrows():
+    for idx, row in session_df.reset_index().iterrows():
 
         if idx < 5:
             continue
