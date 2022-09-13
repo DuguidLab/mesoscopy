@@ -272,7 +272,11 @@ def connectivity(activity_path, annotations, out_dir, epoch=None):
     if epoch:
         df = df.loc[df.epoch == epoch]
 
-    session_id = activity_path.split("/")[-1].replace("_area-activity.csv", "")
+    session_id = (
+        activity_path.split("/")[-1]
+        .replace("_area-activity.csv", "")
+        .replace("_area-activity-epochs.csv", "")
+    )
     os.makedirs(out_dir, exist_ok=True)
 
     annotations = pd.read_csv(annotations, delimiter=", ", engine="python")
