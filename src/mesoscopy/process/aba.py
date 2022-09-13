@@ -154,7 +154,9 @@ def sync_behaviour(activity_path, behaviour_path, out_dir, stimulus_interval=4):
     os.makedirs(out_dir, exist_ok=True)
 
     behaviour_df = pd.read_csv(behaviour_path, parse_dates=["timestamp"])
-    behaviour_df.loc[behaviour_df.response_time < 0, "response_time"] = stimulus_interval
+    behaviour_df.loc[
+        behaviour_df.response_time < 0, "response_time"
+    ] = stimulus_interval
     behaviour_df["timestamp_end"] = (
         behaviour_df.timestamp
         + pd.to_timedelta(behaviour_df.iti, unit="s")
