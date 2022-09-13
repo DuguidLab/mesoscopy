@@ -30,6 +30,7 @@ import time
 import numpy as np
 import pandas as pd
 import scipy.stats as stats
+import scipy.signal as signal
 import matplotlib.pyplot as plt
 
 
@@ -328,6 +329,71 @@ def connectivity(activity_path, annotations, out_dir, epoch=None):
     outpath = out_dir + os.sep + session_id + "_area-connectivity.csv"
     print("Saving to {}".format(outpath))
     df_pearsons = pd.DataFrame(areas_personsr)
+    df_pearsons.to_csv(outpath)
+
+    processing_end = time.time()
+    click.echo(
+        "Processing took a total of {} mins.".format(
+            (processing_end - processing_start) / 60
+        )
+    )
+
+
+@aba.command()
+@click.argument("activity_path", type=click.Path(exists=True))
+@click.option("-o", "--out_dir", type=click.Path(dir_okay=True), default="./")
+@click.option("--epoch", type=str, default=None)
+@click.option("--key", type=str, default=None, help="Activity column")
+def cross_correlations(activity_path, out_dir, key="F", epoch=None):
+    click.echo("Generating cross correlation lags for {}...".format(activity_path))
+    processing_start = time.time()
+
+    df = pd.read_csv(activity_path)
+
+    if epoch:
+        df = df.loc[df.epoch == epoch]
+
+    session_id = (
+        activity_path.split("/")[-1]
+        .replace("_area-activity.csv", "")
+        .replace("_area-activity-epochs.csv", "")
+    )
+    os.makedirs(out_dir, exist_ok=True)
+
+    annotations = df.area.unique()
+
+    areas_lags = []
+    with click.progressbar(
+        itertools.combinations(annotations, 2),
+        label="Calculating activity cross-correlation lags for ABA pairs...",
+        length=sum([1 for _ in itertools.combinations(annotations, 2)]),
+    ) as pairs:
+        for pair in pairs:
+            if pair[0] == pair[1]:
+                continue
+            stim = df[df.area == pair[0]][key].to_numpy()
+            resp = df[df.area == pair[1]][key].to_numpy()
+            xcorr = signal.correlate(stim, resp, mode="full")
+            lags = signal.correlation_lags(stim.size, resp.size, mode="full")
+            lag = lags[np.argmax(xcorr)]
+            areas_lags.append(
+                {
+                    "stim": pair[0],
+                    "resp": pair[1],
+                    "lag": lag,
+                }
+            )
+            areas_lags.append(
+                {
+                    "stim": pair[1],
+                    "resp": pair[0],
+                    "lag": lag,
+                }
+            )
+
+    outpath = out_dir + os.sep + session_id + "_area-xcorr-lags.csv"
+    print("Saving to {}".format(outpath))
+    df_pearsons = pd.DataFrame(areas_lags)
     df_pearsons.to_csv(outpath)
 
     processing_end = time.time()
