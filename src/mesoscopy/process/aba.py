@@ -425,9 +425,17 @@ def average_trial(epochs_path, out_dir, trial):
 
     df = pd.read_csv(epochs_path)
 
-    df = (
+    df_warped = (
         df[df.trial_type == trial]
         .groupby(["area", "warped_offset"])
+        .mean()
+        .reset_index()
+        .drop(["correction", "idx", "Unnamed: 0", "frame"], axis=1)
+    )
+
+    df_realtime = (
+        df[df.trial_type == trial]
+        .groupby(["area", "cue_offset"])
         .mean()
         .reset_index()
         .drop(["correction", "idx", "Unnamed: 0", "frame"], axis=1)
@@ -440,7 +448,16 @@ def average_trial(epochs_path, out_dir, trial):
         + "_area-activity-epochs-avg_trial-{}.csv".format(trial)
     )
     print("Saving to {}".format(outpath))
-    df.to_csv(outpath)
+    df_realtime.to_csv(outpath)
+
+    outpath = (
+        out_dir
+        + os.sep
+        + session_id
+        + "_area-activity-epochs-avg_trial-{}-warped.csv".format(trial)
+    )
+    print("Saving to {}".format(outpath))
+    df_warped.to_csv(outpath)
 
     processing_end = time.time()
     click.echo(
