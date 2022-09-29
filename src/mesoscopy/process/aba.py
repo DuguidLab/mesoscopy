@@ -46,15 +46,17 @@ def aba():
 @click.option("-n", "--annotations", type=click.Path(dir_okay=False))
 @click.option(
     "--skip-start",
-    default=0,
+    default=None,
     help="Number of frames to skip at the start of the recording.",
 )
 @click.option(
     "--skip-end",
-    default=0,
+    default=None,
     help="Number of frames to skip at the end of the recording.",
 )
-def activity(recording_path, atlas, annotations, out_dir, skip_start=0, skip_end=0):
+def activity(
+    recording_path, atlas, annotations, out_dir, skip_start=None, skip_end=None
+):
     """Extract area responses based on the Allen Brain Atlas"""
     click.echo("Processing file {}.".format(recording_path))
 
@@ -427,7 +429,7 @@ def average_trial(epochs_path, out_dir, trial):
 
     df_warped = (
         df[df.trial_type == trial]
-        .groupby(["area", "warped_offset"])
+        .groupby(["area", "epoch", "warped_offset"])
         .mean()
         .reset_index()
         .drop(["correction", "idx", "Unnamed: 0", "frame"], axis=1)
@@ -435,7 +437,7 @@ def average_trial(epochs_path, out_dir, trial):
 
     df_realtime = (
         df[df.trial_type == trial]
-        .groupby(["area", "cue_offset"])
+        .groupby(["area", "epoch", "cue_offset"])
         .mean()
         .reset_index()
         .drop(["correction", "idx", "Unnamed: 0", "frame"], axis=1)
