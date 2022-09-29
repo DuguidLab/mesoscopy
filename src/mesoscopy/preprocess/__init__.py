@@ -56,6 +56,16 @@ from matplotlib import pyplot as plt
     help="Flip channel order.",
 )
 @click.option("--interim_dir", type=click.Path(dir_okay=True), default="interim/")
+@click.option(
+    "--skip-start",
+    default=0,
+    help="Number of frames to skip at the start of the recording.",
+)
+@click.option(
+    "--skip-end",
+    default=0,
+    help="Number of frames to skip at the end of the recording.",
+)
 def preprocess(
     raw_path,
     out_dir,
@@ -66,6 +76,8 @@ def preprocess(
     use_means=False,
     flip_channels=False,
     interim_dir="interim/",
+    skip_start=0,
+    skip_end=0,
 ):
     """Preprocessing to extract deltaF from a single session.
 
@@ -93,7 +105,7 @@ def preprocess(
 
     # Lazy-load the data into a dask array
     f = h5py.File(raw_path)
-    d = f["/frames"]
+    d = f["/frames"][skip_start:-skip_end]
 
     raw_frames = da.from_array(d, chunks="auto")
     if chunks > 0:
