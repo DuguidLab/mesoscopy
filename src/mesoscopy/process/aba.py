@@ -47,11 +47,13 @@ def aba():
 @click.option(
     "--skip-start",
     default=None,
+    type=int,
     help="Number of frames to skip at the start of the recording.",
 )
 @click.option(
     "--skip-end",
     default=None,
+    type=int,
     help="Number of frames to skip at the end of the recording.",
 )
 def activity(
@@ -74,8 +76,16 @@ def activity(
 
     click.echo("Loading recording file...")
     f = h5py.File(recording_path)
-    d = f["/F"][skip_start:-skip_end]
-    ts = f["/ts"][skip_start:-skip_end]
+
+    d = f["/F"]
+    ts = f["/ts"]
+
+    if skip_end:
+        skip_end = -skip_end
+
+    if skip_start or skip_end:
+        d = f["/F"][skip_start:skip_end]
+        ts = f["/ts"][skip_start:skip_end]
 
     click.echo("Loading ABA mask...")
     annotations = pd.read_csv(annotations, delimiter=", ", engine="python")

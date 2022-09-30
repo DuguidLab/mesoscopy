@@ -59,11 +59,13 @@ from matplotlib import pyplot as plt
 @click.option(
     "--skip-start",
     default=None,
+    type=int,
     help="Number of frames to skip at the start of the recording.",
 )
 @click.option(
     "--skip-end",
     default=None,
+    type=int,
     help="Number of frames to skip at the end of the recording.",
 )
 def preprocess(
@@ -106,8 +108,12 @@ def preprocess(
     # Lazy-load the data into a dask array
     f = h5py.File(raw_path)
     d = f["/frames"]
+
+    if skip_end:
+        skip_end = -skip_end
+
     if skip_start or skip_end:
-        d = f["/frames"][skip_start:-skip_end]
+        d = f["/frames"][skip_start:skip_end]
 
     raw_frames = da.from_array(d, chunks="auto")
     if chunks > 0:
