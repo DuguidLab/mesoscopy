@@ -108,12 +108,14 @@ def preprocess(
     # Lazy-load the data into a dask array
     f = h5py.File(raw_path)
     d = f["/frames"]
+    ts = f["/timestamps"]
 
     if skip_end:
         skip_end = -skip_end
 
     if skip_start or skip_end:
         d = f["/frames"][skip_start:skip_end]
+        ts = f["/timestamps"][skip_start:skip_end]
 
     raw_frames = da.from_array(d, chunks="auto")
     if chunks > 0:
@@ -295,7 +297,7 @@ def preprocess(
     # Save timestamps
     outpath = out_dir + os.sep + session_id + "_preprocessed.h5"
     click.echo("Appending timestamps to {}".format(outpath))
-    timestamps = da.from_array(f["/timestamps"][gcamp_filter], chunks="auto")
+    timestamps = da.from_array(ts[gcamp_filter], chunks="auto")
     da.to_hdf5(outpath, "/ts", timestamps)
 
     preprocessing_end = time.time()
