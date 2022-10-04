@@ -509,7 +509,12 @@ def trial_average_map(recording_path, out_dir, epochs_path, trial_type, vmin, vm
     ) as offsets:
         for idx, offset in enumerate(offsets):
             frame_ids = (
-                df[(df.cue_offset == offset) & (df.trial_type == trial_type)]
+                df[
+                    (df.cue_offset == offset)
+                    & (df.trial_type == trial_type)
+                    & (df.frame > 1500)
+                    & (df.frame < df.frame.max() - 1500)
+                ]
                 .frame.unique()
                 .tolist()
             )
