@@ -200,6 +200,18 @@ def sync_behaviour(activity_path, behaviour_path, out_dir, stimulus_interval=4):
         if trial.empty:
             continue
 
+        trial_type = None
+        if (row.outcome == "correct") & (row.response_time > 0):
+            trial_type = "hit"
+        elif (row.outcome == "correct") & (row.response_time < 0):
+            trial_type = "correct_rejection"
+        elif (row.outcome == "incorrect") & (row.response_time > 0):
+            trial_type = "false_alarm"
+        elif row.outcome == "precued":
+            trial_type = "precued"
+        elif row.outcome == "no_response":
+            trial_type = "miss"
+
         trial["epoch"] = ""
 
         trial.loc[
@@ -222,7 +234,7 @@ def sync_behaviour(activity_path, behaviour_path, out_dir, stimulus_interval=4):
             .apply(lambda x: 0.040 * round(float(x) / 0.040))
         )
         trial["idx"] = idx
-        trial["trial_type"] = "hit" if row.outcome == "correct" else "false_alarm"
+        trial["trial_type"] = trial_type
         trial["correction"] = row.correction
 
         trial["warped_offset"] = pd.Series(
@@ -426,7 +438,14 @@ def cross_correlations(activity_path, out_dir, key="F", epoch=None):
 @click.argument("epochs_path", type=click.Path(exists=True))
 @click.option("-o", "--out_dir", type=click.Path(dir_okay=True), default="./")
 @click.option("--trial", type=str)
-def average_trial(epochs_path, out_dir, trial):
+@click.option(
+    "--with-profile",
+    is_flag=True,
+    show_default=True,
+    default=False,
+    help="Export response profile.",
+)
+def average_trial(epochs_path, out_dir, trial, with_profile=False):
     click.echo(
         "Generating average warped timeseries for trial type '{}'...".format(trial)
     )
@@ -439,7 +458,7 @@ def average_trial(epochs_path, out_dir, trial):
 
     df_warped = (
         df[df.trial_type == trial]
-        .groupby(["area", "epoch", "warped_offset"])
+        .groupby(["area", "warped_offset"])
         .mean()
         .reset_index()
         .drop(["correction", "idx", "Unnamed: 0", "frame"], axis=1)
@@ -447,7 +466,7 @@ def average_trial(epochs_path, out_dir, trial):
 
     df_realtime = (
         df[df.trial_type == trial]
-        .groupby(["area", "epoch", "cue_offset"])
+        .groupby(["area", "cue_offset"])
         .mean()
         .reset_index()
         .drop(["correction", "idx", "Unnamed: 0", "frame"], axis=1)
@@ -470,6 +489,70 @@ def average_trial(epochs_path, out_dir, trial):
     )
     print("Saving to {}".format(outpath))
     df_warped.to_csv(outpath)
+
+    if with_profile:
+        print("Generating response profile...")
+        areas_of_interest = [
+            "R_MOp1",
+            "R_MOs",
+            "R_VISp",
+            "R_VISa1",
+            "R_VISal1",
+            "L_MOp1",
+            "L_MOs",
+            "L_VISp",
+            "L_VISa1",
+            "L_VISal1",
+        ]
+        # t2h, peak, spread
+        df = df[(df.trial_type == trial) & (df.area.isin(areas_of_interest))]
+
+        trials = []
+        for area in areas_of_interest:
+            for idx in sorted(df.idx.unique()):
+                trial_response = df[(df.idx == idx) & (df.area == area)]
+
+                iti = trial_response[
+                    (trial_response.cue_offset > -2) & (trial_response.cue_offset <= 0)
+                ]
+                response = trial_response[
+                    (trial_response.cue_offset > 0) & (trial_response.cue_offset <= 2)
+                ]
+
+                iti_offset = iti.z_score.mean()
+
+                avg_response = response.z_score.mean()
+                peak = response.z_score.max()
+                half_peak = peak / 2
+
+                hp_timing = (
+                    response[response.z_score >= half_peak]
+                    .cue_offset.sort_values()
+                    .values
+                )
+                t2h = hp_timing[0] if hp_timing.size > 0 else np.nan
+
+                trials.append(
+                    {
+                        "trial_idx": idx,
+                        "area": area,
+                        "t2h": t2h,
+                        "peak": peak - iti_offset,
+                        "half_peak": half_peak - iti_offset,
+                        "avg_response": avg_response - iti_offset,
+                    }
+                )
+
+        df_prof = pd.DataFrame(trials)
+
+        outpath = (
+            out_dir
+            + os.sep
+            + session_id
+            + "_area-activity-epochs-{}-profile.csv".format(trial)
+        )
+        print("Saving to {}".format(outpath))
+        df_prof.to_csv(outpath)
 
     processing_end = time.time()
     click.echo(
