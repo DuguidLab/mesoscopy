@@ -61,3 +61,10 @@ path = "src/mesoscopy/__about__.py"
 
 [tool.hatch.envs.default]
 python = "3.9"
+
+[tool.hatch.envs.develop]
+python = "3.9"
+dependencies = [
+  "black",
+  "pylint"
+]
