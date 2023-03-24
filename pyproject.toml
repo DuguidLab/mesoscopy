@@ -66,5 +66,6 @@ python = "3.9"
 python = "3.9"
 dependencies = [
   "black",
-  "pylint"
+  "pylint",
+  "ipython"
 ]
