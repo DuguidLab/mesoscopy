@@ -319,7 +319,7 @@ def preprocess(
     deltaF_series = ImageSeries(
         name="DeltaFSeries",
         data=f["/data"],
-        timestamps=timestamps,
+        timestamps=f["/timestamps"],
         unit="df/f",
         description="dF/F widefield cortical imaging series.",
         comments="This imaging series is corrected for the haemodynamic response.",
