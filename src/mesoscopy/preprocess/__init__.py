@@ -331,7 +331,7 @@ def preprocess(
 
     ophys_module.add(deltaF_series)
 
-    io.write()
+    io.write(nwbfile)
     io.close()
     click.echo("Updated NWB file at {}".format(raw_path))
 
