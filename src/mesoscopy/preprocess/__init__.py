@@ -107,14 +107,24 @@ def preprocess(
 
     click.echo("Loading data...")
 
-    # Load data from NWB file
-    io = NWBHDF5IO(raw_path, "r")
-    nwbfile = io.read()
+    # Determine whether we're working with an NWB file
+    nwb = True if raw_path.endswith(".nwb") else False
 
-    session_id = nwbfile.identifier
+    if nwb:
+        io = NWBHDF5IO(raw_path, "a")
+        nwbfile = io.read()
 
-    d = nwbfile.acquisition["DualChannelImagingSeries"].data
-    ts = nwbfile.acquisition["DualChannelImagingSeries"].timestamps
+        session_id = nwbfile.identifier
+
+        d = nwbfile.acquisition["DualChannelImagingSeries"].data
+        ts = nwbfile.acquisition["DualChannelImagingSeries"].timestamps
+    else:
+        session_id = raw_path.split("/")[-1].replace(".h5", "")
+
+        # Lazy-load the data into a dask array
+        f_raw = h5py.File(raw_path)
+        d = f[_raw"/frames"]
+        ts = f_raw["/timestamps"]
 
     if skip_end:
         skip_end = -skip_end
@@ -313,27 +323,28 @@ def preprocess(
         )
     )
 
-    click.echo("Updating NWB file...")
-    f = h5py.File(outpath, "r")
+    if nwb:
+        click.echo("Updating NWB file...")
+        f = h5py.File(outpath, "r")
 
-    deltaF_series = ImageSeries(
-        name="DeltaFSeries",
-        data=f["/data"],
-        timestamps=f["/timestamps"],
-        unit="df/f",
-        description="dF/F widefield cortical imaging series.",
-        comments="This imaging series is corrected for the haemodynamic response.",
-    )
+        deltaF_series = ImageSeries(
+            name="DeltaFSeries",
+            data=f["/data"],
+            timestamps=f["/timestamps"],
+            unit="df/f",
+            description="dF/F widefield cortical imaging series.",
+            comments="This imaging series is corrected for the haemodynamic response.",
+        )
 
-    ophys_module = nwbfile.create_processing_module(
-        name="ophys", description="optical physiology processed data"
-    )
+        ophys_module = nwbfile.create_processing_module(
+            name="ophys", description="optical physiology processed data"
+        )
 
-    ophys_module.add(deltaF_series)
+        ophys_module.add(deltaF_series)
 
-    io.write(nwbfile)
-    io.close()
-    click.echo("Updated NWB file at {}".format(raw_path))
+        io.write(nwbfile)
+        io.close()
+        click.echo("Updated NWB file at {}".format(raw_path))
 
     click.echo("Cleaning up...")
     shutil.rmtree(interim_dir)
