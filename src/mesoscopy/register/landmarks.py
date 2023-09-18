@@ -63,13 +63,24 @@ def landmarks(
 
     click.echo("Loading imaging data...")
     # Load data from NWB file
-    io = NWBHDF5IO(recording_path, "r")
-    nwbfile = io.read()
+    # Determine whether we're working with an NWB file
+    nwb = True if recording_path.endswith(".nwb") else False
 
-    session_id = nwbfile.identifier
+    if nwb:
+        io = NWBHDF5IO(recording_path, "a")
+        nwbfile = io.read()
 
-    frames = nwbfile.processing["ophys"].data_interfaces["DeltaFSeries"].data
-    ts = nwbfile.processing["ophys"].data_interfaces["DeltaFSeries"].timestamps
+        session_id = nwbfile.identifier
+
+        frames = nwbfile.acquisition["DualChannelImagingSeries"].data
+        ts = nwbfile.acquisition["DualChannelImagingSeries"].timestamps
+    else:
+        session_id = recording_path.split("/")[-1].replace(".h5", "")
+
+        # Lazy-load the data into a dask array
+        f_preproc = h5py.File(recording_path)
+        frames = f_preproc["/frames"]
+        ts = f_preproc["/timestamps"]
 
     click.echo("Loading landmarks...")
     template_landmarks = get_landmarks(template_points)
@@ -161,48 +172,50 @@ def landmarks(
         )
     )
 
-    click.echo("Updating NWB file...")
-    f = h5py.File(outpath, "r")
+    if nwb:
+        click.echo("Updating NWB file...")
+        click.echo("Updating NWB file...")
+        f = h5py.File(outpath, "r")
 
-    try:
-        ophys_module = nwbfile.create_processing_module(
-            name="ophys", description="optical physiology processed data"
+        try:
+            ophys_module = nwbfile.create_processing_module(
+                name="ophys", description="optical physiology processed data"
+            )
+        except ValueError:
+            print("Processing module already exists...")
+            ophys_module = nwbfile.processing["ophys"]
+
+        registered_series = ImageSeries(
+            name="corrected",
+            data=f["/F"],
+            timestamps=ts,
+            unit="df/f",
+            description="dF/F widefield cortical imaging series.",
+            comments="This is the haemodynamic corrected series registered to the Allen Brain Atlas CCFv3.",
         )
-    except ValueError:
-        print("Processing module already exists...")
-        ophys_module = nwbfile.processing["ophys"]
 
-    registered_series = ImageSeries(
-        name="corrected",
-        data=f["/F"],
-        timestamps=ts,
-        unit="df/f",
-        description="dF/F widefield cortical imaging series.",
-        comments="This is the haemodynamic corrected series registered to the Allen Brain Atlas CCFv3.",
-    )
+        xy_translation = TimeSeries(
+            name="xy_translation",
+            data=np.repeat(tform.params[None, :], len(ts), axis=0),
+            unit="pixels",
+            timestamps=ts,
+            description="Affine transformation parameters for image registration to the ABA CCFv3.",
+        )
 
-    xy_translation = TimeSeries(
-        name="xy_translation",
-        data=np.repeat(tform.params[None, :], len(ts), axis=0),
-        unit="pixels",
-        timestamps=ts,
-        description="Affine transformation parameters for image registration to the ABA CCFv3.",
-    )
+        corrected_image_stack = CorrectedImageStack(
+            name="CCFRegisteredSeries",
+            corrected=registered_series,
+            original=nwbfile.acquisition["DualChannelImagingSeries"],
+            xy_translation=xy_translation,
+        )
 
-    corrected_image_stack = CorrectedImageStack(
-        name="CCFRegisteredSeries",
-        corrected=registered_series,
-        original=nwbfile.acquisition["DualChannelImagingSeries"],
-        xy_translation=xy_translation,
-    )
+        ophys_module.add(corrected_image_stack)
 
-    ophys_module.add(corrected_image_stack)
-
-    print("Writing to file...")
-    io.write(nwbfile)
+        print("Writing to file...")
+        io.write(nwbfile)
+        io.close()
 
     print("Cleaning up...")
-    io.close()
     f.close()
 
 
