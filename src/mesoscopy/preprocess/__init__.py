@@ -123,7 +123,7 @@ def preprocess(
 
         # Lazy-load the data into a dask array
         f_raw = h5py.File(raw_path)
-        d = f[_raw"/frames"]
+        d = f_raw["/frames"]
         ts = f_raw["/timestamps"]
 
     if skip_end:
