@@ -31,6 +31,10 @@ import time
 import matplotlib.pyplot as plt
 from skimage import transform as trf
 
+from pynwb import NWBHDF5IO, TimeSeries
+from pynwb.image import ImageSeries
+from pynwb.ophys import CorrectedImageStack
+
 
 @click.command()
 @click.argument("recording_path", type=click.Path(exists=True))
@@ -52,15 +56,31 @@ def landmarks(
 
     registration_start = time.time()
 
-    session_id = recording_path.split("/")[-1].replace(".h5", "")
     os.makedirs(out_dir, exist_ok=True)
 
     qa_dir = out_dir + os.sep + "qa"
     os.makedirs(qa_dir, exist_ok=True)
 
     click.echo("Loading imaging data...")
-    f = h5py.File(recording_path)
-    frames = f["/F"]
+    # Load data from NWB file
+    # Determine whether we're working with an NWB file
+    nwb = True if recording_path.endswith(".nwb") else False
+
+    if nwb:
+        io = NWBHDF5IO(recording_path, "a")
+        nwbfile = io.read()
+
+        session_id = nwbfile.identifier
+
+        frames = nwbfile.acquisition["DualChannelImagingSeries"].data
+        ts = nwbfile.acquisition["DualChannelImagingSeries"].timestamps
+    else:
+        session_id = recording_path.split("/")[-1].replace(".h5", "")
+
+        # Lazy-load the data into a dask array
+        f_preproc = h5py.File(recording_path)
+        frames = f_preproc["/frames"]
+        ts = f_preproc["/timestamps"]
 
     click.echo("Loading landmarks...")
     template_landmarks = get_landmarks(template_points)
@@ -142,7 +162,7 @@ def landmarks(
     outpath = out_dir + os.sep + session_id + "-registered.h5"
     with h5py.File(outpath, "w") as hf:
         hf.create_dataset("F", data=warped)
-        hf.create_dataset("ts", data=f["ts"][:])
+        hf.create_dataset("ts", data=ts)
     click.echo("Saved registered frames at {}".format(outpath))
 
     registration_end = time.time()
@@ -151,6 +171,52 @@ def landmarks(
             (registration_end - registration_start) / 60
         )
     )
+
+    if nwb:
+        click.echo("Updating NWB file...")
+        click.echo("Updating NWB file...")
+        f = h5py.File(outpath, "r")
+
+        try:
+            ophys_module = nwbfile.create_processing_module(
+                name="ophys", description="optical physiology processed data"
+            )
+        except ValueError:
+            print("Processing module already exists...")
+            ophys_module = nwbfile.processing["ophys"]
+
+        registered_series = ImageSeries(
+            name="corrected",
+            data=f["/F"],
+            timestamps=ts,
+            unit="df/f",
+            description="dF/F widefield cortical imaging series.",
+            comments="This is the haemodynamic corrected series registered to the Allen Brain Atlas CCFv3.",
+        )
+
+        xy_translation = TimeSeries(
+            name="xy_translation",
+            data=np.repeat(tform.params[None, :], len(ts), axis=0),
+            unit="pixels",
+            timestamps=ts,
+            description="Affine transformation parameters for image registration to the ABA CCFv3.",
+        )
+
+        corrected_image_stack = CorrectedImageStack(
+            name="CCFRegisteredSeries",
+            corrected=registered_series,
+            original=nwbfile.acquisition["DualChannelImagingSeries"],
+            xy_translation=xy_translation,
+        )
+
+        ophys_module.add(corrected_image_stack)
+
+        print("Writing to file...")
+        io.write(nwbfile)
+        io.close()
+
+    print("Cleaning up...")
+    f.close()
 
 
 def get_landmarks(points_path):
