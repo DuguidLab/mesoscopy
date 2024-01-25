@@ -29,6 +29,8 @@ import zarr
 
 import time
 
+import mesoscopy.io as io
+
 import numpy as np
 from dask import array as da
 from matplotlib import pyplot as plt
@@ -107,24 +109,7 @@ def preprocess(
 
     click.echo("Loading data...")
 
-    # Determine whether we're working with an NWB file
-    nwb = True if raw_path.endswith(".nwb") else False
-
-    if nwb:
-        io = NWBHDF5IO(raw_path, "a")
-        nwbfile = io.read()
-
-        session_id = nwbfile.identifier
-
-        d = nwbfile.acquisition["DualChannelImagingSeries"].data
-        ts = nwbfile.acquisition["DualChannelImagingSeries"].timestamps
-    else:
-        session_id = raw_path.split("/")[-1].replace(".h5", "")
-
-        # Lazy-load the data into a dask array
-        f_raw = h5py.File(raw_path)
-        d = f_raw["/frames"]
-        ts = f_raw["/timestamps"]
+    session_id, d, ts = load_raw(raw_path)
 
     if skip_end:
         skip_end = -skip_end
@@ -348,6 +333,28 @@ def preprocess(
 
     click.echo("Cleaning up...")
     shutil.rmtree(interim_dir)
+
+
+def load_raw(raw_path):
+    # Determine whether we're working with an NWB file
+    nwb = True if raw_path.endswith(".nwb") else False
+
+    if nwb:
+        nwbfile = io.read_nwb(raw_path)
+
+        session_id = nwbfile.identifier
+
+        imaging_data = nwbfile.acquisition["DualChannelImagingSeries"].data
+        timestamps = nwbfile.acquisition["DualChannelImagingSeries"].timestamps
+    else:
+        session_id = raw_path.split("/")[-1].replace(".h5", "")
+
+        # Lazy-load the data into a dask array
+        f_raw = io.read_h5(raw_path)
+        imaging_data = f_raw["/frames"]
+        timestamps = f_raw["/timestamps"]
+
+    return session_id, imaging_data, timestamps
 
 
 def bin(array, bins, interim_dir=".", session_id="null"):
