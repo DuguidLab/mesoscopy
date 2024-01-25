@@ -74,3 +74,35 @@ dependencies = [
 [tool.hatch.envs.test.scripts]
 run-coverage = "pytest --cov-config=pyproject.toml --cov=pkg --cov=tests"
 run = "run-coverage --no-cov"
+
+[tool.hatch.envs.style]
+detached = true
+python = "3.12"
+dependencies = [
+  "black",
+  "pylint",
+  "isort"
+]
+
+[tool.hatch.envs.style.scripts]
+check = [
+  "black --check --diff .",
+  "isort --check-only --diff .",
+]
+fmt = [
+  "isort .",
+  "black .",
+  "check",
+]
+
+[tool.mypy]
+ignore_missing_imports = true
+plugins = "numpy.typing.mypy_plugin"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+follow_imports = "normal"
+pretty = true
+show_column_numbers = true
+show_error_codes = true
+warn_no_return = false
+warn_unused_ignores = true
