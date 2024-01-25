@@ -94,7 +94,7 @@ def store_interim(
         chunks (int, optional): Chunk size for the Zarr file. Defaults to 500.
 
     Returns:
-        _type_: _description_
+        Zarr Array: Persistent Zarr array object
     """
     if isinstance(array, da.Array):
         z_interim = zarr.open_array(
