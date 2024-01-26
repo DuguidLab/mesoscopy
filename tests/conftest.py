@@ -9,7 +9,7 @@ from uuid import uuid4
 from pynwb import NWBFile, NWBHDF5IO
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def nwbfile(tmp_path_factory):
     """Create an NWBFile object for testing."""
     # Create a temporary file
