@@ -340,24 +340,24 @@ def load_raw(raw_path, nwb=False):
 
 
 def update_nwb(nwb_path, h5_path):
-    f = h5py.File(h5_path, "r")
-    with io.read_nwb(nwb_path) as nwbfile:
-        deltaF_series = ImageSeries(
-            name="DeltaFSeries",
-            data=f["/data"],
-            timestamps=f["/timestamps"],
-            unit="df/f",
-            description="dF/F widefield cortical imaging series.",
-            comments="This imaging series is corrected for the haemodynamic response.",
-        )
+    f = io.read_h5(h5_path)
+    nwbfile, nwbio = io.read_nwb(nwb_path, return_io=True)
+    deltaF_series = ImageSeries(
+        name="DeltaFSeries",
+        data=f["/data"],
+        timestamps=f["/timestamps"],
+        unit="df/f",
+        description="dF/F widefield cortical imaging series.",
+        comments="This imaging series is corrected for the haemodynamic response.",
+    )
 
-        ophys_module = nwbfile.create_processing_module(
-            name="ophys", description="optical physiology processed data"
-        )
+    ophys_module = nwbfile.create_processing_module(
+        name="ophys", description="optical physiology processed data"
+    )
 
-        ophys_module.add(deltaF_series)
+    ophys_module.add(deltaF_series)
 
-        io.write_nwb(nwb_path, nwbfile)
+    io.write_nwb(nwb_path, nwbfile, io=nwbio)
 
 
 def bin(array, bins, interim_dir=".", session_id="null"):
