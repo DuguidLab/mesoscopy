@@ -37,14 +37,14 @@ from pynwb.ophys import CorrectedImageStack
 
 
 @click.command()
-@click.argument("recording_path", type=click.Path(exists=True))
+@click.argument("path", type=click.Path(exists=True))
 @click.option("-o", "--out_dir", type=click.Path(dir_okay=True), default="./")
 @click.option("-r", "--recording-points", type=click.Path(dir_okay=False))
 @click.option("-t", "--template-points", type=click.Path(dir_okay=False))
 @click.option("--crop-x", default=0, help="Crop recording along the x-axis.")
 @click.option("--crop-y", default=0, help="Crop recording along the y-axis.")
 def landmarks(
-    recording_path,
+    path,
     out_dir,
     recording_points,
     template_points,
@@ -52,7 +52,7 @@ def landmarks(
     crop_y=0,
 ):
     """Register a recording to a template based on manually predefined landmarks."""
-    click.echo("Registering recording {} to template.".format(recording_path))
+    click.echo("Registering recording {} to template.".format(path))
 
     registration_start = time.time()
 
@@ -64,10 +64,10 @@ def landmarks(
     click.echo("Loading imaging data...")
     # Load data from NWB file
     # Determine whether we're working with an NWB file
-    nwb = True if recording_path.endswith(".nwb") else False
+    nwb = True if path.endswith(".nwb") else False
 
     if nwb:
-        io = NWBHDF5IO(recording_path, "a")
+        io = NWBHDF5IO(path, "a")
         nwbfile = io.read()
 
         session_id = nwbfile.identifier
@@ -75,10 +75,10 @@ def landmarks(
         frames = nwbfile.acquisition["DualChannelImagingSeries"].data
         ts = nwbfile.acquisition["DualChannelImagingSeries"].timestamps
     else:
-        session_id = recording_path.split("/")[-1].replace(".h5", "")
+        session_id = path.split("/")[-1].replace(".h5", "")
 
         # Lazy-load the data into a dask array
-        f_preproc = h5py.File(recording_path)
+        f_preproc = h5py.File(path)
         frames = f_preproc["/frames"]
         ts = f_preproc["/timestamps"]
 
