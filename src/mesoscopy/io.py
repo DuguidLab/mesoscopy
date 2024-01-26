@@ -51,7 +51,9 @@ def read_nwb(
     return nwbfile
 
 
-def write_nwb(path: str, nwbfile: NWBFile, mode: str = "w") -> None:
+def write_nwb(
+    path: str, nwbfile: NWBFile, mode: str = "a", io: NWBHDF5IO = None
+) -> None:
     """Write an NWB file.
 
     Args:
@@ -59,8 +61,10 @@ def write_nwb(path: str, nwbfile: NWBFile, mode: str = "w") -> None:
         nwbfile (NWBFile): NWB file object.
         mode (str, optional): File write mode (i.e. write/append). Defaults to "w".
     """
+    if io:
+        return io.write(nwbfile)
     with NWBHDF5IO(path, mode=mode) as io:
-        io.write(nwbfile)
+        return io.write(nwbfile)
 
 
 def read_h5(path: str) -> h5py.File:
