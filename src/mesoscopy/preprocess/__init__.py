@@ -371,17 +371,7 @@ def bin(array, bins, interim_dir=".", session_id="null"):
         array.shape[2] // (array.shape[2] / bins),
     ).mean(axis=(-1, 1, 3), dtype=np.float32)
     interim_path = interim_dir + os.sep + session_id + "_binned.zarr"
-    return store_interim(binned_array, interim_path)
-
-
-def store_interim(array, interim_path, compute=True, chunks=500):
-    z_interim = zarr.open_array(
-        interim_path,
-        shape=array.shape,
-        dtype=array.dtype,
-        chunks=(chunks, array.shape[1], array.shape[2]),
-    )
-    return array.store(z_interim, return_stored=True, compute=compute)
+    return io.store_interim(binned_array, interim_path)
 
 
 def calc_channel_filters(
@@ -460,7 +450,7 @@ def channel_dff(
     interim_path = (
         interim_dir + os.sep + session_id + "_" + channel_name + "_cumsum.zarr"
     )
-    cumsum_vec = store_interim(cumsum_vec, interim_path)
+    cumsum_vec = io.store_interim(cumsum_vec, interim_path)
 
     f0 = da.true_divide(
         (cumsum_vec[window_width:] - cumsum_vec[:-window_width]),
@@ -469,7 +459,7 @@ def channel_dff(
     )
 
     interim_path = interim_dir + os.sep + session_id + "_" + channel_name + "_f0.zarr"
-    f0 = store_interim(f0, interim_path)
+    f0 = io.store_interim(f0, interim_path)
 
     f0_start = da.mean(f0[: int(window_width / 2)]).compute()
     f0_end = da.mean(f0[-int(window_width / 2) :]).compute()
@@ -491,10 +481,10 @@ def channel_dff(
     interim_path = (
         interim_dir + os.sep + session_id + "_" + channel_name + "_f0_appended.zarr"
     )
-    f0 = store_interim(f0, interim_path)
+    f0 = io.store_interim(f0, interim_path)
 
     dff = da.true_divide(da.subtract(array[channel_filter], f0), f0, dtype=np.float32)
 
     interim_path = interim_dir + os.sep + session_id + "_" + channel_name + "_dff.zarr"
 
-    return store_interim(dff, interim_path)
+    return io.store_interim(dff, interim_path)
