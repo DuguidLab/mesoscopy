@@ -23,19 +23,17 @@
 import os
 import shutil
 import click
-import h5py
 import dask
 import zarr
 
 import time
 
 import mesoscopy.io as io
+import mesoscopy.qa as qa
 
 import numpy as np
 from dask import array as da
-from matplotlib import pyplot as plt
 
-from pynwb import NWBHDF5IO
 from pynwb.image import ImageSeries
 
 
@@ -170,12 +168,12 @@ def preprocess(
     end = time.time()
     click.echo("Channel means calculated in {} s".format(end - start))
 
-    plt.clf()
-    plt.plot(gcamp_mean)
-    plt.plot(isosb_mean)
     outpath = qa_dir + os.sep + session_id + "_qa_channel_means.png"
-    plt.savefig(outpath)
-    click.echo("Saved channel means at {}".format(outpath))
+    qa.plot_lines(
+        [gcamp_mean, isosb_mean],
+        outpath,
+        message="Saved channel means at {}".format(outpath),
+    )
 
     if channel_means_only:
         click.echo("Channel means saved as txt files. Exiting.")
@@ -255,12 +253,12 @@ def preprocess(
     end = time.time()
     click.echo("Channel signal means calculated in {} s".format(end - start))
 
-    plt.clf()
-    plt.plot(gcamp_signal_mean)
-    plt.plot(isosb_signal_mean)
     outpath = qa_dir + os.sep + session_id + "_qa_channel_signal_mean.png"
-    plt.savefig(outpath)
-    click.echo("Saved lineplot for channel signal {}".format(outpath))
+    qa.plot_lines(
+        [gcamp_signal_mean, isosb_signal_mean],
+        outpath,
+        message="Saved lineplot for channel signal {}".format(outpath),
+    )
 
     # Max common index (to avoid array overflow)
     if len(gcamp_mean) != len(isosb_mean):
@@ -284,19 +282,22 @@ def preprocess(
     click.echo("F signal calculated in {} s".format(end - start))
     click.echo("Saved F signal at {}".format(outpath))
 
-    plt.clf()
     outpath = qa_dir + os.sep + session_id + "_qa_f_example.png"
-    plt.imsave(outpath, f_signal[200])
-    click.echo("Saved F example at {}".format(outpath))
+    qa.plot_frame(
+        f_signal[200],
+        outpath,
+        message="Saved F example at {}".format(outpath),
+    )
 
     click.echo("Calculating mean F per frame...")
     f_signal_mean = f_signal.mean(axis=(1, 2)).compute()
 
-    plt.clf()
-    plt.plot(f_signal_mean)
     outpath = qa_dir + os.sep + session_id + "_qa_f_signal_mean.png"
-    plt.savefig(outpath)
-    click.echo("Saved lineplot for F signal {}".format(outpath))
+    qa.plot_line(
+        f_signal_mean,
+        outpath,
+        message="Saved lineplot for F signal {}".format(outpath),
+    )
 
     # Save timestamps
     outpath = out_dir + os.sep + session_id + "_preprocessed.h5"
@@ -398,19 +399,19 @@ def calc_channel_filters(
 
     outpath = qa_dir + os.sep + session_id + "_qa_frame_means_histogram.png"
     msg = "Saved histogram for frame means at {}".format(outpath)
-    plot_hist(frame_means, outpath, message=msg)
+    qa.plot_hist(frame_means, outpath, message=msg)
 
     outpath = qa_dir + os.sep + session_id + "_qa_frame_means_line.png"
     msg = "Saved lineplot for frame means at {}".format(outpath)
-    plot_line(frame_means, outpath, message=msg)
+    qa.plot_line(frame_means, outpath, message=msg)
 
     outpath = qa_dir + os.sep + session_id + "_qa_frame_std_histogram.png"
     msg = "Saved histogram for frame means at {}".format(outpath)
-    plot_hist(frame_stds, outpath, message=msg)
+    qa.plot_hist(frame_stds, outpath, message=msg)
 
     outpath = qa_dir + os.sep + session_id + "_qa_frame_std_line.png"
     msg = "Saved lineplot for frame means at {}".format(outpath)
-    plot_line(frame_stds, outpath, message=msg)
+    qa.plot_line(frame_stds, outpath, message=msg)
 
     threshold = frame_stds.mean()
     gcamp_filter = frame_stds > threshold
@@ -434,17 +435,14 @@ def channel_qa(array, channel_filter, qa_dir=".", session_id="null", channel="nu
         array[channel_filter].max(axis=0),
     )
 
-    plt.clf()
     outpath = qa_dir + os.sep + session_id + "_qa_{}_mean.png".format(channel)
-    plt.imsave(outpath, mean_frame)
+    qa.plot_frame(mean_frame, outpath, message="Saved mean frame at {}".format(outpath))
 
-    plt.clf()
     outpath = qa_dir + os.sep + session_id + "_qa_{}_std.png".format(channel)
-    plt.imsave(outpath, std_frame)
+    qa.plot_frame(std_frame, outpath, message="Saved std frame at {}".format(outpath))
 
-    plt.clf()
     outpath = qa_dir + os.sep + session_id + "_qa_{}_maxip.png".format(channel)
-    plt.imsave(outpath, maxip)
+    qa.plot_frame(maxip, outpath, message="Saved maxip frame at {}".format(outpath))
 
 
 def channel_dff(
@@ -500,20 +498,3 @@ def channel_dff(
     interim_path = interim_dir + os.sep + session_id + "_" + channel_name + "_dff.zarr"
 
     return store_interim(dff, interim_path)
-
-
-def plot_line(array, outpath, message=None):
-    plt.clf()
-    plt.plot(array)
-    plt.savefig(outpath)
-    if message:
-        click.echo(message)
-
-
-def plot_hist(array, outpath, message=None):
-    plt.clf()
-    plt.hist(array)
-    plt.savefig(outpath)
-    if message:
-        click.echo(message)
-    pass
