@@ -109,7 +109,10 @@ def preprocess(
 
     click.echo("Loading data...")
 
-    session_id, d, ts = load_raw(raw_path)
+    # Determine whether we're working with an NWB file
+    nwb = True if raw_path.endswith(".nwb") else False
+
+    session_id, d, ts = load_raw(raw_path, nwb=nwb)
 
     if skip_end:
         skip_end = -skip_end
@@ -310,35 +313,14 @@ def preprocess(
 
     if nwb:
         click.echo("Updating NWB file...")
-        f = h5py.File(outpath, "r")
-
-        deltaF_series = ImageSeries(
-            name="DeltaFSeries",
-            data=f["/data"],
-            timestamps=f["/timestamps"],
-            unit="df/f",
-            description="dF/F widefield cortical imaging series.",
-            comments="This imaging series is corrected for the haemodynamic response.",
-        )
-
-        ophys_module = nwbfile.create_processing_module(
-            name="ophys", description="optical physiology processed data"
-        )
-
-        ophys_module.add(deltaF_series)
-
-        io.write(nwbfile)
-        io.close()
+        update_nwb(raw_path, outpath)
         click.echo("Updated NWB file at {}".format(raw_path))
 
     click.echo("Cleaning up...")
     shutil.rmtree(interim_dir)
 
 
-def load_raw(raw_path):
-    # Determine whether we're working with an NWB file
-    nwb = True if raw_path.endswith(".nwb") else False
-
+def load_raw(raw_path, nwb=False):
     if nwb:
         nwbfile = io.read_nwb(raw_path)
 
@@ -355,6 +337,27 @@ def load_raw(raw_path):
         timestamps = f_raw["/timestamps"]
 
     return session_id, imaging_data, timestamps
+
+
+def update_nwb(nwb_path, h5_path):
+    f = h5py.File(h5_path, "r")
+    with io.read_nwb(nwb_path) as nwbfile:
+        deltaF_series = ImageSeries(
+            name="DeltaFSeries",
+            data=f["/data"],
+            timestamps=f["/timestamps"],
+            unit="df/f",
+            description="dF/F widefield cortical imaging series.",
+            comments="This imaging series is corrected for the haemodynamic response.",
+        )
+
+        ophys_module = nwbfile.create_processing_module(
+            name="ophys", description="optical physiology processed data"
+        )
+
+        ophys_module.add(deltaF_series)
+
+        io.write_nwb(nwb_path, nwbfile)
 
 
 def bin(array, bins, interim_dir=".", session_id="null"):
