@@ -10,7 +10,7 @@ from pynwb import NWBFile, NWBHDF5IO
 
 
 @pytest.fixture(scope="session")
-def clean_nwbfile(tmp_path_factory):
+def nwbfile(tmp_path_factory):
     """Create an NWBFile object for testing."""
     # Create a temporary file
     tmpfile = tmp_path_factory.mktemp("data") / "test.nwb"
