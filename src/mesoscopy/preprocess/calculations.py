@@ -30,17 +30,24 @@ import mesoscopy.io as io
 import mesoscopy.plots as plots
 
 
-def bin(array, bins, interim_dir=".", session_id="null"):
-    """Bin an array.
+def bin_array(
+    array: da.Array | npt.ArrayLike,
+    bins: int,
+    interim_dir: str | os.PathLike = ".",
+    session_id: str = "null",
+) -> zarr.core.Array:
+    """Bin a 3D image array across its x and y axes.
+
+    The function bins the width and height of a 3D image array by a factor of `bins`. It does not bin the z-axis (time).
 
     Args:
-        array (): _description_
-        bins (_type_): _description_
-        interim_dir (str, optional): _description_. Defaults to ".".
-        session_id (str, optional): _description_. Defaults to "null".
+        array (Dask or NumPy Array): Array to be binned.
+        bins (int): Number of bins in x and y directions (i.e. width and height).
+        interim_dir (str or PathLike object, optional): Directory to store interim binned array data. Defaults to current working directory (".").
+        session_id (str, optional): Session identifier for interim path. Defaults to "null".
 
     Returns:
-        _type_: _description_
+        zarr.core.Array: Binned array as a persistent Zarr array object.
     """
     binned_array = array.reshape(
         array.shape[0],
