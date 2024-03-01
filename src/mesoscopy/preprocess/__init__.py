@@ -30,6 +30,7 @@ import time
 
 import mesoscopy.io as io
 import mesoscopy.plots as plots
+import mesoscopy.preprocess.calculations as calc
 
 import numpy as np
 from dask import array as da
@@ -110,7 +111,7 @@ def preprocess(
     # Determine whether we're working with an NWB file
     nwb = True if raw_path.endswith(".nwb") else False
 
-    session_id, d, ts = load_raw(raw_path, nwb=nwb)
+    session_id, d, ts = _load_raw(raw_path, nwb=nwb)
 
     if skip_end:
         skip_end = -skip_end
@@ -134,7 +135,7 @@ def preprocess(
         )
     )
     start = time.time()
-    binned_frames = bin(
+    binned_frames = calc.bin_array(
         raw_frames, bins=bins, interim_dir=interim_dir, session_id=session_id
     )
     end = time.time()
@@ -146,7 +147,7 @@ def preprocess(
     # Get the global mean and std values for each frame
     click.echo("Calculating frame means & standard deviations...")
     start = time.time()
-    gcamp_filter, isosb_filter = calc_channel_filters(
+    gcamp_filter, isosb_filter = calc.separate_channels(
         binned_frames,
         session_id=session_id,
         use_means=use_means,
@@ -182,7 +183,7 @@ def preprocess(
     # Generate the mean gcamp frame and its std
     click.echo("Generating mean gcamp frame and its maximum intensity projection...")
     start = time.time()
-    channel_qa(
+    _channel_qa(
         binned_frames,
         gcamp_filter,
         qa_dir=qa_dir,
@@ -201,7 +202,7 @@ def preprocess(
         "Generating mean isosbestic frame and its maximum intensity projection..."
     )
     start = time.time()
-    channel_qa(
+    _channel_qa(
         binned_frames,
         isosb_filter,
         qa_dir=qa_dir,
@@ -221,7 +222,7 @@ def preprocess(
 
     click.echo("Calculating ∂F for the gcamp channel...")
     start = time.time()
-    gcamp_dff = channel_dff(
+    gcamp_dff = calc.channel_dff(
         binned_frames,
         gcamp_filter,
         window_width,
@@ -234,7 +235,7 @@ def preprocess(
 
     click.echo("Calculating ∂F for the isosb channel...")
     start = time.time()
-    isosb_dff = channel_dff(
+    isosb_dff = calc.channel_dff(
         binned_frames,
         isosb_filter,
         window_width,
@@ -314,14 +315,14 @@ def preprocess(
 
     if nwb:
         click.echo("Updating NWB file...")
-        update_nwb(raw_path, outpath)
+        _update_nwb(raw_path, outpath)
         click.echo("Updated NWB file at {}".format(raw_path))
 
     click.echo("Cleaning up...")
     shutil.rmtree(interim_dir)
 
 
-def load_raw(raw_path, nwb=False):
+def _load_raw(raw_path, nwb=False):
     if nwb:
         nwbfile = io.read_nwb(raw_path)
 
@@ -340,7 +341,7 @@ def load_raw(raw_path, nwb=False):
     return session_id, imaging_data, timestamps
 
 
-def update_nwb(nwb_path, h5_path):
+def _update_nwb(nwb_path, h5_path):
     f = io.read_h5(h5_path)
     nwbfile, nwbio = io.read_nwb(nwb_path, return_io=True)
     deltaF_series = ImageSeries(
@@ -361,64 +362,7 @@ def update_nwb(nwb_path, h5_path):
     io.write_nwb(nwb_path, nwbfile, io=nwbio)
 
 
-def bin(array, bins, interim_dir=".", session_id="null"):
-    binned_array = array.reshape(
-        array.shape[0],
-        1,
-        array.shape[1] / bins,
-        array.shape[1] // (array.shape[1] / bins),
-        array.shape[2] / bins,
-        array.shape[2] // (array.shape[2] / bins),
-    ).mean(axis=(-1, 1, 3), dtype=np.float32)
-    interim_path = interim_dir + os.sep + session_id + "_binned.zarr"
-    return io.store_interim(binned_array, interim_path)
-
-
-def calc_channel_filters(
-    array,
-    qa_dir=".",
-    session_id="null",
-    use_means=False,
-    flip_channels=False,
-    interim_dir=None,
-):
-    frame_means, frame_stds = dask.compute(
-        array.mean(axis=(1, 2), dtype=np.float32),
-        array.std(axis=(1, 2), dtype=np.float32),
-    )
-
-    outpath = qa_dir + os.sep + session_id + "_qa_frame_means_histogram.png"
-    msg = "Saved histogram for frame means at {}".format(outpath)
-    plots.plot_hist(frame_means, outpath, message=msg)
-
-    outpath = qa_dir + os.sep + session_id + "_qa_frame_means_line.png"
-    msg = "Saved lineplot for frame means at {}".format(outpath)
-    plots.plot_line(frame_means, outpath, message=msg)
-
-    outpath = qa_dir + os.sep + session_id + "_qa_frame_std_histogram.png"
-    msg = "Saved histogram for frame means at {}".format(outpath)
-    plots.plot_hist(frame_stds, outpath, message=msg)
-
-    outpath = qa_dir + os.sep + session_id + "_qa_frame_std_line.png"
-    msg = "Saved lineplot for frame means at {}".format(outpath)
-    plots.plot_line(frame_stds, outpath, message=msg)
-
-    threshold = frame_stds.mean()
-    gcamp_filter = frame_stds > threshold
-    isosb_filter = frame_stds < threshold
-
-    if use_means:
-        threshold = frame_means.mean()
-        gcamp_filter = frame_means > threshold
-        isosb_filter = frame_means < threshold
-
-    if flip_channels:
-        return isosb_filter, gcamp_filter
-
-    return gcamp_filter, isosb_filter
-
-
-def channel_qa(array, channel_filter, qa_dir=".", session_id="null", channel="null"):
+def _channel_qa(array, channel_filter, qa_dir=".", session_id="null", channel="null"):
     mean_frame, std_frame, maxip = dask.compute(
         array[channel_filter].mean(axis=0),
         array[channel_filter].std(axis=0),
@@ -437,58 +381,3 @@ def channel_qa(array, channel_filter, qa_dir=".", session_id="null", channel="nu
 
     outpath = qa_dir + os.sep + session_id + "_qa_{}_maxip.png".format(channel)
     plots.plot_frame(maxip, outpath, message="Saved maxip frame at {}".format(outpath))
-
-
-def channel_dff(
-    array,
-    channel_filter,
-    window_width,
-    channel_name="null",
-    interim_dir=".",
-    session_id="null",
-):
-    cumsum_vec = da.cumsum(
-        da.insert(array[channel_filter], 0, 0, axis=0), dtype=np.uint32, axis=0
-    )
-
-    interim_path = (
-        interim_dir + os.sep + session_id + "_" + channel_name + "_cumsum.zarr"
-    )
-    cumsum_vec = io.store_interim(cumsum_vec, interim_path)
-
-    f0 = da.true_divide(
-        (cumsum_vec[window_width:] - cumsum_vec[:-window_width]),
-        window_width,
-        dtype=np.float32,
-    )
-
-    interim_path = interim_dir + os.sep + session_id + "_" + channel_name + "_f0.zarr"
-    f0 = io.store_interim(f0, interim_path)
-
-    f0_start = da.mean(f0[: int(window_width / 2)]).compute()
-    f0_end = da.mean(f0[-int(window_width / 2) :]).compute()
-
-    f0 = da.insert(
-        f0,
-        da.arange(0, int(window_width / 2) - 1),
-        f0_start,
-        axis=0,
-    )
-
-    f0 = da.insert(
-        f0,
-        da.arange(f0.shape[0] - int(window_width / 2), f0.shape[0]),
-        f0_end,
-        axis=0,
-    )
-
-    interim_path = (
-        interim_dir + os.sep + session_id + "_" + channel_name + "_f0_appended.zarr"
-    )
-    f0 = io.store_interim(f0, interim_path)
-
-    dff = da.true_divide(da.subtract(array[channel_filter], f0), f0, dtype=np.float32)
-
-    interim_path = interim_dir + os.sep + session_id + "_" + channel_name + "_dff.zarr"
-
-    return io.store_interim(dff, interim_path)
