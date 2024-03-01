@@ -31,9 +31,9 @@ import mesoscopy.plots as plots
 
 
 def bin_array(
-    array: da.Array | npt.ArrayLike,
+    array: da.Array | npt.NDArray,
     bins: int,
-    interim_dir: str | os.PathLike = ".",
+    interim_dir: str = ".",
     session_id: str = "null",
 ) -> zarr.core.Array:
     """Bin a 3D image array across its x and y axes.
@@ -52,18 +52,18 @@ def bin_array(
     binned_array = array.reshape(
         array.shape[0],
         1,
-        array.shape[1] / bins,
-        array.shape[1] // (array.shape[1] / bins),
-        array.shape[2] / bins,
-        array.shape[2] // (array.shape[2] / bins),
+        int(array.shape[1] / bins),
+        int(array.shape[1] // (array.shape[1] / bins)),
+        int(array.shape[2] / bins),
+        int(array.shape[2] // (array.shape[2] / bins)),
     ).mean(axis=(-1, 1, 3), dtype=np.float32)
     interim_path = f"{interim_dir}{os.sep}{session_id}_binned"
     return io.store_interim(binned_array, interim_path)
 
 
 def separate_channels(
-    array: da.Array | npt.ArrayLike,
-    qa_dir: str | os.PathLike = ".",
+    array: da.Array | npt.NDArray,
+    qa_dir: str = ".",
     session_id: str = "null",
     use_means: bool = False,
     flip_channels: bool = False,
@@ -117,7 +117,7 @@ def separate_channels(
 
 
 def channel_dff(
-    array: da.Array | npt.ArrayLike,
+    array: da.Array | npt.NDArray,
     channel_filter: list,
     window_width: int = 750,
     channel_name: str = "null",
