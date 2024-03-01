@@ -62,12 +62,24 @@ def bin_array(
 
 
 def separate_channels(
-    array,
-    qa_dir=".",
-    session_id="null",
-    use_means=False,
-    flip_channels=False,
-):
+    array: da.Array | npt.ArrayLike,
+    qa_dir: str | os.PathLike = ".",
+    session_id: str = "null",
+    use_means: bool = False,
+    flip_channels: bool = False,
+) -> tuple[list, list]:
+    """Separate channels in a mixed-channel array.
+
+    Args:
+        array (Dask or NumPy Array): Array to be separated.
+        qa_dir (str or PathLike object, optional): Directory to store QA plots. Defaults to current working directory (".").
+        session_id (str, optional): Session identifier for interim path. Defaults to "null".
+        use_means (bool, optional): Use means instead of standard deviations for filtering. Defaults to False.
+        flip_channels (bool, optional): Flip the channels. Defaults to False.
+
+    Returns:
+        tuple[list, list]: Tuple of two lists, containing the frame indices for each channel.
+    """
     frame_means, frame_stds = dask.compute(
         array.mean(axis=(1, 2), dtype=np.float32),
         array.std(axis=(1, 2), dtype=np.float32),
@@ -115,15 +127,15 @@ def channel_dff(
     """Calculate dF/F for a channel in a mixed-channel array.
 
     Args:
-        array (_type_): _description_
-        channel_filter (_type_): _description_
-        window_width (int, optional): _description_. Defaults to 750.
-        channel_name (str, optional): _description_. Defaults to "null".
-        interim_dir (str, optional): _description_. Defaults to ".".
-        session_id (str, optional): _description_. Defaults to "null".
+        array (Dask or NumPy Array): Array to be separated.
+        channel_filter (list): List of frame indices for the channel.
+        window_width (int, optional): Window width for dF/F calculation. Defaults to 750.
+        channel_name (str, optional): Channel name for interim path. Defaults to "null".
+        interim_dir (str, optional): Directory to store interim dF/F data. Defaults to current working directory (".").
+        session_id (str, optional): Session identifier for interim path. Defaults to "null".
 
     Returns:
-        _type_: _description_
+        zarr.core.Array: dF/F array as a persistent Zarr array object.
     """
     cumsum_vec = da.cumsum(
         da.insert(array[channel_filter], 0, 0, axis=0), dtype=np.uint32, axis=0
