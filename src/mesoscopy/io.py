@@ -93,13 +93,16 @@ def store_interim(
 
     Args:
         array (Dask or Numpy Array): Dask or Numpy array to persist on disk.
-        interim_path (str): Path to the interim Zarr file.
+        interim_path (str): Path to the interim Zarr file. The .zarr extension is added automatically.
         compute (bool, optional): Whether to compute the array before storing, applies only to Dask arrays. Defaults to True.
         chunks (int, optional): Chunk size for the Zarr file. Defaults to 500.
 
     Returns:
         Zarr Array: Persistent Zarr array object
     """
+    if not interim_path.endswith(".zarr"):
+        interim_path += ".zarr"
+
     if isinstance(array, da.Array):
         z_interim = zarr.open_array(
             interim_path,
