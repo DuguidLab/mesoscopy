@@ -57,7 +57,7 @@ def bin_array(
         array.shape[2] / bins,
         array.shape[2] // (array.shape[2] / bins),
     ).mean(axis=(-1, 1, 3), dtype=np.float32)
-    interim_path = interim_dir + os.sep + session_id + "_binned"
+    interim_path = f"{interim_dir}{os.sep}{session_id}_binned"
     return io.store_interim(binned_array, interim_path)
 
 
