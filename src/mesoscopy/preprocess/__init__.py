@@ -29,7 +29,7 @@ import zarr
 import time
 
 import mesoscopy.io as io
-import mesoscopy.qa as qa
+import mesoscopy.plots as plots
 
 import numpy as np
 from dask import array as da
@@ -169,7 +169,7 @@ def preprocess(
     click.echo("Channel means calculated in {} s".format(end - start))
 
     outpath = qa_dir + os.sep + session_id + "_qa_channel_means.png"
-    qa.plot_lines(
+    plots.plot_lines(
         [gcamp_mean, isosb_mean],
         outpath,
         message="Saved channel means at {}".format(outpath),
@@ -254,7 +254,7 @@ def preprocess(
     click.echo("Channel signal means calculated in {} s".format(end - start))
 
     outpath = qa_dir + os.sep + session_id + "_qa_channel_signal_mean.png"
-    qa.plot_lines(
+    plots.plot_lines(
         [gcamp_signal_mean, isosb_signal_mean],
         outpath,
         message="Saved lineplot for channel signal {}".format(outpath),
@@ -283,7 +283,7 @@ def preprocess(
     click.echo("Saved F signal at {}".format(outpath))
 
     outpath = qa_dir + os.sep + session_id + "_qa_f_example.png"
-    qa.plot_frame(
+    plots.plot_frame(
         f_signal[200],
         outpath,
         message="Saved F example at {}".format(outpath),
@@ -293,7 +293,7 @@ def preprocess(
     f_signal_mean = f_signal.mean(axis=(1, 2)).compute()
 
     outpath = qa_dir + os.sep + session_id + "_qa_f_signal_mean.png"
-    qa.plot_line(
+    plots.plot_line(
         f_signal_mean,
         outpath,
         message="Saved lineplot for F signal {}".format(outpath),
@@ -389,19 +389,19 @@ def calc_channel_filters(
 
     outpath = qa_dir + os.sep + session_id + "_qa_frame_means_histogram.png"
     msg = "Saved histogram for frame means at {}".format(outpath)
-    qa.plot_hist(frame_means, outpath, message=msg)
+    plots.plot_hist(frame_means, outpath, message=msg)
 
     outpath = qa_dir + os.sep + session_id + "_qa_frame_means_line.png"
     msg = "Saved lineplot for frame means at {}".format(outpath)
-    qa.plot_line(frame_means, outpath, message=msg)
+    plots.plot_line(frame_means, outpath, message=msg)
 
     outpath = qa_dir + os.sep + session_id + "_qa_frame_std_histogram.png"
     msg = "Saved histogram for frame means at {}".format(outpath)
-    qa.plot_hist(frame_stds, outpath, message=msg)
+    plots.plot_hist(frame_stds, outpath, message=msg)
 
     outpath = qa_dir + os.sep + session_id + "_qa_frame_std_line.png"
     msg = "Saved lineplot for frame means at {}".format(outpath)
-    qa.plot_line(frame_stds, outpath, message=msg)
+    plots.plot_line(frame_stds, outpath, message=msg)
 
     threshold = frame_stds.mean()
     gcamp_filter = frame_stds > threshold
@@ -426,13 +426,17 @@ def channel_qa(array, channel_filter, qa_dir=".", session_id="null", channel="nu
     )
 
     outpath = qa_dir + os.sep + session_id + "_qa_{}_mean.png".format(channel)
-    qa.plot_frame(mean_frame, outpath, message="Saved mean frame at {}".format(outpath))
+    plots.plot_frame(
+        mean_frame, outpath, message="Saved mean frame at {}".format(outpath)
+    )
 
     outpath = qa_dir + os.sep + session_id + "_qa_{}_std.png".format(channel)
-    qa.plot_frame(std_frame, outpath, message="Saved std frame at {}".format(outpath))
+    plots.plot_frame(
+        std_frame, outpath, message="Saved std frame at {}".format(outpath)
+    )
 
     outpath = qa_dir + os.sep + session_id + "_qa_{}_maxip.png".format(channel)
-    qa.plot_frame(maxip, outpath, message="Saved maxip frame at {}".format(outpath))
+    plots.plot_frame(maxip, outpath, message="Saved maxip frame at {}".format(outpath))
 
 
 def channel_dff(
