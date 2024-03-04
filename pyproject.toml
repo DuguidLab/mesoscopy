@@ -36,6 +36,7 @@ dependencies = [
     "xmltodict", 
     "scikit-image", 
     "pandas", 
+    "pynwb>=2.3.1"
 ]
 dynamic = ["version"]
 
@@ -61,7 +62,6 @@ path = "src/mesoscopy/__about__.py"
 
 [tool.hatch.envs.default]
 python = "3.9"
-
 
 [tool.hatch.envs.test]
 dependencies = [

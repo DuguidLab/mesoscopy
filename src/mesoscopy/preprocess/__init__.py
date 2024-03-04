@@ -33,6 +33,9 @@ import numpy as np
 from dask import array as da
 from matplotlib import pyplot as plt
 
+from pynwb import NWBHDF5IO
+from pynwb.image import ImageSeries
+
 
 @click.command()
 @click.argument("raw_path", type=click.Path(exists=True))
@@ -95,7 +98,6 @@ def preprocess(
 
     preprocessing_start = time.time()
 
-    session_id = raw_path.split("/")[-1].replace(".h5", "")
     os.makedirs(out_dir, exist_ok=True)
 
     qa_dir = out_dir + os.sep + "qa"
@@ -105,17 +107,31 @@ def preprocess(
 
     click.echo("Loading data...")
 
-    # Lazy-load the data into a dask array
-    f = h5py.File(raw_path)
-    d = f["/frames"]
-    ts = f["/timestamps"]
+    # Determine whether we're working with an NWB file
+    nwb = True if raw_path.endswith(".nwb") else False
+
+    if nwb:
+        io = NWBHDF5IO(raw_path, "a")
+        nwbfile = io.read()
+
+        session_id = nwbfile.identifier
+
+        d = nwbfile.acquisition["DualChannelImagingSeries"].data
+        ts = nwbfile.acquisition["DualChannelImagingSeries"].timestamps
+    else:
+        session_id = raw_path.split("/")[-1].replace(".h5", "")
+
+        # Lazy-load the data into a dask array
+        f_raw = h5py.File(raw_path)
+        d = f_raw["/frames"]
+        ts = f_raw["/timestamps"]
 
     if skip_end:
         skip_end = -skip_end
 
     if skip_start or skip_end:
-        d = f["/frames"][skip_start:skip_end]
-        ts = f["/timestamps"][skip_start:skip_end]
+        d = d[skip_start:skip_end]
+        ts = ts[skip_start:skip_end]
 
     raw_frames = da.from_array(d, chunks="auto")
     if chunks > 0:
@@ -275,7 +291,7 @@ def preprocess(
 
     outpath = out_dir + os.sep + session_id + "_preprocessed.h5"
     start = time.time()
-    da.to_hdf5(outpath, "/F", f_signal, compression="lzf")
+    da.to_hdf5(outpath, "/data", f_signal, compression="lzf")
     end = time.time()
     click.echo("F signal calculated in {} s".format(end - start))
     click.echo("Saved F signal at {}".format(outpath))
@@ -298,7 +314,7 @@ def preprocess(
     outpath = out_dir + os.sep + session_id + "_preprocessed.h5"
     click.echo("Appending timestamps to {}".format(outpath))
     timestamps = da.from_array(ts[gcamp_filter], chunks="auto")
-    da.to_hdf5(outpath, "/ts", timestamps)
+    da.to_hdf5(outpath, "/timestamps", timestamps)
 
     preprocessing_end = time.time()
     click.echo(
@@ -307,6 +323,30 @@ def preprocess(
         )
     )
 
+    if nwb:
+        click.echo("Updating NWB file...")
+        f = h5py.File(outpath, "r")
+
+        deltaF_series = ImageSeries(
+            name="DeltaFSeries",
+            data=f["/data"],
+            timestamps=f["/timestamps"],
+            unit="df/f",
+            description="dF/F widefield cortical imaging series.",
+            comments="This imaging series is corrected for the haemodynamic response.",
+        )
+
+        ophys_module = nwbfile.create_processing_module(
+            name="ophys", description="optical physiology processed data"
+        )
+
+        ophys_module.add(deltaF_series)
+
+        io.write(nwbfile)
+        io.close()
+        click.echo("Updated NWB file at {}".format(raw_path))
+
+    click.echo("Cleaning up...")
     shutil.rmtree(interim_dir)
 
 
