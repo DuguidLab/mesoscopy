@@ -27,13 +27,12 @@ import h5py
 
 import time
 
-import matplotlib.pyplot as plt
 from skimage import transform as trf
 
 import mesoscopy.io as io
 import mesoscopy.plots as plots
 
-from pynwb import NWBHDF5IO, TimeSeries
+from pynwb import TimeSeries
 from pynwb.image import ImageSeries
 from pynwb.ophys import CorrectedImageStack
 
@@ -46,14 +45,23 @@ from pynwb.ophys import CorrectedImageStack
 @click.option("--crop-x", default=0, help="Crop recording along the x-axis.")
 @click.option("--crop-y", default=0, help="Crop recording along the y-axis.")
 def register(
-    path,
-    out_dir,
-    recording_points,
-    template_points,
-    crop_x=0,
-    crop_y=0,
-):
-    """Register a recording to a template."""
+    path: str,
+    out_dir: str,
+    recording_points: str,
+    template_points: str,
+    crop_x: int = 0,
+    crop_y: int = 0,
+) -> None:
+    """Register a recording to a template.
+
+    Args:
+        path (str): Path to preprocessed recording HDF5 or NWB file.
+        out_dir (str): Output directory for registered recording.
+        recording_points (str): Path to recording landmark points in Fiji XML points format.
+        template_points (str): Path to template landmark points in Fiji XML points format.
+        crop_x (int, optional): Number of pixels to crop from the x-axis of the recording. Defaults to 0.
+        crop_y (int, optional): Number of pixels to crop from the y-axis of the recording. Defaults to 0.
+    """
     click.echo("Registering recording {} to template.".format(path))
 
     registration_start = time.time()
@@ -144,7 +152,18 @@ def register(
         click.echo("Updated NWB file at {}".format(path))
 
 
-def _load_preprocessed(path, nwb=False):
+def _load_preprocessed(
+    path: str, nwb: bool = False
+) -> tuple[str, np.ndarray, np.ndarray]:
+    """Load preprocessed data from an HDF5 or NWB file.
+
+    Args:
+        path (str): Path to the preprocessed file.
+        nwb (bool, optional): Whether the file is an NWB file. Defaults to False.
+
+    Returns:
+        tuple[str, np.ndarray, np.ndarray]: Session identifier, dF/F series, and timestamps.
+    """
     if nwb:
         nwbfile = io.read_nwb(path)
         session_id = nwbfile.identifier
@@ -159,7 +178,15 @@ def _load_preprocessed(path, nwb=False):
     return session_id, deltaf_series, timestamps
 
 
-def _get_landmarks(points_path):
+def _get_landmarks(points_path: str) -> np.ndarray:
+    """Load landmark points from a Fiji XML points file.
+
+    Args:
+        points_path (str): Path to the points file.
+
+    Returns:
+        np.ndarray: Array of landmark points.
+    """
     with open(points_path, "r") as fp:
         pts = xmltodict.parse(fp.read())
         pts = OrderedDict(
@@ -172,7 +199,16 @@ def _get_landmarks(points_path):
     return np.array(list(pts.values()), dtype=np.float32)
 
 
-def _update_nwb(nwb_path, h5_path, tform_params):
+def _update_nwb(nwb_path: str, h5_path: str, tform_params: np.ndarray) -> None:
+    """Update an NWB file with registered imaging data stored in an HDF5 file.
+
+    Creates a link between the NWB file and the HDF5 file. See https://pynwb.readthedocs.io/en/stable/tutorials/advanced_io/linking_data.html.
+
+    Args:
+        nwb_path (str): Path to the NWB file.
+        h5_path (str): Path to the HDF5 file containing the registered images.
+        tform_params (np.ndarray): Affine transformation parameters.
+    """
     nwbfile = io.read_nwb(nwb_path)
     f = h5py.File(h5_path, "r")
 
