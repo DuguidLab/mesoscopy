@@ -82,8 +82,8 @@ def register(
         ts = f_preproc["/timestamps"]
 
     click.echo("Loading landmarks...")
-    template_landmarks = get_landmarks(template_points)
-    recording_landmarks = get_landmarks(recording_points)
+    template_landmarks = _get_landmarks(template_points)
+    recording_landmarks = _get_landmarks(recording_points)
 
     plt.clf()
     plt.scatter(template_landmarks[:, 0], template_landmarks[:, 1], color="darkorange")
@@ -218,7 +218,7 @@ def register(
     f.close()
 
 
-def get_landmarks(points_path):
+def _get_landmarks(points_path):
     with open(points_path, "r") as fp:
         pts = xmltodict.parse(fp.read())
         pts = OrderedDict(
