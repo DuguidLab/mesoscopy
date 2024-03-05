@@ -10,6 +10,11 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 - Preprocessing and registration accept NWB file as input and update at end of processing. Stand-alone HDF5 files are still supported.
 - Major API refactoring, to break up large `__init__` files and create a more consistent interface.
 
+### Removed
+
+- Removed `landmarks` subcommand; the parent `register` command now does the same thing.
+- Removed average image generation from `register` command (previously under now removed `utils` module).
+
 ## [0.1.0] - 2023-03-24
 
 Line-in-the-sand release, with all the imaging processing code I used for my thesis.
