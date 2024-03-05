@@ -18,6 +18,7 @@
 #  IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
+import typing
 
 import h5py
 import zarr
@@ -25,14 +26,22 @@ import zarr
 import numpy.typing as npt
 from dask import array as da
 
-from typing import Tuple
-
 from pynwb import NWBHDF5IO, NWBFile
+
+
+@typing.overload
+def read_nwb(path: str, mode: str = "a") -> NWBFile: ...
+
+
+@typing.overload
+def read_nwb(
+    path: str, mode: str = "a", return_io: bool = True
+) -> typing.Tuple[NWBFile, NWBHDF5IO]: ...
 
 
 def read_nwb(
     path: str, mode: str = "a", return_io: bool = False
-) -> NWBFile | Tuple[NWBFile, NWBHDF5IO]:
+) -> NWBFile | typing.Tuple[NWBFile, NWBHDF5IO]:
     """Read an NWB file.
 
     Args:
