@@ -74,28 +74,16 @@ def register(
     template_landmarks = _get_landmarks(template_points)
     recording_landmarks = _get_landmarks(recording_points)
 
-    plt.clf()
-    plt.scatter(template_landmarks[:, 0], template_landmarks[:, 1], color="darkorange")
-    plt.scatter(recording_landmarks[:, 0], recording_landmarks[:, 1], color="purple")
-    plt.xlim(0, deltaf_series.shape[2])
-    plt.ylim(deltaf_series.shape[1], 0)
-    plt.legend(["template", "recording"])
-    outpath = (
-        qa_dir + os.sep + session_id + "_qa_registration_unregistered-landmarks.png"
+    plots.plot_scatters(
+        xs=[template_landmarks[:, 0], recording_landmarks[:, 0]],
+        ys=[template_landmarks[:, 1], recording_landmarks[:, 1]],
+        outpath=qa_dir
+        + os.sep
+        + session_id
+        + "_qa_registration_unregistered-landmarks.png",
+        labels=["template", "recording"],
+        message="Saved scatter of unregistered landmarks.",
     )
-    plt.savefig(outpath)
-    click.echo("Saved scatter of unregistered landmarks at {}".format(outpath))
-
-    plt.clf()
-    plt.imshow(deltaf_series[100])
-    plt.scatter(
-        recording_landmarks[:, 0],
-        recording_landmarks[:, 1],
-        color="purple",
-    )
-    outpath = qa_dir + os.sep + session_id + "_qa_registration_unregistered-frame.png"
-    plt.savefig(outpath)
-    click.echo("Saved frame overlay of unregistered landmarks at {}".format(outpath))
 
     click.echo("Estimating transform...")
     start = time.time()
@@ -103,19 +91,16 @@ def register(
     end = time.time()
     click.echo("Transform estimated in {} s".format(end - start))
 
-    plt.clf()
-    plt.scatter(template_landmarks[:, 0], template_landmarks[:, 1], color="darkorange")
-    plt.scatter(
-        tform.inverse(recording_landmarks)[:, 0],
-        tform.inverse(recording_landmarks)[:, 1],
-        color="green",
+    plots.plot_scatters(
+        xs=[template_landmarks[:, 0], tform.inverse(recording_landmarks)[:, 0]],
+        ys=[template_landmarks[:, 1], tform.inverse(recording_landmarks)[:, 1]],
+        outpath=qa_dir
+        + os.sep
+        + session_id
+        + "_qa_registration_registered-landmarks.png",
+        labels=["template", "registered"],
+        message="Saved scatter of registered landmarks.",
     )
-    plt.xlim(0, deltaf_series.shape[2])
-    plt.ylim(deltaf_series.shape[1], 0)
-    plt.legend(["template", "registered"])
-    outpath = qa_dir + os.sep + session_id + "_qa_registration_registered-landmarks.png"
-    plt.savefig(outpath)
-    click.echo("Saved scatter of registered landmarks at {}".format(outpath))
 
     start = time.time()
     warped = []
@@ -133,20 +118,11 @@ def register(
     end = time.time()
     click.echo("Session registered in {} s".format(end - start))
 
-    plt.clf()
-    plt.imshow(warped[100])
-    plt.scatter(template_landmarks[:, 0], template_landmarks[:, 1], color="darkorange")
-    plt.scatter(
-        tform.inverse(recording_landmarks)[:, 0],
-        tform.inverse(recording_landmarks)[:, 1],
-        color="green",
+    plots.plot_frame(
+        warped[100],
+        outpath=qa_dir + os.sep + session_id + "_qa_registration_registered-frame.png",
+        message="Saved frame of registered session.",
     )
-    plt.xlim(0, warped.shape[2])
-    plt.ylim(warped.shape[1], 0)
-    plt.legend(["template", "registered"])
-    outpath = qa_dir + os.sep + session_id + "_qa_registration_registered-frame.png"
-    plt.savefig(outpath)
-    click.echo("Saved frame overlay of registered landmarks at {}".format(outpath))
 
     # Save warped frames and timestamps
     outpath = out_dir + os.sep + session_id + "-registered.h5"
@@ -163,7 +139,6 @@ def register(
     )
 
     if nwb:
-        click.echo("Updating NWB file...")
         click.echo("Updating NWB file...")
         f = h5py.File(outpath, "r")
 
