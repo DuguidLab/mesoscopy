@@ -21,6 +21,7 @@
 
 """Preprocessing submodule."""
 import os
+import typing
 import shutil
 import click
 import dask
@@ -82,8 +83,8 @@ def preprocess(
     use_means: bool = False,
     flip_channels: bool = False,
     interim_dir: str = "interim/",
-    skip_start: int = None,
-    skip_end: int = None,
+    skip_start: typing.Optional[int] = None,
+    skip_end: typing.Optional[int] = None,
 ) -> None:
     """Preprocessing to extract deltaF from a single session dual-channel mixed recording.
 
