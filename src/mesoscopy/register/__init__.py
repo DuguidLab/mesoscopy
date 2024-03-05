@@ -181,7 +181,7 @@ def _update_nwb(nwb_path, h5_path, tform_params):
             name="ophys", description="optical physiology processed data"
         )
     except ValueError:
-        print("Processing module already exists...")
+        click.echo("Processing module already exists...")
         ophys_module = nwbfile.processing["ophys"]
 
     registered_series = ImageSeries(
@@ -210,6 +210,6 @@ def _update_nwb(nwb_path, h5_path, tform_params):
 
     ophys_module.add(corrected_image_stack)
 
-    print("Writing to file...")
+    click.echo("Writing to file...")
     io.write(nwbfile)
     io.close()
