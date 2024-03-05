@@ -11,6 +11,10 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 - Major API refactoring, to break up large `__init__` files and create a more consistent interface.
 - Non-command entries to `__init__` files are now marked as private.
 
+### Fixed
+
+- Registration uses DeltaF series instead of raw fluorescence series for registration when reading from NWB.
+
 ### Removed
 
 - Removed `landmarks` subcommand; the parent `register` command now does the same thing.
@@ -21,5 +25,3 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 Line-in-the-sand release, with all the imaging processing code I used for my thesis.
 
 Not necessarily fit for public consumption, but here it is anyway.
-
-### Added
