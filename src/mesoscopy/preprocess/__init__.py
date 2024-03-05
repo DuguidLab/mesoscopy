@@ -73,27 +73,35 @@ from pynwb.image import ImageSeries
     help="Number of frames to skip at the end of the recording.",
 )
 def preprocess(
-    raw_path,
-    out_dir,
-    chunks=100,
-    crop=0,
-    bins=2,
-    channel_means_only=False,
-    use_means=False,
-    flip_channels=False,
-    interim_dir="interim/",
-    skip_start=None,
-    skip_end=None,
-):
-    """Preprocessing to extract deltaF from a single session.
+    raw_path: str,
+    out_dir: str,
+    chunks: int = 100,
+    crop: int = 0,
+    bins: int = 2,
+    channel_means_only: bool = False,
+    use_means: bool = False,
+    flip_channels: bool = False,
+    interim_dir: str = "interim/",
+    skip_start: int = None,
+    skip_end: int = None,
+) -> None:
+    """Preprocessing to extract deltaF from a single session dual-channel mixed recording.
 
     Preprocessing separates the two channels, applies the haemodynamic correction,
     and extracts the delta F signal.
 
     Args:
-        raw_path: Path to raw HDF5 file
-        out_dir: Path to output directory for preprocessed data. This directory doesn't have to exist.
-
+        raw_path (str): Path to the raw recording HDF5 or NWB file.
+        out_dir (str): Path to the output directory.
+        chunks (int, optional): Number of chunks to load in memory. Defaults to 100.
+        crop (int, optional): Number of pixels to crop from the edges of the recording. Defaults to 0.
+        bins (int, optional): Recording pixel binning factor. Defaults to 2.
+        channel_means_only (bool, optional): Extract the channel means and exit without extracting a delta F series. Defaults to False.
+        use_means (bool, optional): Use means histogram instead of standard deviation to separate channels. Defaults to False.
+        flip_channels (bool, optional): Flip extracted channel order. Defaults to False.
+        interim_dir (str, optional): Path to the interim directory. Defaults to "interim/".
+        skip_start (int, optional): Number of frames to skip at the start of the recording. Defaults to None.
+        skip_end (int, optional): Number of frames to skip at the end of the recording. Defaults to None.
     """
     click.echo("Preprocessing file {}.".format(raw_path))
 
@@ -322,7 +330,18 @@ def preprocess(
     shutil.rmtree(interim_dir)
 
 
-def _load_raw(raw_path, nwb=False):
+def _load_raw(
+    raw_path: str, nwb: bool = False
+) -> tuple[str, da.Array | np.ndarray, da.Array | np.ndarray]:
+    """Load raw imaging data from an HDF5 or NWB file.
+
+    Args:
+        raw_path (str): Path to the raw recording HDF5 or NWB file.
+        nwb (bool, optional): Whether the file is an NWB file. Defaults to False.
+
+    Returns:
+        tuple[str, da.Array | np.ndarray, da.Array | np.ndarray]: Session ID, imaging data, and timestamps.
+    """
     if nwb:
         nwbfile = io.read_nwb(raw_path)
 
@@ -341,7 +360,15 @@ def _load_raw(raw_path, nwb=False):
     return session_id, imaging_data, timestamps
 
 
-def _update_nwb(nwb_path, h5_path):
+def _update_nwb(nwb_path: str, h5_path: str) -> None:
+    """Update an NWB file with a delta F imaging series stored in an HDF5 file.
+
+    Creates a link between the NWB file and the HDF5 file. See https://pynwb.readthedocs.io/en/stable/tutorials/advanced_io/linking_data.html.
+
+    Args:
+        nwb_path (str): Path to NWB file.
+        h5_path (str): Path to HDF5 file containing the delta F imaging series.
+    """
     f = io.read_h5(h5_path)
     nwbfile, nwbio = io.read_nwb(nwb_path, return_io=True)
     deltaF_series = ImageSeries(
@@ -362,7 +389,22 @@ def _update_nwb(nwb_path, h5_path):
     io.write_nwb(nwb_path, nwbfile, io=nwbio)
 
 
-def _channel_qa(array, channel_filter, qa_dir=".", session_id="null", channel="null"):
+def _channel_qa(
+    array: da.Array | np.ndarray,
+    channel_filter: list | da.Array | np.ndarray,
+    qa_dir: str = ".",
+    session_id: str = "null",
+    channel: str = "null",
+) -> None:
+    """Generate QA plots for a channel.
+
+    Args:
+        array (da.Array | np.ndarray): Imaging data array.
+        channel_filter (list | da.Array | np.ndarray): Calculated channel filter.
+        qa_dir (str, optional): Directory to save QA plots. Defaults to ".".
+        session_id (str, optional): Session identifier. Defaults to "null".
+        channel (str, optional): Channel name. Defaults to "null".
+    """
     mean_frame, std_frame, maxip = dask.compute(
         array[channel_filter].mean(axis=0),
         array[channel_filter].std(axis=0),
