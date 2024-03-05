@@ -9,6 +9,7 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 - Dropped python 3.8 support, now requires 3.12 or above.
 - Preprocessing and registration accept NWB file as input and update at end of processing. Stand-alone HDF5 files are still supported.
 - Major API refactoring, to break up large `__init__` files and create a more consistent interface.
+- Non-command entries to `__init__` files are now marked as private.
 
 ### Removed
 
