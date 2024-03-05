@@ -125,11 +125,11 @@ def register(
     )
 
     # Save warped frames and timestamps
-    outpath = out_dir + os.sep + session_id + "-registered.h5"
-    with h5py.File(outpath, "w") as hf:
+    h5_path = out_dir + os.sep + session_id + "-registered.h5"
+    with h5py.File(h5_path, "w") as hf:
         hf.create_dataset("F", data=warped)
         hf.create_dataset("ts", data=timestamps)
-    click.echo("Saved registered frames at {}".format(outpath))
+    click.echo("Saved registered frames at {}".format(h5_path))
 
     registration_end = time.time()
     click.echo(
@@ -140,48 +140,8 @@ def register(
 
     if nwb:
         click.echo("Updating NWB file...")
-        f = h5py.File(outpath, "r")
-
-        try:
-            ophys_module = nwbfile.create_processing_module(
-                name="ophys", description="optical physiology processed data"
-            )
-        except ValueError:
-            print("Processing module already exists...")
-            ophys_module = nwbfile.processing["ophys"]
-
-        registered_series = ImageSeries(
-            name="corrected",
-            data=f["/F"],
-            timestamps=timestamps,
-            unit="df/f",
-            description="dF/F widefield cortical imaging series.",
-            comments="This is the haemodynamic corrected series registered to the Allen Brain Atlas CCFv3.",
-        )
-
-        xy_translation = TimeSeries(
-            name="xy_translation",
-            data=np.repeat(tform.params[None, :], len(timestamps), axis=0),
-            unit="pixels",
-            timestamps=timestamps,
-            description="Affine transformation parameters for image registration to the ABA CCFv3.",
-        )
-
-        corrected_image_stack = CorrectedImageStack(
-            name="CCFRegisteredSeries",
-            corrected=registered_series,
-            original=nwbfile.acquisition["DualChannelImagingSeries"],
-            xy_translation=xy_translation,
-        )
-
-        ophys_module.add(corrected_image_stack)
-
-        print("Writing to file...")
-        io.write(nwbfile)
-        io.close()
-
-    print("Cleaning up...")
-    f.close()
+        _update_nwb(path, h5_path, tform.params[None, :])
+        click.echo("Updated NWB file at {}".format(path))
 
 
 def _load_preprocessed(path, nwb=False):
@@ -210,3 +170,46 @@ def _get_landmarks(points_path):
         )
 
     return np.array(list(pts.values()), dtype=np.float32)
+
+
+def _update_nwb(nwb_path, h5_path, tform_params):
+    nwbfile = io.read_nwb(nwb_path)
+    f = h5py.File(h5_path, "r")
+
+    try:
+        ophys_module = nwbfile.create_processing_module(
+            name="ophys", description="optical physiology processed data"
+        )
+    except ValueError:
+        print("Processing module already exists...")
+        ophys_module = nwbfile.processing["ophys"]
+
+    registered_series = ImageSeries(
+        name="corrected",
+        data=f["/F"],
+        timestamps=f["/ts"],
+        unit="df/f",
+        description="dF/F widefield cortical imaging series.",
+        comments="This is the haemodynamic corrected series registered to the Allen Brain Atlas CCFv3.",
+    )
+
+    xy_translation = TimeSeries(
+        name="xy_translation",
+        data=np.repeat(tform_params, len(f["/ts"]), axis=0),
+        unit="pixels",
+        timestamps=f["/ts"],
+        description="Affine transformation parameters for image registration to the ABA CCFv3.",
+    )
+
+    corrected_image_stack = CorrectedImageStack(
+        name="CCFRegisteredSeries",
+        corrected=registered_series,
+        original=nwbfile.acquisition["DualChannelImagingSeries"],
+        xy_translation=xy_translation,
+    )
+
+    ophys_module.add(corrected_image_stack)
+
+    print("Writing to file...")
+    io.write(nwbfile)
+    io.close()
