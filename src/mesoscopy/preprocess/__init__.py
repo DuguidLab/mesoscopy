@@ -23,7 +23,6 @@ import typing
 import shutil
 import click
 import dask
-import zarr
 
 import time
 
