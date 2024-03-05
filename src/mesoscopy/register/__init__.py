@@ -30,6 +30,9 @@ import time
 import matplotlib.pyplot as plt
 from skimage import transform as trf
 
+import mesoscopy.io as io
+import mesoscopy.plots as plots
+
 from pynwb import NWBHDF5IO, TimeSeries
 from pynwb.image import ImageSeries
 from pynwb.ophys import CorrectedImageStack
@@ -61,25 +64,11 @@ def register(
     os.makedirs(qa_dir, exist_ok=True)
 
     click.echo("Loading imaging data...")
-    # Load data from NWB file
+
     # Determine whether we're working with an NWB file
     nwb = True if path.endswith(".nwb") else False
 
-    if nwb:
-        io = NWBHDF5IO(path, "a")
-        nwbfile = io.read()
-
-        session_id = nwbfile.identifier
-
-        frames = nwbfile.acquisition["DualChannelImagingSeries"].data
-        ts = nwbfile.acquisition["DualChannelImagingSeries"].timestamps
-    else:
-        session_id = path.split("/")[-1].replace(".h5", "")
-
-        # Lazy-load the data into a dask array
-        f_preproc = h5py.File(path)
-        frames = f_preproc["/frames"]
-        ts = f_preproc["/timestamps"]
+    session_id, deltaf_series, timestamps = _load_preprocessed(path, nwb)
 
     click.echo("Loading landmarks...")
     template_landmarks = _get_landmarks(template_points)
@@ -88,8 +77,8 @@ def register(
     plt.clf()
     plt.scatter(template_landmarks[:, 0], template_landmarks[:, 1], color="darkorange")
     plt.scatter(recording_landmarks[:, 0], recording_landmarks[:, 1], color="purple")
-    plt.xlim(0, frames.shape[2])
-    plt.ylim(frames.shape[1], 0)
+    plt.xlim(0, deltaf_series.shape[2])
+    plt.ylim(deltaf_series.shape[1], 0)
     plt.legend(["template", "recording"])
     outpath = (
         qa_dir + os.sep + session_id + "_qa_registration_unregistered-landmarks.png"
@@ -98,7 +87,7 @@ def register(
     click.echo("Saved scatter of unregistered landmarks at {}".format(outpath))
 
     plt.clf()
-    plt.imshow(frames[100])
+    plt.imshow(deltaf_series[100])
     plt.scatter(
         recording_landmarks[:, 0],
         recording_landmarks[:, 1],
@@ -121,8 +110,8 @@ def register(
         tform.inverse(recording_landmarks)[:, 1],
         color="green",
     )
-    plt.xlim(0, frames.shape[2])
-    plt.ylim(frames.shape[1], 0)
+    plt.xlim(0, deltaf_series.shape[2])
+    plt.ylim(deltaf_series.shape[1], 0)
     plt.legend(["template", "registered"])
     outpath = qa_dir + os.sep + session_id + "_qa_registration_registered-landmarks.png"
     plt.savefig(outpath)
@@ -131,13 +120,15 @@ def register(
     start = time.time()
     warped = []
     with click.progressbar(
-        range(frames.shape[0]), label="Registering recording to template..."
+        range(deltaf_series.shape[0]), label="Registering recording to template..."
     ) as frame_ids:
         for idx in frame_ids:
             if crop_x > 0 or crop_y > 0:
-                warped.append(trf.warp(frames[idx, :crop_y, :crop_x], tform, order=3))
+                warped.append(
+                    trf.warp(deltaf_series[idx, :crop_y, :crop_x], tform, order=3)
+                )
             else:
-                warped.append(trf.warp(frames[idx], tform, order=3))
+                warped.append(trf.warp(deltaf_series[idx], tform, order=3))
     warped = np.array(warped)
     end = time.time()
     click.echo("Session registered in {} s".format(end - start))
@@ -161,7 +152,7 @@ def register(
     outpath = out_dir + os.sep + session_id + "-registered.h5"
     with h5py.File(outpath, "w") as hf:
         hf.create_dataset("F", data=warped)
-        hf.create_dataset("ts", data=ts)
+        hf.create_dataset("ts", data=timestamps)
     click.echo("Saved registered frames at {}".format(outpath))
 
     registration_end = time.time()
@@ -187,7 +178,7 @@ def register(
         registered_series = ImageSeries(
             name="corrected",
             data=f["/F"],
-            timestamps=ts,
+            timestamps=timestamps,
             unit="df/f",
             description="dF/F widefield cortical imaging series.",
             comments="This is the haemodynamic corrected series registered to the Allen Brain Atlas CCFv3.",
@@ -195,9 +186,9 @@ def register(
 
         xy_translation = TimeSeries(
             name="xy_translation",
-            data=np.repeat(tform.params[None, :], len(ts), axis=0),
+            data=np.repeat(tform.params[None, :], len(timestamps), axis=0),
             unit="pixels",
-            timestamps=ts,
+            timestamps=timestamps,
             description="Affine transformation parameters for image registration to the ABA CCFv3.",
         )
 
@@ -216,6 +207,21 @@ def register(
 
     print("Cleaning up...")
     f.close()
+
+
+def _load_preprocessed(path, nwb=False):
+    if nwb:
+        nwbfile = io.read_nwb(path)
+        session_id = nwbfile.identifier
+        deltaf_series = nwbfile.processing["ophys"]["DeltaFSeries"].data
+        timestamps = nwbfile.processing["ophys"]["DeltaFSeries"].timestamps
+    else:
+        session_id = path.split("/")[-1].replace(".h5", "")
+        f_preproc = h5py.File(path)
+        deltaf_series = f_preproc["/frames"]
+        timestamps = f_preproc["/timestamps"]
+
+    return session_id, deltaf_series, timestamps
 
 
 def _get_landmarks(points_path):
