@@ -18,14 +18,214 @@
 #  IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
+import os
 import click
-import mesoscopy.register.landmarks as lnd
+import xmltodict
+import numpy as np
+from collections import OrderedDict
+import h5py
+
+import time
+
+import matplotlib.pyplot as plt
+from skimage import transform as trf
+
+from pynwb import NWBHDF5IO, TimeSeries
+from pynwb.image import ImageSeries
+from pynwb.ophys import CorrectedImageStack
 
 
-@click.group()
-def register():
+@click.command()
+@click.argument("path", type=click.Path(exists=True))
+@click.option("-o", "--out_dir", type=click.Path(dir_okay=True), default="./")
+@click.option("-r", "--recording-points", type=click.Path(dir_okay=False))
+@click.option("-t", "--template-points", type=click.Path(dir_okay=False))
+@click.option("--crop-x", default=0, help="Crop recording along the x-axis.")
+@click.option("--crop-y", default=0, help="Crop recording along the y-axis.")
+def register(
+    path,
+    out_dir,
+    recording_points,
+    template_points,
+    crop_x=0,
+    crop_y=0,
+):
     """Register a recording to a template."""
-    pass
+    click.echo("Registering recording {} to template.".format(path))
+
+    registration_start = time.time()
+
+    os.makedirs(out_dir, exist_ok=True)
+
+    qa_dir = out_dir + os.sep + "qa"
+    os.makedirs(qa_dir, exist_ok=True)
+
+    click.echo("Loading imaging data...")
+    # Load data from NWB file
+    # Determine whether we're working with an NWB file
+    nwb = True if path.endswith(".nwb") else False
+
+    if nwb:
+        io = NWBHDF5IO(path, "a")
+        nwbfile = io.read()
+
+        session_id = nwbfile.identifier
+
+        frames = nwbfile.acquisition["DualChannelImagingSeries"].data
+        ts = nwbfile.acquisition["DualChannelImagingSeries"].timestamps
+    else:
+        session_id = path.split("/")[-1].replace(".h5", "")
+
+        # Lazy-load the data into a dask array
+        f_preproc = h5py.File(path)
+        frames = f_preproc["/frames"]
+        ts = f_preproc["/timestamps"]
+
+    click.echo("Loading landmarks...")
+    template_landmarks = get_landmarks(template_points)
+    recording_landmarks = get_landmarks(recording_points)
+
+    plt.clf()
+    plt.scatter(template_landmarks[:, 0], template_landmarks[:, 1], color="darkorange")
+    plt.scatter(recording_landmarks[:, 0], recording_landmarks[:, 1], color="purple")
+    plt.xlim(0, frames.shape[2])
+    plt.ylim(frames.shape[1], 0)
+    plt.legend(["template", "recording"])
+    outpath = (
+        qa_dir + os.sep + session_id + "_qa_registration_unregistered-landmarks.png"
+    )
+    plt.savefig(outpath)
+    click.echo("Saved scatter of unregistered landmarks at {}".format(outpath))
+
+    plt.clf()
+    plt.imshow(frames[100])
+    plt.scatter(
+        recording_landmarks[:, 0],
+        recording_landmarks[:, 1],
+        color="purple",
+    )
+    outpath = qa_dir + os.sep + session_id + "_qa_registration_unregistered-frame.png"
+    plt.savefig(outpath)
+    click.echo("Saved frame overlay of unregistered landmarks at {}".format(outpath))
+
+    click.echo("Estimating transform...")
+    start = time.time()
+    tform = trf.estimate_transform("affine", template_landmarks, recording_landmarks)
+    end = time.time()
+    click.echo("Transform estimated in {} s".format(end - start))
+
+    plt.clf()
+    plt.scatter(template_landmarks[:, 0], template_landmarks[:, 1], color="darkorange")
+    plt.scatter(
+        tform.inverse(recording_landmarks)[:, 0],
+        tform.inverse(recording_landmarks)[:, 1],
+        color="green",
+    )
+    plt.xlim(0, frames.shape[2])
+    plt.ylim(frames.shape[1], 0)
+    plt.legend(["template", "registered"])
+    outpath = qa_dir + os.sep + session_id + "_qa_registration_registered-landmarks.png"
+    plt.savefig(outpath)
+    click.echo("Saved scatter of registered landmarks at {}".format(outpath))
+
+    start = time.time()
+    warped = []
+    with click.progressbar(
+        range(frames.shape[0]), label="Registering recording to template..."
+    ) as frame_ids:
+        for idx in frame_ids:
+            if crop_x > 0 or crop_y > 0:
+                warped.append(trf.warp(frames[idx, :crop_y, :crop_x], tform, order=3))
+            else:
+                warped.append(trf.warp(frames[idx], tform, order=3))
+    warped = np.array(warped)
+    end = time.time()
+    click.echo("Session registered in {} s".format(end - start))
+
+    plt.clf()
+    plt.imshow(warped[100])
+    plt.scatter(template_landmarks[:, 0], template_landmarks[:, 1], color="darkorange")
+    plt.scatter(
+        tform.inverse(recording_landmarks)[:, 0],
+        tform.inverse(recording_landmarks)[:, 1],
+        color="green",
+    )
+    plt.xlim(0, warped.shape[2])
+    plt.ylim(warped.shape[1], 0)
+    plt.legend(["template", "registered"])
+    outpath = qa_dir + os.sep + session_id + "_qa_registration_registered-frame.png"
+    plt.savefig(outpath)
+    click.echo("Saved frame overlay of registered landmarks at {}".format(outpath))
+
+    # Save warped frames and timestamps
+    outpath = out_dir + os.sep + session_id + "-registered.h5"
+    with h5py.File(outpath, "w") as hf:
+        hf.create_dataset("F", data=warped)
+        hf.create_dataset("ts", data=ts)
+    click.echo("Saved registered frames at {}".format(outpath))
+
+    registration_end = time.time()
+    click.echo(
+        "Registration took a total of {} mins.".format(
+            (registration_end - registration_start) / 60
+        )
+    )
+
+    if nwb:
+        click.echo("Updating NWB file...")
+        click.echo("Updating NWB file...")
+        f = h5py.File(outpath, "r")
+
+        try:
+            ophys_module = nwbfile.create_processing_module(
+                name="ophys", description="optical physiology processed data"
+            )
+        except ValueError:
+            print("Processing module already exists...")
+            ophys_module = nwbfile.processing["ophys"]
+
+        registered_series = ImageSeries(
+            name="corrected",
+            data=f["/F"],
+            timestamps=ts,
+            unit="df/f",
+            description="dF/F widefield cortical imaging series.",
+            comments="This is the haemodynamic corrected series registered to the Allen Brain Atlas CCFv3.",
+        )
+
+        xy_translation = TimeSeries(
+            name="xy_translation",
+            data=np.repeat(tform.params[None, :], len(ts), axis=0),
+            unit="pixels",
+            timestamps=ts,
+            description="Affine transformation parameters for image registration to the ABA CCFv3.",
+        )
+
+        corrected_image_stack = CorrectedImageStack(
+            name="CCFRegisteredSeries",
+            corrected=registered_series,
+            original=nwbfile.acquisition["DualChannelImagingSeries"],
+            xy_translation=xy_translation,
+        )
+
+        ophys_module.add(corrected_image_stack)
+
+        print("Writing to file...")
+        io.write(nwbfile)
+        io.close()
+
+    print("Cleaning up...")
+    f.close()
 
 
-register.add_command(lnd.landmarks)
+def get_landmarks(points_path):
+    with open(points_path, "r") as fp:
+        pts = xmltodict.parse(fp.read())
+        pts = OrderedDict(
+            {
+                point["@name"]: (point["@x"], point["@y"])
+                for point in pts["namedpointset"]["pointworld"]
+            }
+        )
+
+    return np.array(list(pts.values()), dtype=np.float32)
