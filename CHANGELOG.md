@@ -19,6 +19,7 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 - Removed `landmarks` subcommand; the parent `register` command now does the same thing.
 - Removed average image generation from `register` command (previously under now removed `utils` module).
+- Removed processing `aba` module, which used to extract average dF/F traces per ABA area and write output as CSV.
 
 ## [0.1.0] - 2023-03-24
 
