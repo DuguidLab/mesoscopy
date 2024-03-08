@@ -26,7 +26,4 @@ import mesoscopy.process.aba as aba
 
 @click.group()
 def process():
-    pass
-
-
-process.add_command(aba.aba)
+    raise NotImplementedError("This command is not implemented yet.")
