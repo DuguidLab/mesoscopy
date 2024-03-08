@@ -21,7 +21,6 @@
 
 """Processing submodule."""
 import click
-import mesoscopy.process.aba as aba
 
 
 @click.group()
