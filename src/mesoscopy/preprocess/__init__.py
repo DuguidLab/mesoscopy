@@ -37,12 +37,32 @@ from pynwb.image import ImageSeries
 
 
 @click.command()
-@click.argument("raw_path", type=click.Path(exists=True))
-@click.argument("out_dir", type=click.Path(dir_okay=True))
+@click.argument(
+    "path",
+    type=click.Path(exists=True),
+    help="Path to the raw recording HDF5 or NWB file.",
+)
+@click.option(
+    "-o",
+    "--out_dir",
+    type=click.Path(dir_okay=True),
+    default="./",
+    help="Output directory for preprocessed recording.",
+)
 @click.option("--chunks", default=100, help="Number of chunks to load in memory.")
-@click.option("--crop", default=0)
-@click.option("--bins", default=2, help="Binning.")
-@click.option("--channel-means-only", is_flag=True, show_default=True, default=False)
+@click.option(
+    "--crop",
+    default=0,
+    help="Number of pixels to crop from the edges of the recording.",
+)
+@click.option("--bins", default=2, help="Recording pixel binning factor.")
+@click.option(
+    "--channel-means-only",
+    is_flag=True,
+    show_default=True,
+    default=False,
+    help="Extract the channel means and exit without extracting a delta F series.",
+)
 @click.option(
     "--use-means",
     is_flag=True,
@@ -71,7 +91,7 @@ from pynwb.image import ImageSeries
     help="Number of frames to skip at the end of the recording.",
 )
 def preprocess(
-    raw_path: str,
+    path: str,
     out_dir: str,
     chunks: int = 100,
     crop: int = 0,
@@ -101,7 +121,7 @@ def preprocess(
         skip_start (int, optional): Number of frames to skip at the start of the recording. Defaults to None.
         skip_end (int, optional): Number of frames to skip at the end of the recording. Defaults to None.
     """
-    click.echo("Preprocessing file {}.".format(raw_path))
+    click.echo("Preprocessing file {}.".format(path))
 
     preprocessing_start = time.time()
 
@@ -115,9 +135,9 @@ def preprocess(
     click.echo("Loading data...")
 
     # Determine whether we're working with an NWB file
-    nwb = True if raw_path.endswith(".nwb") else False
+    nwb = True if path.endswith(".nwb") else False
 
-    session_id, d, ts = _load_raw(raw_path, nwb=nwb)
+    session_id, d, ts = _load_raw(path, nwb=nwb)
 
     if skip_end:
         skip_end = -skip_end
@@ -321,8 +341,8 @@ def preprocess(
 
     if nwb:
         click.echo("Updating NWB file...")
-        _update_nwb(raw_path, outpath)
-        click.echo("Updated NWB file at {}".format(raw_path))
+        _update_nwb(path, outpath)
+        click.echo("Updated NWB file at {}".format(path))
 
     click.echo("Cleaning up...")
     shutil.rmtree(interim_dir)
