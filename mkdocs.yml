@@ -1,0 +1,88 @@
+site_name: Mesoscopy
+site_url: https://docs.mesoscopy.org/
+repo_url: https://github.com/DuguidLab/mesoscopy
+repo_name: DuguidLab/visiomode
+
+theme:
+  name: material
+  # favicon: assets/mesoscopy_logo_icon.png
+  # custom_dir: docs/overrides
+  font:
+    text: Montserrat
+  # logo: assets/mesoscopy_logo_icon.png
+  icon:
+    repo: fontawesome/brands/github
+  features:
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.tracking
+    - navigation.sections
+    - navigation.path
+    # - navigation.indexes
+    # - toc.integrate
+    - navigation.top
+    - navigation.tabs
+    - toc.follow
+    - content.code.copy
+    - content.code.annotate
+    - navigation.footer
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/eye
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/eye-outline
+        name: Switch to light mode
+
+extra_css:
+  - stylesheets/extra.css
+
+plugins:
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          paths: [src]
+          options:
+            show_source: true
+            docstring_style: google
+            docstring_section_style: list
+  - search
+  # - material-plausible
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+
+extra:
+  homepage: https://mesoscopy.org
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/orgs/DuguidLab
+    - icon: material/web
+      link: https://www.duguidlab.com
+  # analytics:
+  #   provider: plausible
+  #   domain: docs.mesoscopy.org
+
+copyright: Copyright &copy; 2024 Constantinos Eleftheriou
+
+nav:
+  - Getting started:
+    - Installation: index.md
+  - How-to:
+    - Overview: how-to/index.md
+  - Design principles:
+    - Overview: design-principles/index.md
+  - Reference:
+    - Overview: reference/index.md
