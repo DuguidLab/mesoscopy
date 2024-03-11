@@ -10,6 +10,7 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 - Preprocessing and registration accept NWB file as input and update at end of processing. Stand-alone HDF5 files are still supported.
 - Major API refactoring, to break up large `__init__` files and create a more consistent interface.
 - Non-command entries to `__init__` files are now marked as private.
+- `preprocess` command no longer requires output directory to be specified; this is now an optional flag which defaults to the user's current directory.
 
 ### Fixed
 
