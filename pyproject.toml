@@ -99,6 +99,7 @@ fmt = [
 dependencies = [
   "mypy>=1.0.0",
 ]
+
 [tool.hatch.envs.typing.scripts]
 check = "mypy --install-types --non-interactive src/mesoscopy tests"
 
