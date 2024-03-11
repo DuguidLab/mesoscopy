@@ -209,7 +209,7 @@ def _update_nwb(nwb_path: str, h5_path: str, tform_params: np.ndarray) -> None:
         h5_path (str): Path to the HDF5 file containing the registered images.
         tform_params (np.ndarray): Affine transformation parameters.
     """
-    nwbfile = io.read_nwb(nwb_path)
+    nwbfile, nwbio = io.read_nwb(nwb_path, return_io=True)
     f = h5py.File(h5_path, "r")
 
     try:
@@ -246,6 +246,4 @@ def _update_nwb(nwb_path: str, h5_path: str, tform_params: np.ndarray) -> None:
 
     ophys_module.add(corrected_image_stack)
 
-    click.echo("Writing to file...")
-    io.write(nwbfile)
-    io.close()
+    io.write_nwb(nwb_path, nwbfile, io=nwbio)
