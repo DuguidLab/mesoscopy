@@ -13,7 +13,7 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 ### Fixed
 
-- Registration uses DeltaF series instead of raw fluorescence series for registration when reading from NWB.
+- Registration uses DeltaF series instead of raw fluorescence series when reading from NWB.
 
 ### Removed
 
