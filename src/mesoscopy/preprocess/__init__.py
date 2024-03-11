@@ -18,32 +18,51 @@
 #  IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
-
-"""Preprocessing submodule."""
 import os
+import typing
 import shutil
 import click
-import h5py
 import dask
-import zarr
 
 import time
 
+import mesoscopy.io as io
+import mesoscopy.plots as plots
+import mesoscopy.preprocess.calculations as calc
+
 import numpy as np
 from dask import array as da
-from matplotlib import pyplot as plt
 
-from pynwb import NWBHDF5IO
 from pynwb.image import ImageSeries
 
 
 @click.command()
-@click.argument("raw_path", type=click.Path(exists=True))
-@click.argument("out_dir", type=click.Path(dir_okay=True))
+@click.argument(
+    "path",
+    type=click.Path(exists=True),
+    help="Path to the raw recording HDF5 or NWB file.",
+)
+@click.option(
+    "-o",
+    "--out_dir",
+    type=click.Path(dir_okay=True),
+    default="./",
+    help="Output directory for preprocessed recording.",
+)
 @click.option("--chunks", default=100, help="Number of chunks to load in memory.")
-@click.option("--crop", default=0)
-@click.option("--bins", default=2, help="Binning.")
-@click.option("--channel-means-only", is_flag=True, show_default=True, default=False)
+@click.option(
+    "--crop",
+    default=0,
+    help="Number of pixels to crop from the edges of the recording.",
+)
+@click.option("--bins", default=2, help="Recording pixel binning factor.")
+@click.option(
+    "--channel-means-only",
+    is_flag=True,
+    show_default=True,
+    default=False,
+    help="Extract the channel means and exit without extracting a delta F series.",
+)
 @click.option(
     "--use-means",
     is_flag=True,
@@ -72,29 +91,37 @@ from pynwb.image import ImageSeries
     help="Number of frames to skip at the end of the recording.",
 )
 def preprocess(
-    raw_path,
-    out_dir,
-    chunks=100,
-    crop=0,
-    bins=2,
-    channel_means_only=False,
-    use_means=False,
-    flip_channels=False,
-    interim_dir="interim/",
-    skip_start=None,
-    skip_end=None,
-):
-    """Preprocessing to extract deltaF from a single session.
+    path: str,
+    out_dir: str,
+    chunks: int = 100,
+    crop: int = 0,
+    bins: int = 2,
+    channel_means_only: bool = False,
+    use_means: bool = False,
+    flip_channels: bool = False,
+    interim_dir: str = "interim/",
+    skip_start: typing.Optional[int] = None,
+    skip_end: typing.Optional[int] = None,
+) -> None:
+    """Preprocessing to extract deltaF from a single session dual-channel mixed recording.
 
     Preprocessing separates the two channels, applies the haemodynamic correction,
     and extracts the delta F signal.
 
     Args:
-        raw_path: Path to raw HDF5 file
-        out_dir: Path to output directory for preprocessed data. This directory doesn't have to exist.
-
+        raw_path (str): Path to the raw recording HDF5 or NWB file.
+        out_dir (str): Path to the output directory.
+        chunks (int, optional): Number of chunks to load in memory. Defaults to 100.
+        crop (int, optional): Number of pixels to crop from the edges of the recording. Defaults to 0.
+        bins (int, optional): Recording pixel binning factor. Defaults to 2.
+        channel_means_only (bool, optional): Extract the channel means and exit without extracting a delta F series. Defaults to False.
+        use_means (bool, optional): Use means histogram instead of standard deviation to separate channels. Defaults to False.
+        flip_channels (bool, optional): Flip extracted channel order. Defaults to False.
+        interim_dir (str, optional): Path to the interim directory. Defaults to "interim/".
+        skip_start (int, optional): Number of frames to skip at the start of the recording. Defaults to None.
+        skip_end (int, optional): Number of frames to skip at the end of the recording. Defaults to None.
     """
-    click.echo("Preprocessing file {}.".format(raw_path))
+    click.echo("Preprocessing file {}.".format(path))
 
     preprocessing_start = time.time()
 
@@ -108,23 +135,9 @@ def preprocess(
     click.echo("Loading data...")
 
     # Determine whether we're working with an NWB file
-    nwb = True if raw_path.endswith(".nwb") else False
+    nwb = True if path.endswith(".nwb") else False
 
-    if nwb:
-        io = NWBHDF5IO(raw_path, "a")
-        nwbfile = io.read()
-
-        session_id = nwbfile.identifier
-
-        d = nwbfile.acquisition["DualChannelImagingSeries"].data
-        ts = nwbfile.acquisition["DualChannelImagingSeries"].timestamps
-    else:
-        session_id = raw_path.split("/")[-1].replace(".h5", "")
-
-        # Lazy-load the data into a dask array
-        f_raw = h5py.File(raw_path)
-        d = f_raw["/frames"]
-        ts = f_raw["/timestamps"]
+    session_id, d, ts = _load_raw(path, nwb=nwb)
 
     if skip_end:
         skip_end = -skip_end
@@ -148,7 +161,7 @@ def preprocess(
         )
     )
     start = time.time()
-    binned_frames = bin(
+    binned_frames = calc.bin_array(
         raw_frames, bins=bins, interim_dir=interim_dir, session_id=session_id
     )
     end = time.time()
@@ -160,7 +173,7 @@ def preprocess(
     # Get the global mean and std values for each frame
     click.echo("Calculating frame means & standard deviations...")
     start = time.time()
-    gcamp_filter, isosb_filter = calc_channel_filters(
+    gcamp_filter, isosb_filter = calc.separate_channels(
         binned_frames,
         session_id=session_id,
         use_means=use_means,
@@ -182,12 +195,12 @@ def preprocess(
     end = time.time()
     click.echo("Channel means calculated in {} s".format(end - start))
 
-    plt.clf()
-    plt.plot(gcamp_mean)
-    plt.plot(isosb_mean)
     outpath = qa_dir + os.sep + session_id + "_qa_channel_means.png"
-    plt.savefig(outpath)
-    click.echo("Saved channel means at {}".format(outpath))
+    plots.plot_lines(
+        [gcamp_mean, isosb_mean],
+        outpath,
+        message="Saved channel means at {}".format(outpath),
+    )
 
     if channel_means_only:
         click.echo("Channel means saved as txt files. Exiting.")
@@ -196,7 +209,7 @@ def preprocess(
     # Generate the mean gcamp frame and its std
     click.echo("Generating mean gcamp frame and its maximum intensity projection...")
     start = time.time()
-    channel_qa(
+    _channel_qa(
         binned_frames,
         gcamp_filter,
         qa_dir=qa_dir,
@@ -215,7 +228,7 @@ def preprocess(
         "Generating mean isosbestic frame and its maximum intensity projection..."
     )
     start = time.time()
-    channel_qa(
+    _channel_qa(
         binned_frames,
         isosb_filter,
         qa_dir=qa_dir,
@@ -235,7 +248,7 @@ def preprocess(
 
     click.echo("Calculating ∂F for the gcamp channel...")
     start = time.time()
-    gcamp_dff = channel_dff(
+    gcamp_dff = calc.channel_dff(
         binned_frames,
         gcamp_filter,
         window_width,
@@ -248,7 +261,7 @@ def preprocess(
 
     click.echo("Calculating ∂F for the isosb channel...")
     start = time.time()
-    isosb_dff = channel_dff(
+    isosb_dff = calc.channel_dff(
         binned_frames,
         isosb_filter,
         window_width,
@@ -267,12 +280,12 @@ def preprocess(
     end = time.time()
     click.echo("Channel signal means calculated in {} s".format(end - start))
 
-    plt.clf()
-    plt.plot(gcamp_signal_mean)
-    plt.plot(isosb_signal_mean)
     outpath = qa_dir + os.sep + session_id + "_qa_channel_signal_mean.png"
-    plt.savefig(outpath)
-    click.echo("Saved lineplot for channel signal {}".format(outpath))
+    plots.plot_lines(
+        [gcamp_signal_mean, isosb_signal_mean],
+        outpath,
+        message="Saved lineplot for channel signal {}".format(outpath),
+    )
 
     # Max common index (to avoid array overflow)
     if len(gcamp_mean) != len(isosb_mean):
@@ -296,19 +309,22 @@ def preprocess(
     click.echo("F signal calculated in {} s".format(end - start))
     click.echo("Saved F signal at {}".format(outpath))
 
-    plt.clf()
     outpath = qa_dir + os.sep + session_id + "_qa_f_example.png"
-    plt.imsave(outpath, f_signal[200])
-    click.echo("Saved F example at {}".format(outpath))
+    plots.plot_frame(
+        f_signal[200],
+        outpath,
+        message="Saved F example at {}".format(outpath),
+    )
 
     click.echo("Calculating mean F per frame...")
     f_signal_mean = f_signal.mean(axis=(1, 2)).compute()
 
-    plt.clf()
-    plt.plot(f_signal_mean)
     outpath = qa_dir + os.sep + session_id + "_qa_f_signal_mean.png"
-    plt.savefig(outpath)
-    click.echo("Saved lineplot for F signal {}".format(outpath))
+    plots.plot_line(
+        f_signal_mean,
+        outpath,
+        message="Saved lineplot for F signal {}".format(outpath),
+    )
 
     # Save timestamps
     outpath = out_dir + os.sep + session_id + "_preprocessed.h5"
@@ -325,185 +341,103 @@ def preprocess(
 
     if nwb:
         click.echo("Updating NWB file...")
-        f = h5py.File(outpath, "r")
-
-        deltaF_series = ImageSeries(
-            name="DeltaFSeries",
-            data=f["/data"],
-            timestamps=f["/timestamps"],
-            unit="df/f",
-            description="dF/F widefield cortical imaging series.",
-            comments="This imaging series is corrected for the haemodynamic response.",
-        )
-
-        ophys_module = nwbfile.create_processing_module(
-            name="ophys", description="optical physiology processed data"
-        )
-
-        ophys_module.add(deltaF_series)
-
-        io.write(nwbfile)
-        io.close()
-        click.echo("Updated NWB file at {}".format(raw_path))
+        _update_nwb(path, outpath)
+        click.echo("Updated NWB file at {}".format(path))
 
     click.echo("Cleaning up...")
     shutil.rmtree(interim_dir)
 
 
-def bin(array, bins, interim_dir=".", session_id="null"):
-    binned_array = array.reshape(
-        array.shape[0],
-        1,
-        array.shape[1] / bins,
-        array.shape[1] // (array.shape[1] / bins),
-        array.shape[2] / bins,
-        array.shape[2] // (array.shape[2] / bins),
-    ).mean(axis=(-1, 1, 3), dtype=np.float32)
-    interim_path = interim_dir + os.sep + session_id + "_binned.zarr"
-    return store_interim(binned_array, interim_path)
+def _load_raw(
+    raw_path: str, nwb: bool = False
+) -> tuple[str, da.Array | np.ndarray, da.Array | np.ndarray]:
+    """Load raw imaging data from an HDF5 or NWB file.
+
+    Args:
+        raw_path (str): Path to the raw recording HDF5 or NWB file.
+        nwb (bool, optional): Whether the file is an NWB file. Defaults to False.
+
+    Returns:
+        tuple[str, da.Array | np.ndarray, da.Array | np.ndarray]: Session ID, imaging data, and timestamps.
+    """
+    if nwb:
+        nwbfile = io.read_nwb(raw_path)
+
+        session_id = nwbfile.identifier
+
+        imaging_data = nwbfile.acquisition["DualChannelImagingSeries"].data
+        timestamps = nwbfile.acquisition["DualChannelImagingSeries"].timestamps
+    else:
+        session_id = raw_path.split("/")[-1].replace(".h5", "")
+
+        # Lazy-load the data into a dask array
+        f_raw = io.read_h5(raw_path)
+        imaging_data = f_raw["/frames"]
+        timestamps = f_raw["/timestamps"]
+
+    return session_id, imaging_data, timestamps
 
 
-def store_interim(array, interim_path, compute=True, chunks=500):
-    z_interim = zarr.open_array(
-        interim_path,
-        shape=array.shape,
-        dtype=array.dtype,
-        chunks=(chunks, array.shape[1], array.shape[2]),
+def _update_nwb(nwb_path: str, h5_path: str) -> None:
+    """Update an NWB file with a delta F imaging series stored in an HDF5 file.
+
+    Creates a link between the NWB file and the HDF5 file. See https://pynwb.readthedocs.io/en/stable/tutorials/advanced_io/linking_data.html.
+
+    Args:
+        nwb_path (str): Path to NWB file.
+        h5_path (str): Path to HDF5 file containing the delta F imaging series.
+    """
+    f = io.read_h5(h5_path)
+    nwbfile, nwbio = io.read_nwb(nwb_path, return_io=True)
+    deltaF_series = ImageSeries(
+        name="DeltaFSeries",
+        data=f["/data"],
+        timestamps=f["/timestamps"],
+        unit="df/f",
+        description="dF/F widefield cortical imaging series.",
+        comments="This imaging series is corrected for the haemodynamic response.",
     )
-    return array.store(z_interim, return_stored=True, compute=compute)
 
-
-def calc_channel_filters(
-    array,
-    qa_dir=".",
-    session_id="null",
-    use_means=False,
-    flip_channels=False,
-    interim_dir=None,
-):
-    frame_means, frame_stds = dask.compute(
-        array.mean(axis=(1, 2), dtype=np.float32),
-        array.std(axis=(1, 2), dtype=np.float32),
+    ophys_module = nwbfile.create_processing_module(
+        name="ophys", description="optical physiology processed data"
     )
 
-    outpath = qa_dir + os.sep + session_id + "_qa_frame_means_histogram.png"
-    msg = "Saved histogram for frame means at {}".format(outpath)
-    plot_hist(frame_means, outpath, message=msg)
+    ophys_module.add(deltaF_series)
 
-    outpath = qa_dir + os.sep + session_id + "_qa_frame_means_line.png"
-    msg = "Saved lineplot for frame means at {}".format(outpath)
-    plot_line(frame_means, outpath, message=msg)
-
-    outpath = qa_dir + os.sep + session_id + "_qa_frame_std_histogram.png"
-    msg = "Saved histogram for frame means at {}".format(outpath)
-    plot_hist(frame_stds, outpath, message=msg)
-
-    outpath = qa_dir + os.sep + session_id + "_qa_frame_std_line.png"
-    msg = "Saved lineplot for frame means at {}".format(outpath)
-    plot_line(frame_stds, outpath, message=msg)
-
-    threshold = frame_stds.mean()
-    gcamp_filter = frame_stds > threshold
-    isosb_filter = frame_stds < threshold
-
-    if use_means:
-        threshold = frame_means.mean()
-        gcamp_filter = frame_means > threshold
-        isosb_filter = frame_means < threshold
-
-    if flip_channels:
-        return isosb_filter, gcamp_filter
-
-    return gcamp_filter, isosb_filter
+    io.write_nwb(nwb_path, nwbfile, io=nwbio)
 
 
-def channel_qa(array, channel_filter, qa_dir=".", session_id="null", channel="null"):
+def _channel_qa(
+    array: da.Array | np.ndarray,
+    channel_filter: list | da.Array | np.ndarray,
+    qa_dir: str = ".",
+    session_id: str = "null",
+    channel: str = "null",
+) -> None:
+    """Generate QA plots for a channel.
+
+    Args:
+        array (da.Array | np.ndarray): Imaging data array.
+        channel_filter (list | da.Array | np.ndarray): Calculated channel filter.
+        qa_dir (str, optional): Directory to save QA plots. Defaults to ".".
+        session_id (str, optional): Session identifier. Defaults to "null".
+        channel (str, optional): Channel name. Defaults to "null".
+    """
     mean_frame, std_frame, maxip = dask.compute(
         array[channel_filter].mean(axis=0),
         array[channel_filter].std(axis=0),
         array[channel_filter].max(axis=0),
     )
 
-    plt.clf()
     outpath = qa_dir + os.sep + session_id + "_qa_{}_mean.png".format(channel)
-    plt.imsave(outpath, mean_frame)
+    plots.plot_frame(
+        mean_frame, outpath, message="Saved mean frame at {}".format(outpath)
+    )
 
-    plt.clf()
     outpath = qa_dir + os.sep + session_id + "_qa_{}_std.png".format(channel)
-    plt.imsave(outpath, std_frame)
+    plots.plot_frame(
+        std_frame, outpath, message="Saved std frame at {}".format(outpath)
+    )
 
-    plt.clf()
     outpath = qa_dir + os.sep + session_id + "_qa_{}_maxip.png".format(channel)
-    plt.imsave(outpath, maxip)
-
-
-def channel_dff(
-    array,
-    channel_filter,
-    window_width,
-    channel_name="null",
-    interim_dir=".",
-    session_id="null",
-):
-    cumsum_vec = da.cumsum(
-        da.insert(array[channel_filter], 0, 0, axis=0), dtype=np.uint32, axis=0
-    )
-
-    interim_path = (
-        interim_dir + os.sep + session_id + "_" + channel_name + "_cumsum.zarr"
-    )
-    cumsum_vec = store_interim(cumsum_vec, interim_path)
-
-    f0 = da.true_divide(
-        (cumsum_vec[window_width:] - cumsum_vec[:-window_width]),
-        window_width,
-        dtype=np.float32,
-    )
-
-    interim_path = interim_dir + os.sep + session_id + "_" + channel_name + "_f0.zarr"
-    f0 = store_interim(f0, interim_path)
-
-    f0_start = da.mean(f0[: int(window_width / 2)]).compute()
-    f0_end = da.mean(f0[-int(window_width / 2) :]).compute()
-
-    f0 = da.insert(
-        f0,
-        da.arange(0, int(window_width / 2) - 1),
-        f0_start,
-        axis=0,
-    )
-
-    f0 = da.insert(
-        f0,
-        da.arange(f0.shape[0] - int(window_width / 2), f0.shape[0]),
-        f0_end,
-        axis=0,
-    )
-
-    interim_path = (
-        interim_dir + os.sep + session_id + "_" + channel_name + "_f0_appended.zarr"
-    )
-    f0 = store_interim(f0, interim_path)
-
-    dff = da.true_divide(da.subtract(array[channel_filter], f0), f0, dtype=np.float32)
-
-    interim_path = interim_dir + os.sep + session_id + "_" + channel_name + "_dff.zarr"
-
-    return store_interim(dff, interim_path)
-
-
-def plot_line(array, outpath, message=None):
-    plt.clf()
-    plt.plot(array)
-    plt.savefig(outpath)
-    if message:
-        click.echo(message)
-
-
-def plot_hist(array, outpath, message=None):
-    plt.clf()
-    plt.hist(array)
-    plt.savefig(outpath)
-    if message:
-        click.echo(message)
-    pass
+    plots.plot_frame(maxip, outpath, message="Saved maxip frame at {}".format(outpath))
