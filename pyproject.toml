@@ -95,6 +95,20 @@ fmt = [
   "check",
 ]
 
+[tool.hatch.envs.docs]
+dependencies = [
+  "mkdocs",
+  "mkdocs-material",
+  "mkdocstrings-python",
+  "pymdown-extensions",
+  "material-plausible-plugin",
+]
+
+[tool.hatch.envs.docs.scripts]
+build = "mkdocs build --clean --strict"
+serve = "mkdocs serve --dev-addr localhost:8000"
+deploy = "mkdocs gh-deploy --force"
+
 [tool.hatch.envs.typing]
 dependencies = [
   "mypy>=1.0.0",
