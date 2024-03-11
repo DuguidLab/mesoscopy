@@ -38,10 +38,30 @@ from pynwb.ophys import CorrectedImageStack
 
 
 @click.command()
-@click.argument("path", type=click.Path(exists=True))
-@click.option("-o", "--out_dir", type=click.Path(dir_okay=True), default="./")
-@click.option("-r", "--recording-points", type=click.Path(dir_okay=False))
-@click.option("-t", "--template-points", type=click.Path(dir_okay=False))
+@click.argument(
+    "path",
+    type=click.Path(exists=True),
+    help="Path to preprocessed recording HDF5 or NWB file.",
+)
+@click.option(
+    "-o",
+    "--out_dir",
+    type=click.Path(dir_okay=True),
+    default="./",
+    help="Output directory for registered recording.",
+)
+@click.option(
+    "-r",
+    "--recording-points",
+    type=click.Path(dir_okay=False),
+    help="Path to recording landmark points in Fiji XML points format",
+)
+@click.option(
+    "-t",
+    "--template-points",
+    type=click.Path(dir_okay=False),
+    help="Path to template landmark points in Fiji XML points format",
+)
 @click.option("--crop-x", default=0, help="Crop recording along the x-axis.")
 @click.option("--crop-y", default=0, help="Crop recording along the y-axis.")
 def register(
