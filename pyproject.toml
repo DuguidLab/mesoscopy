@@ -35,7 +35,8 @@ dependencies = [
     "xmltodict", 
     "scikit-image", 
     "pandas", 
-    "pynwb>=2.3.1"
+    "pynwb>=2.3.1",
+    "napari[all]>=0.4.19"
 ]
 dynamic = ["version"]
 
