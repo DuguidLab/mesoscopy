@@ -102,6 +102,8 @@ def mark_landmarks(maxip_image: da.Array | npt.ArrayLike) -> dict:
 
     napari.run()
 
+    return dict(zip(landmarks, points_layer.data))
+
 
 def _create_label_menu(points_layer, labels):
     """Create a label menu widget that can be added to the napari viewer dock.
@@ -148,4 +150,4 @@ if __name__ == "__main__":
 
     maxip_path = sys.argv[1]
     maxip_image = io.imread(maxip_path, as_gray=True)
-    mark_landmarks(maxip_image)
+    print(mark_landmarks(maxip_image))
