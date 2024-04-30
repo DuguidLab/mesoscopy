@@ -4,6 +4,10 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 ## [Unreleased]
 
+### Added
+
+- Registration GUI with Napari for identifying anatomical landmarks.
+
 ### Changed
 
 - Dropped python 3.8 support, now requires 3.12 or above.
