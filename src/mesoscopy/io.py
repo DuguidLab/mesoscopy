@@ -119,7 +119,7 @@ def store_interim(
             dtype=array.dtype,
             chunks=(chunks, array.shape[1], array.shape[2]),
         )
-        return array.store(z_interim, return_stored=True, compute=compute)
+        return da.store(array, z_interim, return_stored=True, compute=compute)
 
     zarr.save(interim_path, array)
     return zarr.load(interim_path)
