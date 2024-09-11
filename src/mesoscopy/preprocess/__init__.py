@@ -40,7 +40,6 @@ from pynwb.image import ImageSeries
 @click.argument(
     "path",
     type=click.Path(exists=True),
-    help="Path to the raw recording HDF5 or NWB file.",
 )
 @click.option(
     "-o",
