@@ -1,0 +1,34 @@
+id, acronym, name
+11, SSp-ul, Primary somatosensory area upper limb
+97, AUDd1, Dorsal auditory area
+104, AUDp1, Primary auditory area
+111, AUDpo1, Posterior auditory area
+118, AUDv1, Ventral auditory area
+395, FRP1, Frontal pole
+578, MOp1, Primary motor area
+584, MOs, Secondary motor area
+665, ORBm1, Orbital area medial part
+753, PL1, Prelimbic area
+866, RSPagl1, Retrosplenial area lateral agranular part
+872, RSPd1, Retrosplenial area dorsal part
+879, RSPv1, Retrosplenial area ventral part
+970, SSp-bfd1, Primary somatosensory area barrel field
+977, SSp-ll1, Primary somatosensory area lower limb
+984, SSp-m1, Primary somatosensory area mouth
+991, SSp-n1, Primary somatosensory area nose
+998, SSp-tr1, Primary somatosensory area trunk
+1005, SSp-ul1, Primary somatosensory area upper limb
+1012, SSp-un1, Primary somatosensory area unassigned
+1019, SSs1, Supplemental somatosensory area
+1060, TEa1, Temporal association areas
+1125, VISal1, Anterolateral visual area
+1132, VISam1, Anteromedial visual area
+1139, VISC1, Visceral area
+1146, VISl1, Lateral visual area
+1153, VISp, Primary visual area
+1160, VISpl1, Posterolateral visual area
+1167, VISpm, Posteromedial visual area
+1207, VISa1, Anterior area
+1214, VISli1, Laterointermediate area
+1221, VISpor1, Postrhinal area
+1228, VISrl1, Rostrolateral area
