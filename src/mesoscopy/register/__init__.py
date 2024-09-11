@@ -41,7 +41,6 @@ from pynwb.ophys import CorrectedImageStack
 @click.argument(
     "path",
     type=click.Path(exists=True),
-    help="Path to preprocessed recording HDF5 or NWB file.",
 )
 @click.option(
     "-o",
