@@ -42,7 +42,7 @@ COLOR_CYCLE = [
 ]
 
 
-def mark_landmarks(maxip_image: da.Array | npt.ArrayLike) -> dict:
+def mark_landmarks(maxip_image: npt.NDArray | da.Array) -> dict:
     """Launch the napari viewer to identify anatomical landmarks on a maximum intensity projection image.
 
     The following landmarks are identified for registration:
@@ -57,12 +57,11 @@ def mark_landmarks(maxip_image: da.Array | npt.ArrayLike) -> dict:
     - aIPB: Anterior aspect of the interparietal bone.
 
     Args:
-        maxip_image (npt.ArrayLike): Maximum intensity projection image. Could be either channel.
+        maxip_image (npt.NDArray): Maximum intensity projection image. Could be either channel.
 
     Returns:
         dict: Dictionary with the landmarks and their x-y coordinates. Dictionary keys are landmark names, while x-y coordinates are stored as an (y, x) tuple.
     """
-    print(maxip_image.shape)
     maxip_height, maxip_width = maxip_image.shape
     viewer = napari.view_image(maxip_image)
 
