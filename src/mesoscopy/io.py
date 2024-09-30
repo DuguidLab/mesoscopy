@@ -19,13 +19,15 @@
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
 import typing
+import xmltodict
+from collections import OrderedDict
 
 import h5py
 import zarr
 
+import numpy as np
 import numpy.typing as npt
 from dask import array as da
-
 from pynwb import NWBHDF5IO, NWBFile
 
 
@@ -123,3 +125,24 @@ def store_interim(
 
     zarr.save(interim_path, array)
     return zarr.load(interim_path)
+
+
+def read_points(path: str) -> dict[str, tuple[float, float]]:
+    """Read a FIJI landmark points file.
+
+    Args:
+        path (str): Path to the points file.
+
+    Returns:
+        dict[str, tuple[float, float]]: Dictionary with the landmark names as keys and their x-y coordinates
+    """
+    with open(path, "r") as fp:
+        points = xmltodict.parse(fp.read())
+        points = OrderedDict(
+            {
+                point["@name"]: (point["@x"], point["@y"])
+                for point in points["namedpointset"]["pointworld"]
+            }
+        )
+
+    return points
