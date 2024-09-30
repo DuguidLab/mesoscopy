@@ -27,10 +27,14 @@ import h5py
 
 import time
 
+import importlib.resources as resources
+
 from skimage import transform as trf
 
 import mesoscopy.io as io
 import mesoscopy.plots as plots
+import mesoscopy.register.landmarks_gui as reg_gui
+import mesoscopy.resources
 
 from pynwb import TimeSeries
 from pynwb.image import ImageSeries
@@ -97,13 +101,25 @@ def register(
 
     session_id, deltaf_series, timestamps = _load_preprocessed(path, nwb)
 
+    click.echo("Generating Maximum Intensity Projection image...")
+    maxip = np.max(deltaf_series, axis=0)
+
     click.echo("Loading landmarks...")
-    template_landmarks = _get_landmarks(template_points)
-    recording_landmarks = _get_landmarks(recording_points)
+    template_landmarks = io.read_points(
+        str(
+            resources.files(mesoscopy.resources).joinpath(
+                "ccf_template_top_140x142.points"
+            )
+        )
+    )
+    recording_landmarks = reg_gui.mark_landmarks(maxip, template_landmarks)
+
+    template = np.array(list(template_landmarks.values()), dtype=np.float32)
+    recording = np.array(list(recording_landmarks.values()), dtype=np.float32)
 
     plots.plot_scatters(
-        xs=[template_landmarks[:, 0], recording_landmarks[:, 0]],
-        ys=[template_landmarks[:, 1], recording_landmarks[:, 1]],
+        xs=[template[:, 1], recording[:, 1]],
+        ys=[template[:, 0], recording[:, 0]],
         outpath=qa_dir
         + os.sep
         + session_id
@@ -114,13 +130,13 @@ def register(
 
     click.echo("Estimating transform...")
     start = time.time()
-    tform = trf.estimate_transform("affine", template_landmarks, recording_landmarks)
+    tform = trf.estimate_transform("affine", template, recording)
     end = time.time()
     click.echo("Transform estimated in {} s".format(end - start))
 
     plots.plot_scatters(
-        xs=[template_landmarks[:, 0], tform.inverse(recording_landmarks)[:, 0]],
-        ys=[template_landmarks[:, 1], tform.inverse(recording_landmarks)[:, 1]],
+        xs=[template[:, 1], tform.inverse(recording)[:, 1]],
+        ys=[template[:, 0], tform.inverse(recording)[:, 0]],
         outpath=qa_dir
         + os.sep
         + session_id
@@ -195,27 +211,6 @@ def _load_preprocessed(
         timestamps = f_preproc["/timestamps"]
 
     return session_id, deltaf_series, timestamps
-
-
-def _get_landmarks(points_path: str) -> np.ndarray:
-    """Load landmark points from a Fiji XML points file.
-
-    Args:
-        points_path (str): Path to the points file.
-
-    Returns:
-        np.ndarray: Array of landmark points.
-    """
-    with open(points_path, "r") as fp:
-        pts = xmltodict.parse(fp.read())
-        pts = OrderedDict(
-            {
-                point["@name"]: (point["@x"], point["@y"])
-                for point in pts["namedpointset"]["pointworld"]
-            }
-        )
-
-    return np.array(list(pts.values()), dtype=np.float32)
 
 
 def _update_nwb(nwb_path: str, h5_path: str, tform_params: np.ndarray) -> None:

@@ -23,9 +23,13 @@ import napari
 import typing
 import magicgui.widgets as mgw
 
+import mesoscopy.resources
+import mesoscopy.io as io
+
 import numpy as np
 import numpy.typing as npt
 
+from collections import OrderedDict
 from dask import array as da
 
 
@@ -42,7 +46,9 @@ COLOR_CYCLE = [
 ]
 
 
-def mark_landmarks(maxip_image: npt.NDArray | da.Array) -> dict:
+def mark_landmarks(
+    maxip_image: npt.NDArray | da.Array, template_landmarks: dict = {}
+) -> dict:
     """Launch the napari viewer to identify anatomical landmarks on a maximum intensity projection image.
 
     The following landmarks are identified for registration:
@@ -58,6 +64,7 @@ def mark_landmarks(maxip_image: npt.NDArray | da.Array) -> dict:
 
     Args:
         maxip_image (npt.NDArray): Maximum intensity projection image. Could be either channel.
+        template_landmarks (dict, optional): Dictionary with the landmarks and their x-y coordinates. Dictionary keys are landmark names, while x-y coordinates are stored as an (y, x) tuple. Defaults to {}.
 
     Returns:
         dict: Dictionary with the landmarks and their x-y coordinates. Dictionary keys are landmark names, while x-y coordinates are stored as an (y, x) tuple.
@@ -65,7 +72,7 @@ def mark_landmarks(maxip_image: npt.NDArray | da.Array) -> dict:
     maxip_height, maxip_width = maxip_image.shape
     viewer = napari.view_image(maxip_image)
 
-    default_landmark_locations = {
+    default_landmark_locations = template_landmarks or {
         "bregma": (maxip_height / 2, maxip_width / 2),
         "cFP": (maxip_height / 7, maxip_width / 2),
         "rFP": (maxip_height / 7, maxip_width / 1.5),
@@ -101,7 +108,7 @@ def mark_landmarks(maxip_image: npt.NDArray | da.Array) -> dict:
 
     napari.run()
 
-    return dict(zip(landmarks, points_layer.data))
+    return OrderedDict(zip(landmarks, points_layer.data))
 
 
 def _create_label_menu(points_layer, labels):
