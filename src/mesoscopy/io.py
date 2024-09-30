@@ -140,7 +140,7 @@ def read_points(path: str) -> dict[str, tuple[float, float]]:
         points = xmltodict.parse(fp.read())
         points = OrderedDict(
             {
-                point["@name"]: (point["@x"], point["@y"])
+                point["@name"]: (point["@y"], point["@x"])
                 for point in points["namedpointset"]["pointworld"]
             }
         )
