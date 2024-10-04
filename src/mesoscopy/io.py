@@ -18,6 +18,7 @@
 #  IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
+import csv
 import typing
 import xmltodict
 from collections import OrderedDict
@@ -128,6 +129,22 @@ def store_interim(
 
 
 def read_points(path: str) -> dict[str, tuple[float, float]]:
+    """Read a landmark points file.
+
+    Args:
+        path (str): Path to the points file.
+
+    Returns:
+        dict[str, tuple[float, float]]: Dictionary with the landmark names as keys and their x-y coordinates
+    """
+    if path.endswith(".xml") or path.endswith(".points"):
+        return _read_fiji_points(path)
+    if path.endswith(".csv"):
+        return _read_csv_points(path)
+    raise ValueError("Unsupported file format.")
+
+
+def _read_fiji_points(path: str) -> dict[str, tuple[float, float]]:
     """Read a FIJI landmark points file.
 
     Args:
@@ -140,9 +157,43 @@ def read_points(path: str) -> dict[str, tuple[float, float]]:
         points = xmltodict.parse(fp.read())
         points = OrderedDict(
             {
-                point["@name"]: (point["@y"], point["@x"])
+                point["@name"]: (float(point["@y"]), float(point["@x"]))
                 for point in points["namedpointset"]["pointworld"]
             }
         )
 
     return points
+
+
+def _read_csv_points(path: str) -> dict[str, tuple[float, float]]:
+    """Read a CSV file with landmark points.
+
+    Args:
+        path (str): Path to the CSV file.
+
+    Returns:
+        dict[str, tuple[float, float]]: Dictionary with the landmark names as keys and their x-y coordinates
+    """
+    with open(path, "r") as fp:
+        csv_reader = csv.DictReader(fp)
+        points = OrderedDict(
+            {row["landmark"]: (float(row["y"]), float(row["x"])) for row in csv_reader}
+        )
+
+    return points
+
+
+def write_points(path: str, points: dict[str, tuple[float, float]]) -> None:
+    """Write a dictionary of landmark points to a CSV file.
+
+    Args:
+        path (str): Path to output CSV file.
+        points (dict[str, tuple[float, float]]): Dictionary with the landmark names as keys and their x-y coordinates
+    """
+    if not path.endswith(".csv"):
+        path += ".csv"
+    with open(path, "w") as fp:
+        csv_writer = csv.DictWriter(fp, fieldnames=["landmark", "y", "x"])
+        csv_writer.writeheader()
+        for landmark, (y, x) in points.items():
+            csv_writer.writerow({"landmark": landmark, "y": y, "x": x})

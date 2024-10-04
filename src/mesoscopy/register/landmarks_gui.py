@@ -18,12 +18,9 @@
 #  IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
-import h5py
 import napari
-import typing
 import magicgui.widgets as mgw
 
-import mesoscopy.resources
 import mesoscopy.io as io
 
 import numpy as np
@@ -69,8 +66,10 @@ def mark_landmarks(
     Returns:
         dict: Dictionary with the landmarks and their x-y coordinates. Dictionary keys are landmark names, while x-y coordinates are stored as an (y, x) tuple.
     """
-    maxip_height, maxip_width = maxip_image.shape
+    maxip_height, maxip_width, _ = maxip_image.shape
     viewer = napari.view_image(maxip_image)
+
+    print(template_landmarks)
 
     default_landmark_locations = template_landmarks or {
         "bregma": (maxip_height / 2, maxip_width / 2),
@@ -83,6 +82,8 @@ def mark_landmarks(
         "rpRSP": (maxip_height / 1.25, maxip_width / 1.75),
         "aIPB": (maxip_height / 1.4, maxip_width / 2),
     }
+
+    print(default_landmark_locations)
 
     landmarks = list(default_landmark_locations.keys())
 
@@ -148,12 +149,3 @@ def _create_label_menu(points_layer, labels):
     label_menu.changed.connect(label_changed)
 
     return label_widget
-
-
-if __name__ == "__main__":
-    import sys
-    from skimage import io
-
-    maxip_path = sys.argv[1]
-    maxip_image = io.imread(maxip_path, as_gray=True)
-    print(mark_landmarks(maxip_image))

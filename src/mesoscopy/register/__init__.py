@@ -20,28 +20,87 @@
 #  SOFTWARE.
 import os
 import click
-import xmltodict
-import numpy as np
-from collections import OrderedDict
 import h5py
+import numpy as np
 
 import time
 
-import importlib.resources as resources
-
-from skimage import transform as trf
+import skimage.io as skio
 
 import mesoscopy.io as io
 import mesoscopy.plots as plots
 import mesoscopy.register.landmarks_gui as reg_gui
-import mesoscopy.resources
+import mesoscopy.register.transform as trf
+import mesoscopy.resources as res
 
 from pynwb import TimeSeries
 from pynwb.image import ImageSeries
 from pynwb.ophys import CorrectedImageStack
 
 
-@click.command()
+@click.group("register")
+def register() -> None:
+    """Register recordings to a template."""
+    pass
+
+
+@register.command("mark-landmarks")
+@click.argument(
+    "maxip_path",
+    type=click.Path(exists=True),
+)
+@click.option(
+    "-o",
+    "--out_dir",
+    type=click.Path(dir_okay=True),
+    default="./",
+    help="Output directory for registered recording.",
+)
+@click.option(
+    "-t",
+    "--template-points",
+    type=click.Path(dir_okay=False),
+    help="Path to template landmark points in CSV or Fiji XML points format",
+)
+@click.option(
+    "--session-id",
+    type=str,
+    help="Session ID for the recording.",
+)
+def mark_landmarks(maxip_path, out_dir, template_points, session_id) -> dict:
+    """Mark landmarks on a recording for registration to a template using the landmarks GUI.
+
+    Args:
+        maxip_path (str): Path to maximum intensity projection image.
+        out_dir (str): Output directory for registered recording.
+        template_points (str): Path to template landmark points in CSV or Fiji XML points format.
+        session_id (str): Session ID for the recording.
+    """
+
+    click.echo("Loading imaging data...")
+    maxip = skio.imread(maxip_path)
+
+    click.echo("Loading template landmarks...")
+    template_landmarks = res.get_default_landmarks()
+    if template_points:
+        template_landmarks = io.read_points(template_points)
+
+    click.echo("Launching landmark identification GUI...")
+    recording_landmarks = reg_gui.mark_landmarks(maxip, template_landmarks)
+
+    if not session_id:
+        session_id = os.path.basename(maxip_path).split(".")[0].split("_qa")[0]
+
+    click.echo("Saving recording landmarks...")
+    outpath = out_dir + os.sep + session_id + "_landmarks.csv"
+    io.write_points(outpath, recording_landmarks)
+
+    click.echo(f"Recording landmarks saved at {outpath}.")
+
+    return recording_landmarks
+
+
+@register.command("landmarks")
 @click.argument(
     "path",
     type=click.Path(exists=True),
@@ -67,7 +126,7 @@ from pynwb.ophys import CorrectedImageStack
 )
 @click.option("--crop-x", default=0, help="Crop recording along the x-axis.")
 @click.option("--crop-y", default=0, help="Crop recording along the y-axis.")
-def register(
+def register_landmarks(
     path: str,
     out_dir: str,
     recording_points: str,
@@ -75,13 +134,13 @@ def register(
     crop_x: int = 0,
     crop_y: int = 0,
 ) -> None:
-    """Register a recording to a template.
+    """Register a recording to a template based on defined landmarks.
 
     Args:
         path (str): Path to preprocessed recording HDF5 or NWB file.
         out_dir (str): Output directory for registered recording.
-        recording_points (str): Path to recording landmark points in Fiji XML points format.
-        template_points (str): Path to template landmark points in Fiji XML points format.
+        recording_points (str): Path to recording landmark points in CSV or Fiji XML points format.
+        template_points (str): Path to template landmark points in CSV or Fiji XML points format.
         crop_x (int, optional): Number of pixels to crop from the x-axis of the recording. Defaults to 0.
         crop_y (int, optional): Number of pixels to crop from the y-axis of the recording. Defaults to 0.
     """
@@ -101,65 +160,31 @@ def register(
 
     session_id, deltaf_series, timestamps = _load_preprocessed(path, nwb)
 
-    click.echo("Generating Maximum Intensity Projection image...")
-    maxip = np.max(deltaf_series, axis=0)
-
     click.echo("Loading landmarks...")
-    template_landmarks = io.read_points(
-        str(
-            resources.files(mesoscopy.resources).joinpath(
-                "ccf_template_top_140x142.points"
+    template_landmarks = res.get_default_landmarks()
+    if template_points:
+        template_landmarks = io.read_points(template_points)
+
+    if not recording_points:
+        if nwb and os.path.exists(path.replace(".nwb", "_landmarks.csv")):
+            recording_points = path.replace(".nwb", "_landmarks.csv")
+        elif os.path.exists(path.replace(".h5", "_landmarks.csv")):
+            recording_points = path.replace(".h5", "_landmarks.csv")
+        else:
+            raise ValueError(
+                "Path to recording landmarks could not be inferred. Please supply a recording landmarks file."
             )
-        )
+    recording_landmarks = io.read_points(recording_points)
+
+    warped, tform = trf.landmarks_affine(
+        deltaf_series,
+        recording_landmarks,
+        template_landmarks,
+        crop_x=crop_x,
+        crop_y=crop_y,
+        qa_dir=qa_dir,
+        session_id=session_id,
     )
-    recording_landmarks = reg_gui.mark_landmarks(maxip, template_landmarks)
-
-    template = np.array(list(template_landmarks.values()), dtype=np.float32)
-    recording = np.array(list(recording_landmarks.values()), dtype=np.float32)
-
-    plots.plot_scatters(
-        xs=[template[:, 1], recording[:, 1]],
-        ys=[template[:, 0], recording[:, 0]],
-        outpath=qa_dir
-        + os.sep
-        + session_id
-        + "_qa_registration_unregistered-landmarks.png",
-        labels=["template", "recording"],
-        message="Saved scatter of unregistered landmarks.",
-    )
-
-    click.echo("Estimating transform...")
-    start = time.time()
-    tform = trf.estimate_transform("affine", template, recording)
-    end = time.time()
-    click.echo("Transform estimated in {} s".format(end - start))
-
-    plots.plot_scatters(
-        xs=[template[:, 1], tform.inverse(recording)[:, 1]],
-        ys=[template[:, 0], tform.inverse(recording)[:, 0]],
-        outpath=qa_dir
-        + os.sep
-        + session_id
-        + "_qa_registration_registered-landmarks.png",
-        labels=["template", "registered"],
-        message="Saved scatter of registered landmarks.",
-    )
-
-    start = time.time()
-    _warped = []
-    with click.progressbar(
-        range(deltaf_series.shape[0]), label="Registering recording to template..."
-    ) as frame_ids:
-        for idx in frame_ids:
-            if crop_x > 0 or crop_y > 0:
-                _warped.append(
-                    trf.warp(deltaf_series[idx, :crop_y, :crop_x], tform, order=3)
-                )
-            else:
-                _warped.append(trf.warp(deltaf_series[idx], tform, order=3))
-    warped = np.array(_warped)
-    end = time.time()
-    click.echo("Session registered in {} s".format(end - start))
 
     plots.plot_frame(
         warped[100],
@@ -183,7 +208,7 @@ def register(
 
     if nwb:
         click.echo("Updating NWB file...")
-        _update_nwb(path, h5_path, tform.params[None, :])
+        _update_nwb(path, h5_path, tform)
         click.echo("Updated NWB file at {}".format(path))
 
 
