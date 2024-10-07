@@ -1,6 +1,6 @@
 import pytest
-
 import numpy as np
+import importlib.resources as resources
 
 from datetime import datetime, timedelta
 from dateutil.tz import tzlocal
@@ -8,6 +8,7 @@ from pynwb import NWBFile, NWBHDF5IO
 from uuid import uuid4
 
 import mesoscopy.io as io
+import mesoscopy.resources
 
 
 def test_read_h5(raw_h5):
@@ -54,3 +55,39 @@ def test_store_interim(tmp_path):
     path = tmp_path / "test.h5"
     data = np.random.rand(300, 142, 142)
     io.store_interim(data, str(path))
+
+
+def test_load_interim(tmp_path):
+    path = tmp_path / "test.h5"
+    data = np.random.rand(300, 142, 142)
+    assert io.store_interim(data, str(path)).any()
+
+
+def test_read_points_fiji():
+    assert io.read_points(
+        str(
+            resources.files(mesoscopy.resources).joinpath(
+                "ccf_template_top_140x142.points"
+            )
+        )
+    )
+
+
+def test_read_points_csv():
+    assert io.read_points(
+        str(
+            resources.files(mesoscopy.resources).joinpath(
+                "ccf_template_landmarks_140x142.csv"
+            )
+        )
+    )
+
+
+def test_write_points_csv(tmp_path):
+    path = tmp_path / "test_points.csv"
+    data = {
+        "testArea": [0, 200],
+        "anotherTestArea": [250, 20]
+    }
+    io.write_points(str(path), data)
+
