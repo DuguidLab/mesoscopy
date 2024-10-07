@@ -95,8 +95,13 @@ def test_read_points_csv():
     )
 
 
+def test_read_points_unsupported():
+    with pytest.raises(ValueError):
+        io.read_points("unsupported.file")
+
+
 def test_write_points_csv(tmp_path):
-    path = tmp_path / "test_points.csv"
+    path = tmp_path / "test_points"
     data = {
         "testArea": [0, 200],
         "anotherTestArea": [250, 20]
