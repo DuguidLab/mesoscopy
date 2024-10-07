@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE namedpointset [
+  <!ELEMENT namedpointset (pointworld*)>
+  <!ELEMENT pointworld EMPTY>
+  <!ATTLIST namedpointset version CDATA #REQUIRED>
+  <!ATTLIST pointworld set (true|false) #REQUIRED>
+  <!ATTLIST pointworld name CDATA #REQUIRED>
+  <!ATTLIST pointworld x CDATA #IMPLIED>
+  <!ATTLIST pointworld y CDATA #IMPLIED>
+  <!ATTLIST pointworld z CDATA #IMPLIED>
+]>
+
+<namedpointset version="1.0">
+  <pointworld set="true" name="bregma" x="71.0" y="60.0" z="0.0"/>
+  <pointworld set="true" name="cFP" x="71.0" y="19.0" z="0.0"/>
+  <pointworld set="true" name="lFP" x="51.0" y="19.0" z="0.0"/>
+  <pointworld set="true" name="rFP" x="90.0" y="19.0" z="0.0"/>
+  <pointworld set="true" name="lPB" x="30.0" y="35.0" z="0.0"/>
+  <pointworld set="true" name="rPB" x="111.0" y="35.0" z="0.0"/>
+  <pointworld set="true" name="lpRSP" x="60.0" y="115.0" z="0.0"/>
+  <pointworld set="true" name="rpRSP" x="81.0" y="115.0" z="0.0"/>
+  <pointworld set="true" name="aIPB" x="71.0" y="102.0" z="0.0"/>
+</namedpointset>

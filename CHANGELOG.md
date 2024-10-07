@@ -4,6 +4,10 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 ## [Unreleased]
 
+### Added
+
+- Registration GUI with Napari for identifying anatomical landmarks.
+
 ### Changed
 
 - Dropped python 3.8 support, now requires 3.12 or above.
@@ -11,6 +15,7 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 - Major API refactoring, to break up large `__init__` files and create a more consistent interface.
 - Non-command entries to `__init__` files are now marked as private.
 - `preprocess` command no longer requires output directory to be specified; this is now an optional flag which defaults to the user's current directory.
+- `register` command now contains a `mark-landmarks` subcommand, which launches the landmark annotation GUI. The `landmarks` subcommand now accepts registration points in CSV format (exported from the landmark registration GUI) in addition to FIJI XML points.
 
 ### Fixed
 
@@ -18,7 +23,6 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 ### Removed
 
-- Removed `landmarks` subcommand; the parent `register` command now does the same thing.
 - Removed average image generation from `register` command (previously under now removed `utils` module).
 - Removed processing `aba` module, which used to extract average dF/F traces per ABA area and write output as CSV.
 
