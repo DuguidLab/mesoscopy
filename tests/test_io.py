@@ -1,6 +1,7 @@
 import pytest
 import numpy as np
 import importlib.resources as resources
+import dask.array as da
 
 from datetime import datetime, timedelta
 from dateutil.tz import tzlocal
@@ -13,6 +14,11 @@ import mesoscopy.resources
 
 def test_read_h5(raw_h5):
     _ = io.read_h5(raw_h5)
+
+
+def test_h5_write_not_implemented():
+    with pytest.raises(NotImplementedError):
+        io.write_h5()
 
 
 def test_read_nwb(nwbfile):
@@ -52,9 +58,15 @@ def test_write_nwb_io(tmp_path):
 
 
 def test_store_interim(tmp_path):
-    path = tmp_path / "test.h5"
+    path = tmp_path / "test.zarr"
     data = np.random.rand(300, 142, 142)
     io.store_interim(data, str(path))
+
+
+def test_store_interim_dask(tmp_path):
+    path = tmp_path / "test.zarr"
+    dask_data = da.from_array(np.random.rand(300, 142, 142), chunks=(100, 142, 142))
+    io.store_interim(dask_data, str(path))
 
 
 def test_load_interim(tmp_path):
