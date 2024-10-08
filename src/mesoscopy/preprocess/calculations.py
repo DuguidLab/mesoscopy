@@ -137,6 +137,9 @@ def channel_dff(
     Returns:
         zarr.core.Array: dF/F array as a persistent Zarr array object.
     """
+    if type(array) == np.ndarray:
+        array = da.from_array(array, chunks=(100, array.shape[1], array.shape[2]))
+
     cumsum_vec = da.cumsum(
         da.insert(array[channel_filter], 0, 0, axis=0), dtype=np.uint32, axis=0
     )
