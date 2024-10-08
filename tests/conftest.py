@@ -20,9 +20,9 @@ def nwbfile(tmp_path_factory):
 
     nwbfile = NWBFile(
         session_description="Test file, not real data",
-        identifier=str(uuid4()),
+        identifier="session_1234",
         session_start_time=session_start_time,
-        session_id="session_1234",
+        # session_id="session_1234",
     )
 
     # Add fake raw imaging data
@@ -51,7 +51,7 @@ def nwbfile(tmp_path_factory):
         grid_spacing_unit="micrometers",
     )
 
-    frames_num = 400
+    frames_num = 300
     timestamps = [
         (timedelta(milliseconds=i)).total_seconds() for i in range(frames_num)
     ]
@@ -83,7 +83,7 @@ def nwbfile(tmp_path_factory):
 def raw_h5(tmp_path_factory):
     """Create an HDF5 file with fake raw data for testing."""
     # Create a temporary file
-    tmpfile = tmp_path_factory.mktemp("data") / "preproc.h5"
+    tmpfile = tmp_path_factory.mktemp("data") / "preproc_test.h5"
     # Create timestamps
     timestamps = [
         (datetime.now() + timedelta(milliseconds=i))
