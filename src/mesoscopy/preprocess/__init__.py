@@ -89,7 +89,7 @@ from pynwb.image import ImageSeries
     type=int,
     help="Number of frames to skip at the end of the recording.",
 )
-def preprocess(
+def preprocess_cmd(
     path: str,
     out_dir: str,
     chunks: int = 100,

@@ -39,12 +39,12 @@ from pynwb.ophys import CorrectedImageStack
 
 
 @click.group("register")
-def register() -> None:
+def register_cmd() -> None:
     """Register recordings to a template."""
     pass
 
 
-@register.command("mark-landmarks")
+@register_cmd.command("mark-landmarks")
 @click.argument(
     "maxip_path",
     type=click.Path(exists=True),
@@ -100,7 +100,7 @@ def mark_landmarks(maxip_path, out_dir, template_points, session_id) -> dict:
     return recording_landmarks
 
 
-@register.command("landmarks")
+@register_cmd.command("landmarks")
 @click.argument(
     "path",
     type=click.Path(exists=True),

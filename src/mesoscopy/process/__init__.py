@@ -24,5 +24,5 @@ import click
 
 
 @click.group()
-def process():
+def process_cmd():
     raise NotImplementedError("This command is not implemented yet.")

@@ -69,7 +69,7 @@ def sample(path, out_dir, index, crop=0, vmin=0, vmax=255, key="frames"):
     click.echo("Saved sample at {}".format(outpath))
 
 
-cli.add_command(preprocess.preprocess)
-cli.add_command(process.process)
-cli.add_command(postprocess.postprocess)
-cli.add_command(register.register)
+cli.add_command(preprocess.preprocess_cmd)
+cli.add_command(process.process_cmd)
+cli.add_command(postprocess.postprocess_cmd)
+cli.add_command(register.register_cmd)
