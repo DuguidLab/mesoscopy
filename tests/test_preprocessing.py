@@ -5,11 +5,17 @@ import mesoscopy.preprocess.calculations as calculations
 
 
 def test_load_raw_h5(raw_h5):
-    preprocess._load_raw(raw_h5, nwb=False)
+    session_id, imaging_data, timestamps = preprocess._load_raw(raw_h5, nwb=False)
+    assert session_id == "preproc_test"
+    assert imaging_data.shape == (300, 142, 142)
+    assert len(timestamps) == 300
 
 
 def test_load_raw_nwb(nwbfile):
-    preprocess._load_raw(nwbfile, nwb=True)
+    session_id, imaging_data, timestamps = preprocess._load_raw(nwbfile, nwb=True)
+    assert session_id == "session_1234"
+    assert imaging_data.shape == (300, 142, 142)
+    assert len(timestamps) == 300
 
 
 def test_channel_qa():
