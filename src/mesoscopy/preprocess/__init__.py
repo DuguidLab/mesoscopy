@@ -36,7 +36,7 @@ from dask import array as da
 from pynwb.image import ImageSeries
 
 
-@click.command()
+@click.command(name="preprocess")
 @click.argument(
     "path",
     type=click.Path(exists=True),
@@ -90,6 +90,13 @@ from pynwb.image import ImageSeries
     help="Number of frames to skip at the end of the recording.",
 )
 def preprocess_cmd(
+    **kwargs: typing.Any,
+) -> None:
+    """This command will preprocess a single session dual-channel mixed recording to extract a deltaF signal corrected for the haemodynamic response."""
+    run_preprocessing(**kwargs)
+
+
+def run_preprocessing(
     path: str,
     out_dir: str,
     chunks: int = 100,
@@ -136,7 +143,7 @@ def preprocess_cmd(
     # Determine whether we're working with an NWB file
     nwb = True if path.endswith(".nwb") else False
 
-    session_id, d, ts = _load_raw(path, nwb=nwb)
+    session_id, d, ts = load_raw(path, nwb=nwb)
 
     if skip_end:
         skip_end = -skip_end
@@ -208,7 +215,7 @@ def preprocess_cmd(
     # Generate the mean gcamp frame and its std
     click.echo("Generating mean gcamp frame and its maximum intensity projection...")
     start = time.time()
-    _channel_qa(
+    channel_qa(
         binned_frames,
         gcamp_filter,
         qa_dir=qa_dir,
@@ -227,7 +234,7 @@ def preprocess_cmd(
         "Generating mean isosbestic frame and its maximum intensity projection..."
     )
     start = time.time()
-    _channel_qa(
+    channel_qa(
         binned_frames,
         isosb_filter,
         qa_dir=qa_dir,
@@ -340,14 +347,14 @@ def preprocess_cmd(
 
     if nwb:
         click.echo("Updating NWB file...")
-        _update_nwb(path, outpath)
+        update_nwb(path, outpath)
         click.echo("Updated NWB file at {}".format(path))
 
     click.echo("Cleaning up...")
     shutil.rmtree(interim_dir)
 
 
-def _load_raw(
+def load_raw(
     raw_path: str, nwb: bool = False
 ) -> tuple[str, da.Array | np.ndarray, da.Array | np.ndarray]:
     """Load raw imaging data from an HDF5 or NWB file.
@@ -377,7 +384,7 @@ def _load_raw(
     return session_id, imaging_data, timestamps
 
 
-def _update_nwb(nwb_path: str, h5_path: str) -> None:
+def update_nwb(nwb_path: str, h5_path: str) -> None:
     """Update an NWB file with a delta F imaging series stored in an HDF5 file.
 
     Creates a link between the NWB file and the HDF5 file. See https://pynwb.readthedocs.io/en/stable/tutorials/advanced_io/linking_data.html.
@@ -408,7 +415,7 @@ def _update_nwb(nwb_path: str, h5_path: str) -> None:
     return nwbfile
 
 
-def _channel_qa(
+def channel_qa(
     array: da.Array | np.ndarray,
     channel_filter: list | da.Array | np.ndarray,
     qa_dir: str = ".",
