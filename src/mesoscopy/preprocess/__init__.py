@@ -405,6 +405,8 @@ def _update_nwb(nwb_path: str, h5_path: str) -> None:
 
     io.write_nwb(nwb_path, nwbfile, io=nwbio)
 
+    return nwbfile
+
 
 def _channel_qa(
     array: da.Array | np.ndarray,
