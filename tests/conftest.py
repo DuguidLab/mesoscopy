@@ -113,3 +113,9 @@ def preproc_h5(tmp_path_factory):
         f.create_dataset("timestamps", data=np.arange(300))
     # Return the path to the temporary file
     return str(tmpfile)
+
+
+@pytest.fixture(scope="session")
+def output_dir(tmp_path_factory):
+    """Create a temporary directory for output."""
+    return str(tmp_path_factory.mktemp("output"))
