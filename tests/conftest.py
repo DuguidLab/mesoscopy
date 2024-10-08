@@ -10,8 +10,14 @@ from pynwb import NWBFile, NWBHDF5IO
 from pynwb.ophys import OpticalChannel, OnePhotonSeries
 
 
-@pytest.fixture
-def nwbfile(tmp_path_factory):
+@pytest.fixture(scope="session")
+def random_idx():
+    """Return a random index for testing."""
+    return np.sort(np.random.choice(600, 300, replace=False))
+
+
+@pytest.fixture(scope="session")
+def nwbfile(tmp_path_factory, random_idx):
     """Create an NWBFile object for testing."""
     # Create a temporary file
     tmpfile = tmp_path_factory.mktemp("data") / "test.nwb"
@@ -51,7 +57,16 @@ def nwbfile(tmp_path_factory):
         grid_spacing_unit="micrometers",
     )
 
-    frames_num = 300
+    # Generate mock dual-channel imaging data
+    mock_gcamp = np.random.normal(70, 200, size=(300, 142, 142))
+    mock_isosb = np.random.normal(65, 50, size=(300, 142, 142))
+
+    # Merge the two channels in random order
+    mock_dual_channel = np.insert(
+        mock_gcamp, random_idx - np.arange(len(random_idx)), mock_isosb, axis=0
+    )
+
+    frames_num = 600
     timestamps = [
         (timedelta(milliseconds=i)).total_seconds() for i in range(frames_num)
     ]
@@ -59,7 +74,7 @@ def nwbfile(tmp_path_factory):
     imaging_series = OnePhotonSeries(
         name="DualChannelImagingSeries",
         imaging_plane=imaging_plane,
-        data=np.random.rand(frames_num, 142, 142),
+        data=mock_dual_channel,
         timestamps=timestamps,
         unit="pixel_intensity",
         binning=2,
@@ -80,7 +95,7 @@ def nwbfile(tmp_path_factory):
 
 
 @pytest.fixture(scope="session")
-def raw_h5(tmp_path_factory):
+def raw_h5(tmp_path_factory, random_idx):
     """Create an HDF5 file with fake raw data for testing."""
     # Create a temporary file
     tmpfile = tmp_path_factory.mktemp("data") / "preproc_test.h5"
@@ -91,13 +106,23 @@ def raw_h5(tmp_path_factory):
         .replace("-", "")
         .replace(":", "")
         .replace(".", "")
-        for i in range(300)
+        for i in range(600)
     ]
-    print(timestamps)
+    # Generate mock dual-channel imaging data
+    mock_gcamp = np.random.normal(70, 200, size=(300, 142, 142))
+    mock_isosb = np.random.normal(65, 50, size=(300, 142, 142))
+
+    # Merge the two channels in random order
+    mock_dual_channel = np.insert(
+        mock_gcamp, random_idx - np.arange(len(random_idx)), mock_isosb, axis=0
+    )
+
     # Create an HDF5 file
     with h5.File(str(tmpfile), "w") as f:
-        f.create_dataset("frames", data=np.random.rand(300, 142, 142))
+        f.create_dataset("frames", data=mock_dual_channel)
         f.create_dataset("timestamps", data=timestamps)
+        f.create_dataset("test_isosb_idx", data=random_idx)
+
     # Return the path to the temporary file
     return str(tmpfile)
 
