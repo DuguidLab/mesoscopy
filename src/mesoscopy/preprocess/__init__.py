@@ -362,7 +362,7 @@ def _load_raw(
     if nwb:
         nwbfile = io.read_nwb(raw_path)
 
-        session_id = nwbfile.session_id
+        session_id = nwbfile.identifier
 
         imaging_data = nwbfile.acquisition["DualChannelImagingSeries"].data
         timestamps = nwbfile.acquisition["DualChannelImagingSeries"].timestamps
