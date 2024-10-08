@@ -23,7 +23,10 @@ def test_channel_qa():
 
 
 def test_nwb_link(nwbfile, preproc_h5):
-    preprocess._update_nwb(nwbfile, preproc_h5)
+    nwb = preprocess._update_nwb(nwbfile, preproc_h5)
+    assert nwb.processing["ophys"]["DeltaFSeries"].data
+    assert nwb.processing["ophys"]["DeltaFSeries"].data.shape == (300, 142, 142)
+    assert nwb.processing["ophys"]["DeltaFSeries"].timestamps
 
 
 def test_preprocess_h5(raw_h5):
