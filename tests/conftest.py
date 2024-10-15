@@ -58,8 +58,8 @@ def nwbfile(tmp_path_factory, random_idx):
     )
 
     # Generate mock dual-channel imaging data
-    mock_gcamp = np.random.normal(70, 200, size=(300, 142, 142))
-    mock_isosb = np.random.normal(65, 50, size=(300, 142, 142))
+    mock_gcamp = np.random.normal(70, 200, size=(300, 40, 40))
+    mock_isosb = np.random.normal(65, 50, size=(300, 40, 40))
 
     # Merge the two channels in random order
     mock_dual_channel = np.insert(
@@ -109,8 +109,8 @@ def raw_h5(tmp_path_factory, random_idx):
         for i in range(600)
     ]
     # Generate mock dual-channel imaging data
-    mock_gcamp = np.random.normal(70, 200, size=(300, 142, 142))
-    mock_isosb = np.random.normal(65, 50, size=(300, 142, 142))
+    mock_gcamp = np.random.normal(70, 200, size=(300, 40, 40))
+    mock_isosb = np.random.normal(65, 50, size=(300, 40, 40))
 
     # Merge the two channels in random order
     mock_dual_channel = np.insert(
@@ -134,7 +134,7 @@ def preproc_h5(tmp_path_factory):
     tmpfile = tmp_path_factory.mktemp("data") / "preproc.h5"
     # Create an HDF5 file
     with h5.File(str(tmpfile), "w") as f:
-        f.create_dataset("data", data=np.random.rand(300, 142, 142))
+        f.create_dataset("data", data=np.random.rand(300, 40, 40))
         f.create_dataset("timestamps", data=np.arange(300))
     # Return the path to the temporary file
     return str(tmpfile)
