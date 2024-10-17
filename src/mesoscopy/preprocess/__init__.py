@@ -252,6 +252,12 @@ def run_preprocessing(
 
     window_width = 30 * 25
 
+    if window_width > binned_frames.shape[0]:
+        click.echo(
+            f"WARNING: Default window width is larger than the number of frames. Setting window width to { binned_frames.shape[0] // 2}."
+        )
+        window_width = binned_frames.shape[0] // 2
+
     click.echo("Calculating ∂F for the gcamp channel...")
     start = time.time()
     gcamp_dff = calc.channel_dff(
