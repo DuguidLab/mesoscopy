@@ -341,7 +341,7 @@ def run_preprocessing(
     # Save timestamps
     outpath = out_dir + os.sep + session_id + "_preprocessed.h5"
     click.echo("Appending timestamps to {}".format(outpath))
-    timestamps = da.from_array(ts[gcamp_filter], chunks="auto")
+    timestamps = da.from_array(np.array(ts[gcamp_filter], dtype="S25"), chunks="auto")
     da.to_hdf5(outpath, "/timestamps", timestamps)
 
     preprocessing_end = time.time()

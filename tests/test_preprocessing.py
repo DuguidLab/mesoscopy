@@ -137,11 +137,37 @@ def test_channel_dff(output_dir, random_idx):
     assert dff.shape == (300, 20, 20)
 
 
+def test_channel_dff_invalid_window(output_dir, random_idx):
+    # Generate mock dual-channel imaging data
+    mock_gcamp = np.random.normal(70, 200, size=(300, 20, 20))
+    mock_isosb = np.random.normal(65, 50, size=(300, 20, 20))
+
+    # Merge the two channels in random order
+    mock_dual_channel = np.insert(
+        mock_gcamp, random_idx - np.arange(len(random_idx)), mock_isosb, axis=0
+    )
+
+    gcamp_filter, isosb_filter = calculations.separate_channels(
+        array=da.from_array(mock_dual_channel, chunks=(100, 20, 20)),
+        qa_dir=output_dir,
+        session_id="null",
+        flip_channels=True,
+    )
+
+    with pytest.raises(ValueError):
+        calculations.channel_dff(
+            array=mock_dual_channel,
+            channel_filter=gcamp_filter,
+            interim_dir=output_dir,
+            session_id="null",
+            window_width=700,
+        )
+
+
 def test_preprocess_h5(raw_h5, output_dir):
-    # preprocess.run_preprocessing(
-    #     path=raw_h5, out_dir=output_dir, interim_dir=output_dir
-    # )
-    ...
+    preprocess.run_preprocessing(
+        path=raw_h5, out_dir=output_dir, interim_dir=output_dir
+    )
 
 
 def test_preprocess_h5_crop(raw_h5): ...

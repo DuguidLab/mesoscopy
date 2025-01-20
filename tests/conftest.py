@@ -2,6 +2,7 @@ import pytest
 
 import numpy as np
 import h5py as h5
+import tables
 
 from datetime import datetime, timedelta
 from dateutil.tz import tzlocal
@@ -120,7 +121,7 @@ def raw_h5(tmp_path_factory, random_idx):
     # Create an HDF5 file
     with h5.File(str(tmpfile), "w") as f:
         f.create_dataset("frames", data=mock_dual_channel)
-        f.create_dataset("timestamps", data=timestamps)
+        f.create_dataset("timestamps", data=timestamps, dtype="S26")
         f.create_dataset("test_isosb_idx", data=random_idx)
 
     # Return the path to the temporary file
@@ -135,7 +136,9 @@ def preproc_h5(tmp_path_factory):
     # Create an HDF5 file
     with h5.File(str(tmpfile), "w") as f:
         f.create_dataset("data", data=np.random.rand(300, 40, 40))
-        f.create_dataset("timestamps", data=np.arange(300))
+        f.create_dataset(
+            "timestamps", data=[datetime.now().isoformat() for _ in range(300)]
+        )
     # Return the path to the temporary file
     return str(tmpfile)
 
