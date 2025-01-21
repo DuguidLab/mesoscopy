@@ -143,6 +143,10 @@ def channel_dff(
     if window_width > len(array):
         raise ValueError("Window width must be less than the number of frames.")
 
+    # If window width is an odd number, add 1 to make it even to avoid broadcast errors
+    if window_width % 2 != 0:
+        window_width = window_width + 1
+
     cumsum_vec = da.cumsum(
         da.insert(array[channel_filter], 0, 0, axis=0), dtype=np.uint32, axis=0
     )
