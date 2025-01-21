@@ -170,13 +170,36 @@ def test_preprocess_h5(raw_h5, output_dir):
     )
 
 
-def test_preprocess_h5_crop(raw_h5): ...
+def test_preprocess_h5_crop(raw_h5, output_dir):
+    preprocess.run_preprocessing(
+        path=raw_h5, out_dir=output_dir, interim_dir=output_dir, crop=5
+    )
 
 
-def test_preprocess_h5_frameskip(raw_h5): ...
+def test_preprocess_h5_frameskip(raw_h5, output_dir):
+    # Skip odd frames
+    preprocess.run_preprocessing(
+        path=raw_h5,
+        out_dir=output_dir,
+        interim_dir=output_dir,
+        skip_start=5,
+        skip_end=5,
+    )
+
+    # Skip even frames
+    preprocess.run_preprocessing(
+        path=raw_h5,
+        out_dir=output_dir,
+        interim_dir=output_dir,
+        skip_start=50,
+        skip_end=50,
+    )
 
 
-def test_preprocess_h5_bin(raw_h5): ...
+def test_preprocess_h5_bin(raw_h5, output_dir):
+    preprocess.run_preprocessing(
+        path=raw_h5, out_dir=output_dir, interim_dir=output_dir, bins=4
+    )
 
 
 def test_preprocess_nwb(nwbfile): ...
