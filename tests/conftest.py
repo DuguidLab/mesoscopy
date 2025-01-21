@@ -143,7 +143,7 @@ def preproc_h5(tmp_path_factory):
     return str(tmpfile)
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture()
 def output_dir(tmp_path_factory):
     """Create a temporary directory for output."""
     return str(tmp_path_factory.mktemp("output"))
