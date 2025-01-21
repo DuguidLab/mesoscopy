@@ -145,6 +145,8 @@ def run_preprocessing(
 
     session_id, d, ts = load_raw(path, nwb=nwb)
 
+    if skip_start and skip_start != 0:
+        skip_start = skip_start - 1
     if skip_end:
         skip_end = -skip_end
 
@@ -254,9 +256,9 @@ def run_preprocessing(
 
     if window_width > binned_frames.shape[0]:
         click.echo(
-            f"WARNING: Default window width is larger than the number of frames. Setting window width to { binned_frames.shape[0] // 2}."
+            f"WARNING: Default window width is larger than the number of frames. Setting window width to { binned_frames.shape[0] // 4}."
         )
-        window_width = binned_frames.shape[0] // 2
+        window_width = binned_frames.shape[0] // 4
 
     click.echo("Calculating ∂F for the gcamp channel...")
     start = time.time()
