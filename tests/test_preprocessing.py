@@ -202,16 +202,44 @@ def test_preprocess_h5_bin(raw_h5, output_dir):
     )
 
 
-def test_preprocess_nwb(nwbfile): ...
+def test_preprocess_nwb(nwbfile, output_dir):
+    preprocess.run_preprocessing(
+        path=nwbfile, out_dir=output_dir, interim_dir=output_dir
+    )
 
 
-def test_preprocess_nwb_crop(nwbfile): ...
+def test_preprocess_nwb_crop(nwbfile, output_dir):
+    preprocess.run_preprocessing(
+        path=nwbfile, out_dir=output_dir, interim_dir=output_dir, crop=5
+    )
 
 
-def test_preprocess_nwb_frameskip(nwbfile): ...
+def test_preprocess_nwb_frameskip_odd(nwbfile, output_dir):
+    # Skip odd frames
+    preprocess.run_preprocessing(
+        path=nwbfile,
+        out_dir=output_dir,
+        interim_dir=output_dir,
+        skip_start=5,
+        skip_end=5,
+    )
 
 
-def test_preprocess_nwb_bin(nwbfile): ...
+def test_preprocess_nwb_frameskip_even(nwbfile, output_dir):
+    # Skip even frames
+    preprocess.run_preprocessing(
+        path=nwbfile,
+        out_dir=output_dir,
+        interim_dir=output_dir,
+        skip_start=50,
+        skip_end=50,
+    )
+
+
+def test_preprocess_nwb_bin(nwbfile, output_dir):
+    preprocess.run_preprocessing(
+        path=nwbfile, out_dir=output_dir, interim_dir=output_dir, bins=4
+    )
 
 
 def test_preprocess_nwb_channel_means(nwbfile): ...
