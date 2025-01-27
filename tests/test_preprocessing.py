@@ -202,6 +202,12 @@ def test_preprocess_h5_bin(raw_h5, output_dir):
     )
 
 
+def test_preprocess_h5_channelmeansonly(raw_h5, output_dir):
+    preprocess.run_preprocessing(
+        path=raw_h5, out_dir=output_dir, interim_dir=output_dir, channel_means_only=True
+    )
+
+
 def test_preprocess_nwb(nwbfile, output_dir):
     preprocess.run_preprocessing(
         path=nwbfile, out_dir=output_dir, interim_dir=output_dir
@@ -242,19 +248,10 @@ def test_preprocess_nwb_bin(nwbfile, output_dir):
     )
 
 
-def test_preprocess_nwb_channel_means(nwbfile): ...
-
-
-def test_preprocess_nwb_use_means(nwbfile): ...
-
-
-def test_preprocess_nwb_flip_channels(nwbfile): ...
-
-
-def test_preprocess_nwb_use_means_flip_channels(nwbfile): ...
-
-
-def test_preprocess_nwb_interim_dir(nwbfile): ...
-
-
-def test_preprocess_nwb_chunksize(nwbfile): ...
+def test_preprocess_nwb_channelmeansonly(nwbfile, output_dir):
+    preprocess.run_preprocessing(
+        path=nwbfile,
+        out_dir=output_dir,
+        interim_dir=output_dir,
+        channel_means_only=True,
+    )
