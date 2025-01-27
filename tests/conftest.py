@@ -17,7 +17,7 @@ def random_idx():
     return np.sort(np.random.choice(600, 300, replace=False))
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture()
 def nwbfile(tmp_path_factory, random_idx):
     """Create an NWBFile object for testing."""
     # Create a temporary file
