@@ -4,6 +4,8 @@ from click.testing import CliRunner
 import numpy as np
 from dask import array as da
 
+import mesoscopy
+
 import mesoscopy.preprocess as preprocess
 import mesoscopy.preprocess.calculations as calculations
 
@@ -255,3 +257,13 @@ def test_preprocess_nwb_channelmeansonly(nwbfile, output_dir):
         interim_dir=output_dir,
         channel_means_only=True,
     )
+
+
+def test_cmd_parity(raw_h5, output_dir):
+    """Check if click preprocess cmd caller works"""
+    runner = CliRunner()
+    result = runner.invoke(
+        mesoscopy.cli,
+        args=f"preprocess --out_dir {output_dir} --interim_dir {output_dir} {raw_h5}",
+    )
+    assert result.exit_code == 0
