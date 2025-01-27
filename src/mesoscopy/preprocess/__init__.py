@@ -153,6 +153,9 @@ def run_preprocessing(
     if skip_start or skip_end:
         d = d[skip_start:skip_end]
         ts = ts[skip_start:skip_end]
+    else:
+        d = d[:]
+        ts = ts[:]
 
     raw_frames = da.from_array(d, chunks="auto")
     if chunks > 0:
