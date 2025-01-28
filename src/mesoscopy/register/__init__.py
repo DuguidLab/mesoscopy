@@ -232,7 +232,7 @@ def _load_preprocessed(
     else:
         session_id = path.split("/")[-1].replace(".h5", "")
         f_preproc = h5py.File(path)
-        deltaf_series = f_preproc["/frames"]
+        deltaf_series = f_preproc["/data"]
         timestamps = f_preproc["/timestamps"]
 
     return session_id, deltaf_series, timestamps
