@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from dateutil.tz import tzlocal
 from uuid import uuid4
 from pynwb import NWBFile, NWBHDF5IO
-from pynwb.ophys import OpticalChannel, OnePhotonSeries
+from pynwb.ophys import OpticalChannel, OnePhotonSeries, ImageSeries
 
 
 @pytest.fixture(scope="session")
@@ -128,19 +128,47 @@ def raw_h5(tmp_path_factory, random_idx):
     return str(tmpfile)
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def preproc_h5(tmp_path_factory):
     """Create an HDF5 file with fake preprocessed data for testing."""
     # Create a temporary file
     tmpfile = tmp_path_factory.mktemp("data") / "preproc.h5"
+    frames_num = 300
+    timestamps = [
+        (timedelta(milliseconds=i)).total_seconds() for i in range(frames_num)
+    ]
     # Create an HDF5 file
     with h5.File(str(tmpfile), "w") as f:
-        f.create_dataset("data", data=np.random.rand(300, 40, 40))
-        f.create_dataset(
-            "timestamps", data=[datetime.now().isoformat() for _ in range(300)]
-        )
+        f.create_dataset("/data", data=np.random.rand(300, 40, 40))
+        f.create_dataset("/timestamps", data=timestamps)
     # Return the path to the temporary file
     return str(tmpfile)
+
+
+@pytest.fixture
+def preproc_nwb(nwbfile, preproc_h5):
+    f = h5.File(preproc_h5, "r")
+    io = NWBHDF5IO(nwbfile, "a")
+    nwb = io.read()
+    print(f["/timestamps"][:])
+    deltaF_series = ImageSeries(
+        name="DeltaFSeries",
+        data=f["/data"][:],
+        timestamps=f["/timestamps"][:],
+        unit="df/f",
+        description="dF/F widefield cortical imaging series.",
+        comments="This imaging series is corrected for the haemodynamic response.",
+    )
+
+    ophys_module = nwb.create_processing_module(
+        name="ophys", description="optical physiology processed data"
+    )
+
+    ophys_module.add(deltaF_series)
+
+    io.write(nwb)
+
+    return nwbfile
 
 
 @pytest.fixture()
