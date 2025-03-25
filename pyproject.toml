@@ -64,6 +64,9 @@ path = "src/mesoscopy/__about__.py"
 python = "3.12"
 path = ".hatch"
 
+[[tool.hatch.envs.test.matrix]]
+python = ["3.12", "3.13"]
+
 [tool.hatch.envs.test]
 dependencies = [
   "coverage[toml]",
