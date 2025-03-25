@@ -102,13 +102,13 @@ def separate_channels(
     plots.plot_line(frame_stds, outpath, message=msg)
 
     threshold = frame_stds.mean()
-    gcamp_filter = frame_stds > threshold
-    isosb_filter = frame_stds < threshold
+    gcamp_filter = np.nonzero(frame_stds > threshold)[0].tolist()
+    isosb_filter = np.nonzero(frame_stds < threshold)[0].tolist()
 
     if use_means:
         threshold = frame_means.mean()
-        gcamp_filter = frame_means > threshold
-        isosb_filter = frame_means < threshold
+        gcamp_filter = np.nonzero(frame_means > threshold)[0].tolist()
+        isosb_filter = np.nonzero(frame_means < threshold)[0].tolist()
 
     if flip_channels:
         return isosb_filter, gcamp_filter
@@ -137,6 +137,16 @@ def channel_dff(
     Returns:
         zarr.core.Array: dF/F array as a persistent Zarr array object.
     """
+    if type(array) == np.ndarray:
+        array = da.from_array(array, chunks=(100, array.shape[1], array.shape[2]))
+
+    if window_width > len(array):
+        raise ValueError("Window width must be less than the number of frames.")
+
+    # If window width is an odd number, add 1 to make it even to avoid broadcast errors
+    if window_width % 2 != 0:
+        window_width = window_width + 1
+
     cumsum_vec = da.cumsum(
         da.insert(array[channel_filter], 0, 0, axis=0), dtype=np.uint32, axis=0
     )

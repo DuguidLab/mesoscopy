@@ -24,5 +24,5 @@ import click
 
 
 @click.command()
-def postprocess():
+def postprocess_cmd():
     click.echo("Postprocessing")

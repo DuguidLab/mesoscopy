@@ -36,7 +36,7 @@ from dask import array as da
 from pynwb.image import ImageSeries
 
 
-@click.command()
+@click.command(name="preprocess")
 @click.argument(
     "path",
     type=click.Path(exists=True),
@@ -89,7 +89,14 @@ from pynwb.image import ImageSeries
     type=int,
     help="Number of frames to skip at the end of the recording.",
 )
-def preprocess(
+def preprocess_cmd(
+    **kwargs: typing.Any,
+) -> None:
+    """This command will preprocess a single session dual-channel mixed recording to extract a deltaF signal corrected for the haemodynamic response."""
+    run_preprocessing(**kwargs)
+
+
+def run_preprocessing(
     path: str,
     out_dir: str,
     chunks: int = 100,
@@ -136,14 +143,19 @@ def preprocess(
     # Determine whether we're working with an NWB file
     nwb = True if path.endswith(".nwb") else False
 
-    session_id, d, ts = _load_raw(path, nwb=nwb)
+    session_id, d, ts = load_raw(path, nwb=nwb)
 
+    if skip_start and skip_start != 0:
+        skip_start = skip_start - 1
     if skip_end:
         skip_end = -skip_end
 
     if skip_start or skip_end:
         d = d[skip_start:skip_end]
         ts = ts[skip_start:skip_end]
+    else:
+        d = d[:]
+        ts = ts[:]
 
     raw_frames = da.from_array(d, chunks="auto")
     if chunks > 0:
@@ -208,7 +220,7 @@ def preprocess(
     # Generate the mean gcamp frame and its std
     click.echo("Generating mean gcamp frame and its maximum intensity projection...")
     start = time.time()
-    _channel_qa(
+    channel_qa(
         binned_frames,
         gcamp_filter,
         qa_dir=qa_dir,
@@ -227,7 +239,7 @@ def preprocess(
         "Generating mean isosbestic frame and its maximum intensity projection..."
     )
     start = time.time()
-    _channel_qa(
+    channel_qa(
         binned_frames,
         isosb_filter,
         qa_dir=qa_dir,
@@ -244,6 +256,12 @@ def preprocess(
     # Calculate the dff per channel using a rolling baseline (mean in a 30s window)
 
     window_width = 30 * 25
+
+    if window_width > binned_frames.shape[0]:
+        click.echo(
+            f"WARNING: Default window width is larger than the number of frames. Setting window width to { binned_frames.shape[0] // 4}."
+        )
+        window_width = binned_frames.shape[0] // 4
 
     click.echo("Calculating ∂F for the gcamp channel...")
     start = time.time()
@@ -328,7 +346,7 @@ def preprocess(
     # Save timestamps
     outpath = out_dir + os.sep + session_id + "_preprocessed.h5"
     click.echo("Appending timestamps to {}".format(outpath))
-    timestamps = da.from_array(ts[gcamp_filter], chunks="auto")
+    timestamps = da.from_array(np.array(ts[gcamp_filter], dtype="S25"), chunks="auto")
     da.to_hdf5(outpath, "/timestamps", timestamps)
 
     preprocessing_end = time.time()
@@ -340,14 +358,14 @@ def preprocess(
 
     if nwb:
         click.echo("Updating NWB file...")
-        _update_nwb(path, outpath)
+        update_nwb(path, outpath)
         click.echo("Updated NWB file at {}".format(path))
 
     click.echo("Cleaning up...")
     shutil.rmtree(interim_dir)
 
 
-def _load_raw(
+def load_raw(
     raw_path: str, nwb: bool = False
 ) -> tuple[str, da.Array | np.ndarray, da.Array | np.ndarray]:
     """Load raw imaging data from an HDF5 or NWB file.
@@ -377,7 +395,7 @@ def _load_raw(
     return session_id, imaging_data, timestamps
 
 
-def _update_nwb(nwb_path: str, h5_path: str) -> None:
+def update_nwb(nwb_path: str, h5_path: str) -> None:
     """Update an NWB file with a delta F imaging series stored in an HDF5 file.
 
     Creates a link between the NWB file and the HDF5 file. See https://pynwb.readthedocs.io/en/stable/tutorials/advanced_io/linking_data.html.
@@ -405,8 +423,10 @@ def _update_nwb(nwb_path: str, h5_path: str) -> None:
 
     io.write_nwb(nwb_path, nwbfile, io=nwbio)
 
+    return nwbfile
 
-def _channel_qa(
+
+def channel_qa(
     array: da.Array | np.ndarray,
     channel_filter: list | da.Array | np.ndarray,
     qa_dir: str = ".",

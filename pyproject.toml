@@ -73,7 +73,7 @@ dependencies = [
 ]
 
 [tool.hatch.envs.test.scripts]
-run-coverage = "pytest --cov-config=pyproject.toml --cov=pkg --cov=tests"
+run-coverage = "pytest --cov-config=pyproject.toml --cov=mesoscopy --cov=tests --cov-report=term --cov-report=lcov:lcov.info"
 run = "run-coverage --no-cov"
 
 [tool.hatch.envs.style]
