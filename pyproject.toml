@@ -31,7 +31,7 @@ dependencies = [
     "tables", 
     "graphviz", 
     "scipy>=1.7.1", 
-    "zarr>=2.11.3", 
+    "zarr>=2,<3", 
     "xmltodict", 
     "scikit-image", 
     "pandas", 
