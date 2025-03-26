@@ -139,7 +139,7 @@ def preproc_h5(tmp_path_factory):
     ]
     # Create an HDF5 file
     with h5.File(str(tmpfile), "w") as f:
-        f.create_dataset("/data", data=np.random.rand(300, 40, 40))
+        f.create_dataset("/data", data=np.random.rand(frames_num, 40, 40))
         f.create_dataset("/timestamps", data=timestamps)
     # Return the path to the temporary file
     return str(tmpfile)
@@ -150,7 +150,6 @@ def preproc_nwb(nwbfile, preproc_h5):
     f = h5.File(preproc_h5, "r")
     io = NWBHDF5IO(nwbfile, "a")
     nwb = io.read()
-    print(f["/timestamps"][:])
     deltaF_series = ImageSeries(
         name="DeltaFSeries",
         data=f["/data"][:],
