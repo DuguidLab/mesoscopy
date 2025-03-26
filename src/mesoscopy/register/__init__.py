@@ -283,8 +283,6 @@ def update_nwb(nwb_path: str, h5_path: str, tform_params: np.ndarray) -> None:
         xy_translation=xy_translation,
     )
 
-    ophys_module.add(registered_series)
-    ophys_module.add(xy_translation)
     ophys_module.add(corrected_image_stack)
 
     io.write_nwb(nwb_path, nwbfile, io=nwbio)
