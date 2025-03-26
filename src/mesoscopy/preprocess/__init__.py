@@ -147,8 +147,16 @@ def run_preprocessing(
 
     if skip_start and skip_start != 0:
         skip_start = skip_start - 1
+
+    # If odd or even skips, add one to make them even to avoid strangeness
+    if skip_start and skip_start % 2 != 0:
+        skip_start += 1
+
+    if skip_end and skip_end % 2 != 0:
+        skip_end += 1
+
     if skip_end:
-        skip_end = -skip_end
+        skip_end = -abs(skip_end)
 
     if skip_start or skip_end:
         d = d[skip_start:skip_end]
@@ -346,7 +354,9 @@ def run_preprocessing(
     # Save timestamps
     outpath = out_dir + os.sep + session_id + "_preprocessed.h5"
     click.echo("Appending timestamps to {}".format(outpath))
-    timestamps = da.from_array(np.array(ts[gcamp_filter], dtype="S25"), chunks="auto")
+    timestamps = da.from_array(
+        np.array(ts[gcamp_filter[:max_idx]], dtype="S25"), chunks="auto"
+    )
     da.to_hdf5(outpath, "/timestamps", timestamps)
 
     preprocessing_end = time.time()
