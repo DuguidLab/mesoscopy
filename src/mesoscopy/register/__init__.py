@@ -208,7 +208,7 @@ def register_landmarks(
 
     if nwb:
         click.echo("Updating NWB file...")
-        _update_nwb(path, h5_path, tform)
+        update_nwb(path, h5_path, tform)
         click.echo("Updated NWB file at {}".format(path))
 
 
@@ -238,7 +238,7 @@ def _load_preprocessed(
     return session_id, deltaf_series, timestamps
 
 
-def _update_nwb(nwb_path: str, h5_path: str, tform_params: np.ndarray) -> None:
+def update_nwb(nwb_path: str, h5_path: str, tform_params: np.ndarray) -> None:
     """Update an NWB file with registered imaging data stored in an HDF5 file.
 
     Creates a link between the NWB file and the HDF5 file. See https://pynwb.readthedocs.io/en/stable/tutorials/advanced_io/linking_data.html.
@@ -261,8 +261,8 @@ def _update_nwb(nwb_path: str, h5_path: str, tform_params: np.ndarray) -> None:
 
     registered_series = ImageSeries(
         name="corrected",
-        data=f["/F"],
-        timestamps=f["/ts"],
+        data=f["/data"],
+        timestamps=f["/timestamps"],
         unit="df/f",
         description="dF/F widefield cortical imaging series.",
         comments="This is the haemodynamic corrected series registered to the Allen Brain Atlas CCFv3.",
@@ -270,9 +270,9 @@ def _update_nwb(nwb_path: str, h5_path: str, tform_params: np.ndarray) -> None:
 
     xy_translation = TimeSeries(
         name="xy_translation",
-        data=np.repeat(tform_params, len(f["/ts"]), axis=0),
+        data=np.repeat(tform_params, len(f["/timestamps"]), axis=0),
         unit="pixels",
-        timestamps=f["/ts"],
+        timestamps=f["/timestamps"],
         description="Affine transformation parameters for image registration to the ABA CCFv3.",
     )
 
@@ -283,6 +283,10 @@ def _update_nwb(nwb_path: str, h5_path: str, tform_params: np.ndarray) -> None:
         xy_translation=xy_translation,
     )
 
+    ophys_module.add(registered_series)
+    ophys_module.add(xy_translation)
     ophys_module.add(corrected_image_stack)
 
     io.write_nwb(nwb_path, nwbfile, io=nwbio)
+
+    return nwbfile
