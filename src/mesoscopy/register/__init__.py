@@ -158,7 +158,7 @@ def register_landmarks(
     # Determine whether we're working with an NWB file
     nwb = True if path.endswith(".nwb") else False
 
-    session_id, deltaf_series, timestamps = _load_preprocessed(path, nwb)
+    session_id, deltaf_series, timestamps = load_preprocessed(path, nwb)
 
     click.echo("Loading landmarks...")
     template_landmarks = res.get_default_landmarks()
@@ -212,7 +212,7 @@ def register_landmarks(
         click.echo("Updated NWB file at {}".format(path))
 
 
-def _load_preprocessed(
+def load_preprocessed(
     path: str, nwb: bool = False
 ) -> tuple[str, np.ndarray, np.ndarray]:
     """Load preprocessed data from an HDF5 or NWB file.
