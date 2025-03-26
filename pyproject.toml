@@ -31,7 +31,7 @@ dependencies = [
     "tables", 
     "graphviz", 
     "scipy>=1.7.1", 
-    "zarr>=2.11.3", 
+    "zarr>=2,<3", 
     "xmltodict", 
     "scikit-image", 
     "pandas", 
@@ -64,6 +64,9 @@ path = "src/mesoscopy/__about__.py"
 python = "3.12"
 path = ".hatch"
 
+[[tool.hatch.envs.test.matrix]]
+python = ["3.12", "3.13"]
+
 [tool.hatch.envs.test]
 dependencies = [
   "coverage[toml]",
@@ -73,7 +76,7 @@ dependencies = [
 ]
 
 [tool.hatch.envs.test.scripts]
-run-coverage = "pytest --cov-config=pyproject.toml --cov=mesoscopy --cov=tests --cov-report=term --cov-report=lcov:lcov.info"
+run-coverage = "pytest --cov-config=pyproject.toml --cov=mesoscopy --cov=tests --cov-report=term --cov-report=lcov:lcov.info  --cov-report=xml:coverage.xml"
 run = "run-coverage --no-cov"
 
 [tool.hatch.envs.style]
