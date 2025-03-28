@@ -139,8 +139,8 @@ def register_landmarks(
     Args:
         path (str): Path to preprocessed recording HDF5 or NWB file.
         out_dir (str): Output directory for registered recording.
-        recording_points (str): Path to recording landmark points in CSV or Fiji XML points format.
-        template_points (str): Path to template landmark points in CSV or Fiji XML points format.
+        recording_points (str, optional): Path to recording landmark points in CSV or Fiji XML points format.
+        template_points (str, optional): Path to template landmark points in CSV or Fiji XML points format.
         crop_x (int, optional): Number of pixels to crop from the x-axis of the recording. Defaults to 0.
         crop_y (int, optional): Number of pixels to crop from the y-axis of the recording. Defaults to 0.
     """
