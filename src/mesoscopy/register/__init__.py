@@ -139,8 +139,8 @@ def register_landmarks(
     Args:
         path (str): Path to preprocessed recording HDF5 or NWB file.
         out_dir (str): Output directory for registered recording.
-        recording_points (str): Path to recording landmark points in CSV or Fiji XML points format.
-        template_points (str): Path to template landmark points in CSV or Fiji XML points format.
+        recording_points (str, optional): Path to recording landmark points in CSV or Fiji XML points format.
+        template_points (str, optional): Path to template landmark points in CSV or Fiji XML points format.
         crop_x (int, optional): Number of pixels to crop from the x-axis of the recording. Defaults to 0.
         crop_y (int, optional): Number of pixels to crop from the y-axis of the recording. Defaults to 0.
     """
@@ -158,7 +158,7 @@ def register_landmarks(
     # Determine whether we're working with an NWB file
     nwb = True if path.endswith(".nwb") else False
 
-    session_id, deltaf_series, timestamps = _load_preprocessed(path, nwb)
+    session_id, deltaf_series, timestamps = load_preprocessed(path, nwb)
 
     click.echo("Loading landmarks...")
     template_landmarks = res.get_default_landmarks()
@@ -208,11 +208,11 @@ def register_landmarks(
 
     if nwb:
         click.echo("Updating NWB file...")
-        _update_nwb(path, h5_path, tform)
+        update_nwb(path, h5_path, tform)
         click.echo("Updated NWB file at {}".format(path))
 
 
-def _load_preprocessed(
+def load_preprocessed(
     path: str, nwb: bool = False
 ) -> tuple[str, np.ndarray, np.ndarray]:
     """Load preprocessed data from an HDF5 or NWB file.
@@ -238,7 +238,7 @@ def _load_preprocessed(
     return session_id, deltaf_series, timestamps
 
 
-def _update_nwb(nwb_path: str, h5_path: str, tform_params: np.ndarray) -> None:
+def update_nwb(nwb_path: str, h5_path: str, tform_params: np.ndarray) -> None:
     """Update an NWB file with registered imaging data stored in an HDF5 file.
 
     Creates a link between the NWB file and the HDF5 file. See https://pynwb.readthedocs.io/en/stable/tutorials/advanced_io/linking_data.html.
@@ -261,8 +261,8 @@ def _update_nwb(nwb_path: str, h5_path: str, tform_params: np.ndarray) -> None:
 
     registered_series = ImageSeries(
         name="corrected",
-        data=f["/F"],
-        timestamps=f["/ts"],
+        data=f["/data"],
+        timestamps=f["/timestamps"],
         unit="df/f",
         description="dF/F widefield cortical imaging series.",
         comments="This is the haemodynamic corrected series registered to the Allen Brain Atlas CCFv3.",
@@ -270,9 +270,9 @@ def _update_nwb(nwb_path: str, h5_path: str, tform_params: np.ndarray) -> None:
 
     xy_translation = TimeSeries(
         name="xy_translation",
-        data=np.repeat(tform_params, len(f["/ts"]), axis=0),
+        data=np.repeat(tform_params, len(f["/timestamps"]), axis=0),
         unit="pixels",
-        timestamps=f["/ts"],
+        timestamps=f["/timestamps"],
         description="Affine transformation parameters for image registration to the ABA CCFv3.",
     )
 
@@ -286,3 +286,5 @@ def _update_nwb(nwb_path: str, h5_path: str, tform_params: np.ndarray) -> None:
     ophys_module.add(corrected_image_stack)
 
     io.write_nwb(nwb_path, nwbfile, io=nwbio)
+
+    return nwbfile
