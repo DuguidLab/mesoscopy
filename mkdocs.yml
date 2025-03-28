@@ -1,7 +1,7 @@
 site_name: Mesoscopy
 site_url: https://docs.mesoscopy.org/
 repo_url: https://github.com/DuguidLab/mesoscopy
-repo_name: DuguidLab/visiomode
+repo_name: DuguidLab/mesoscopy
 
 theme:
   name: material
@@ -28,18 +28,24 @@ theme:
     - navigation.footer
   palette:
     - media: "(prefers-color-scheme: light)"
-      scheme: default
+      scheme: light
       toggle:
         icon: material/eye
         name: Switch to dark mode
     - media: "(prefers-color-scheme: dark)"
-      scheme: slate
+      scheme: dark
       toggle:
         icon: material/eye-outline
         name: Switch to light mode
 
 extra_css:
   - stylesheets/extra.css
+  - stylesheets/dark-hc.css
+  - stylesheets/dark-mc.css
+  - stylesheets/dark.css
+  - stylesheets/light-hc.css
+  - stylesheets/light-mc.css
+  - stylesheets/light.css
 
 plugins:
   - mkdocstrings:
