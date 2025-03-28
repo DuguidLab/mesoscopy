@@ -20,11 +20,12 @@
 #  SOFTWARE.
 
 """Main entry point to the mesoscopy CLI"""
+
 import os
 import click
 import h5py
 import mesoscopy.preprocess as preprocess
-import mesoscopy.register as register
+import mesoscopy.register as reg
 import mesoscopy.process as process
 import mesoscopy.postprocess as postprocess
 
@@ -72,4 +73,4 @@ def sample(path, out_dir, index, crop=0, vmin=0, vmax=255, key="frames"):
 cli.add_command(preprocess.preprocess_cmd)
 cli.add_command(process.process_cmd)
 cli.add_command(postprocess.postprocess_cmd)
-cli.add_command(register.register_cmd)
+cli.add_command(reg.register_cmd)
