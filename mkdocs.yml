@@ -8,7 +8,7 @@ theme:
   # favicon: assets/mesoscopy_logo_icon.png
   # custom_dir: docs/overrides
   font:
-    text: Montserrat
+    text: Montserrat 
   # logo: assets/mesoscopy_logo_icon.png
   icon:
     repo: fontawesome/brands/github
@@ -28,12 +28,15 @@ theme:
     - navigation.footer
   palette:
     - media: "(prefers-color-scheme: light)"
-      scheme: light
+      primary: blue grey
+      accent: teal
       toggle:
         icon: material/eye
         name: Switch to dark mode
     - media: "(prefers-color-scheme: dark)"
-      scheme: dark
+      scheme: slate
+      primary: blue grey
+      accent: teal
       toggle:
         icon: material/eye-outline
         name: Switch to light mode
