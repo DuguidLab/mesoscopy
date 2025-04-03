@@ -1,0 +1,12 @@
+[data-md-color-scheme="light"] {
+    --md-primary-bg-color:               rgb(255 255 255);
+    --md-primary-bg-color--light:        rgb(157 240 250);
+    --md-primary-fg-color--dark:          rgb(0 79 85);
+    --md-primary-fg-color:               rgb(0 105 113);
+    --md-primary-fg-color--light:        rgb(0 105 113);
+
+    --md-accent-fg-color:                rgb(74 99 102);
+    --md-accent-fg-color--transparent:   hsla(rgb(74 99 102), 0.1);
+    --md-accent-bg-color:                rgb(255 255 255);
+    --md-accent-bg-color--light:         hsla(rgb(255 255 255), 0.7);
+}

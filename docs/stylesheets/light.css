@@ -1,4 +1,4 @@
-[data-md-color-scheme="light"] {
+.light {
   --md-sys-color-primary: rgb(0 105 113);
   --md-sys-color-surface-tint: rgb(0 105 113);
   --md-sys-color-on-primary: rgb(255 255 255);
