@@ -31,14 +31,14 @@ theme:
       primary: blue grey
       accent: teal
       toggle:
-        icon: material/eye
+        icon: material/moon-waxing-crescent
         name: Switch to dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
       primary: blue grey
       accent: teal
       toggle:
-        icon: material/eye-outline
+        icon: material/weather-sunny
         name: Switch to light mode
 
 extra_css:
@@ -60,6 +60,7 @@ plugins:
             show_source: true
             docstring_style: google
             docstring_section_style: list
+            members_order: source
   - search
   # - material-plausible
 
