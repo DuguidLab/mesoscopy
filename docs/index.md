@@ -4,7 +4,7 @@ Mesoscopy is an open-source package for the analysis of mesoscale calcium record
 
 ## Prerequisites
 
-Mesoscopy works best with data acquired in the [NWB](https://www.nwb.org) format. Alternatively, recordings acquired as HDF5 files compatible with mesoscopy's [raw data schema]() may be used.
+Mesoscopy works best with data acquired in the [NWB](https://www.nwb.org) format. Alternatively, recordings acquired as HDF5 files compatible with mesoscopy's [raw data schema](design-principles/data-structure.md) may be used.
 
 Dual-channel recordings with an accompanying haemodynamic response channel (e.g. using both 470nm and 405nm excitation for GCaMP) will be automatically separated during preprocessing and yield a corrected ∆F signal.
 
@@ -85,4 +85,4 @@ pipx install mesoscopy
 
 Our [typical workflow]() guide will take you through the typical processing steps for analysing mesoscale recordings with `mesoscopy`.
 
-You should also check out our [how to]() guides for a deeper dive into individual aspects of analysis, including [quality control](). If you're about to start acquiring data, or wish to convert existing data to a format compatible with `mesoscopy`, check out our [data schema]() and [converting videos to HDF5]() guides.
+You should also check out our [how to](how-to/index.md) guides for a deeper dive into individual aspects of analysis, including [quality control](how-to/qa.md). If you're about to start acquiring data, or wish to convert existing data to a format compatible with `mesoscopy`, check out our [data schema](design-principles/data-structure.md) and [converting videos to HDF5](how-to/convert-video-to-h5.md) guides.
