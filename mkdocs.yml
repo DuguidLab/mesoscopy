@@ -110,3 +110,19 @@ nav:
     - Landmark registration & the Allen Brain Atlas: design-principles/registration.md
   - Reference:
     - Overview: reference/index.md
+    - Mesoscopy CLI:
+      - inspect: reference/cli-mesoscopy-inspect.md
+      - preprocess: reference/cli-mesoscopy-preprocess.md
+      - register: reference/cli-mesoscopy-register.md
+      - process: reference/cli-mesoscopy-process.md
+      - postprocess: reference/cli-mesoscopy-postprocess.md
+      - utilities: reference/cli-mesoscopy-utilities.md
+    - Mesoscopy API: 
+      - mesoscopy: reference/api-mesoscopy.md
+      - mesoscopy.io: reference/api-mesoscopy-io.md
+      - mesoscopy.plots: reference/api-mesoscopy-plots.md
+      - mesoscopy.preprocess: reference/api-mesoscopy-preprocess.md
+      - mesoscopy.register: reference/api-mesoscopy-register.md
+      - mesoscopy.process: reference/api-mesoscopy-process.md
+      - mesoscopy.postprocess: reference/api-mesoscopy-postprocess.md
+      - mesoscopy.resources: reference/api-mesoscopy-resources.md
