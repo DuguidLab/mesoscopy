@@ -103,6 +103,7 @@ fmt = [
 dependencies = [
   "mkdocs",
   "mkdocs-material",
+  "mkdocs-click",
   "mkdocstrings-python",
   "pymdown-extensions",
   "material-plausible-plugin",
