@@ -105,5 +105,8 @@ nav:
   - Design principles:
     - Overview: design-principles/index.md
     - Data structure: design-principles/data-structure.md
+    - Haemodynamic correction: design-principles/haemodynamics.md
+    - Channel separation in mixed recordings: design-principles/channel-separation.md
+    - Landmark registration & the Allen Brain Atlas: design-principles/registration.md
   - Reference:
     - Overview: reference/index.md
