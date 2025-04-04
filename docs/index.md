@@ -8,7 +8,7 @@ Mesoscopy works best with data acquired in the [NWB](https://www.nwb.org) format
 
 Dual-channel recordings with an accompanying haemodynamic response channel (e.g. using both 470nm and 405nm excitation for GCaMP) will be automatically separated during preprocessing and yield a corrected ∆F signal.
 
-An example acquisition script (designed for FLIR BlackFly cameras) can be found [here](https://gist.github.com/celefthe/d069e4e90397039b3aaf53292446fbd1).
+An example acquisition script (designed for FLIR Grasshopper cameras) can be found [here](https://gist.github.com/celefthe/d069e4e90397039b3aaf53292446fbd1).
 
 ## Installing mesoscopy
 
