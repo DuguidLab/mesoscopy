@@ -1,5 +1,11 @@
 # Typical workflow
 
+## Inspecting raw data
+
+!!! note 
+    Coming soon!
+
+
 ## Preprocessing
 
 
@@ -9,4 +15,4 @@
 ## Extracting area responses
 
 
-## 
+## Next steps
