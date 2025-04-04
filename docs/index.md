@@ -8,6 +8,8 @@ Mesoscopy works best with data acquired in the [NWB](https://www.nwb.org) format
 
 Dual-channel recordings with an accompanying haemodynamic response channel (e.g. using both 470nm and 405nm excitation for GCaMP) will be automatically separated during preprocessing, which will yield a corrected ∆F signal.
 
+An example acquisition script (designed for FLIR BlackFly cameras) can be found [here](https://gist.github.com/celefthe/d069e4e90397039b3aaf53292446fbd1).
+
 ## Installing mesoscopy
 
 The recommended way to install `mesoscopy` is by using `pipx` (https://pypa.github.io/pipx/). `pipx` will create an isolated python environment from which `mesoscopy` will run, leaving the system python alone. This is the recommended way to install `mesoscopy`, as it will not interfere with any other python packages you may have installed on your system.
@@ -80,3 +82,7 @@ pipx install mesoscopy
 ```
 
 ## Next steps
+
+Our [typical workflow]() guide will take you through the typical processing steps for analysing mesoscale recordings with `mesoscopy`.
+
+You should also check out our [how to]() guides for a deeper dive into individual aspects of analysis, including [quality control](). If you're about to start acquiring data, or wish to convert existing data to a format compatible with `mesoscopy`, check out our [data schema]() and [converting videos to HDF5]() guides.
