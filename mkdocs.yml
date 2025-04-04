@@ -90,6 +90,7 @@ nav:
   - Getting started:
     - Installation: index.md
     - Typical workflow: typical-workflow.md
+    - Where to go from here: where-to-go.md
     - Contributing: contributing.md
     - Troubleshooting: troubleshooting.md
   - How-to:
