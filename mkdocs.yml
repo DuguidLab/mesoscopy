@@ -89,6 +89,9 @@ copyright: Copyright &copy; 2024 Constantinos Eleftheriou
 nav:
   - Getting started:
     - Installation: index.md
+    - Typical workflow: typical-workflow.md
+    - Contributing: contributing.md
+    - Troubleshooting: troubleshooting.md
   - How-to:
     - Overview: how-to/index.md
   - Design principles:
