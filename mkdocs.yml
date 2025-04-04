@@ -95,6 +95,12 @@ nav:
     - Troubleshooting: troubleshooting.md
   - How-to:
     - Overview: how-to/index.md
+    - Preprocessing: how-to/preprocessing.md
+    - Registration to the ABA: how-to/registration.md
+    - Quality control: how-to/qa.md
+    - Resting-state recordings: how-to/resting-state-analysis.md
+    - Imaging with behaviour: how-to/imaging-with-behaviour-analysis.md
+    - Using mesoscopy as a library: how-to/using-mesoscopy-as-a-library.md
   - Design principles:
     - Overview: design-principles/index.md
   - Reference:
