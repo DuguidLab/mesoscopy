@@ -175,14 +175,10 @@ def run_preprocessing(
 
     # Binning
     click.echo(
-        "{}x{} binning to shape {} by {}".format(
-            bins, bins, raw_frames.shape[1] // bins, raw_frames.shape[2] // bins
-        )
+        "{}x{} binning to shape {} by {}".format(bins, bins, raw_frames.shape[1] // bins, raw_frames.shape[2] // bins)
     )
     start = time.time()
-    binned_frames = calc.bin_array(
-        raw_frames, bins=bins, interim_dir=interim_dir, session_id=session_id
-    )
+    binned_frames = calc.bin_array(raw_frames, bins=bins, interim_dir=interim_dir, session_id=session_id)
     end = time.time()
     click.echo("Binned frames saved in {} s".format(end - start))
 
@@ -200,9 +196,7 @@ def run_preprocessing(
         qa_dir=qa_dir,
     )
     end = time.time()
-    click.echo(
-        "Frame means & standard deviations calculated in {} s".format(end - start)
-    )
+    click.echo("Frame means & standard deviations calculated in {} s".format(end - start))
 
     # Check that the separation works
     click.echo("Separating channels...")
@@ -236,16 +230,10 @@ def run_preprocessing(
         channel="gcamp",
     )
     end = time.time()
-    click.echo(
-        "GCaMP average frame, std and maximum intensity projection calculated in {} s".format(
-            end - start
-        )
-    )
+    click.echo("GCaMP average frame, std and maximum intensity projection calculated in {} s".format(end - start))
 
     # Generate the mean isosbestic frame and its std
-    click.echo(
-        "Generating mean isosbestic frame and its maximum intensity projection..."
-    )
+    click.echo("Generating mean isosbestic frame and its maximum intensity projection...")
     start = time.time()
     channel_qa(
         binned_frames,
@@ -255,11 +243,7 @@ def run_preprocessing(
         channel="isosb",
     )
     end = time.time()
-    click.echo(
-        "Isosbestic average frame, std and maximum intensity projection calculated in {} s".format(
-            end - start
-        )
-    )
+    click.echo("Isosbestic average frame, std and maximum intensity projection calculated in {} s".format(end - start))
 
     # Calculate the dff per channel using a rolling baseline (mean in a 30s window)
 
@@ -299,9 +283,7 @@ def run_preprocessing(
 
     click.echo("Calculating mean ∂F per frame for gcamp and isosb channels...")
     start = time.time()
-    gcamp_signal_mean, isosb_signal_mean = da.compute(
-        gcamp_dff.mean(axis=(1, 2)), isosb_dff.mean(axis=(1, 2))
-    )
+    gcamp_signal_mean, isosb_signal_mean = da.compute(gcamp_dff.mean(axis=(1, 2)), isosb_dff.mean(axis=(1, 2)))
     end = time.time()
     click.echo("Channel signal means calculated in {} s".format(end - start))
 
@@ -354,17 +336,11 @@ def run_preprocessing(
     # Save timestamps
     outpath = out_dir + os.sep + session_id + "_preprocessed.h5"
     click.echo("Appending timestamps to {}".format(outpath))
-    timestamps = da.from_array(
-        np.array(ts[gcamp_filter[:max_idx]], dtype="S25"), chunks="auto"
-    )
+    timestamps = da.from_array(np.array(ts[gcamp_filter[:max_idx]], dtype="S25"), chunks="auto")
     da.to_hdf5(outpath, "/timestamps", timestamps)
 
     preprocessing_end = time.time()
-    click.echo(
-        "Preprocessing took a total of {} mins.".format(
-            (preprocessing_end - preprocessing_start) / 60
-        )
-    )
+    click.echo("Preprocessing took a total of {} mins.".format((preprocessing_end - preprocessing_start) / 60))
 
     if nwb:
         click.echo("Updating NWB file...")
@@ -375,9 +351,7 @@ def run_preprocessing(
     shutil.rmtree(interim_dir)
 
 
-def load_raw(
-    raw_path: str, nwb: bool = False
-) -> tuple[str, da.Array | np.ndarray, da.Array | np.ndarray]:
+def load_raw(raw_path: str, nwb: bool = False) -> tuple[str, da.Array | np.ndarray, da.Array | np.ndarray]:
     """Load raw imaging data from an HDF5 or NWB file.
 
     Args:
@@ -425,9 +399,7 @@ def update_nwb(nwb_path: str, h5_path: str) -> None:
         comments="This imaging series is corrected for the haemodynamic response.",
     )
 
-    ophys_module = nwbfile.create_processing_module(
-        name="ophys", description="optical physiology processed data"
-    )
+    ophys_module = nwbfile.create_processing_module(name="ophys", description="optical physiology processed data")
 
     ophys_module.add(deltaF_series)
 
@@ -459,14 +431,10 @@ def channel_qa(
     )
 
     outpath = qa_dir + os.sep + session_id + "_qa_{}_mean.png".format(channel)
-    plots.plot_frame(
-        mean_frame, outpath, message="Saved mean frame at {}".format(outpath)
-    )
+    plots.plot_frame(mean_frame, outpath, message="Saved mean frame at {}".format(outpath))
 
     outpath = qa_dir + os.sep + session_id + "_qa_{}_std.png".format(channel)
-    plots.plot_frame(
-        std_frame, outpath, message="Saved std frame at {}".format(outpath)
-    )
+    plots.plot_frame(std_frame, outpath, message="Saved std frame at {}".format(outpath))
 
     outpath = qa_dir + os.sep + session_id + "_qa_{}_maxip.png".format(channel)
     plots.plot_frame(maxip, outpath, message="Saved maxip frame at {}".format(outpath))
