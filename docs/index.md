@@ -6,7 +6,7 @@ Mesoscopy is an open-source package for the analysis of mesoscale calcium record
 
 Mesoscopy works best with data acquired in the [NWB](https://www.nwb.org) format. Alternatively, recordings acquired as HDF5 files compatible with mesoscopy's [raw data schema]() may be used.
 
-Dual-channel recordings with an accompanying haemodynamic response channel (e.g. using both 470nm and 405nm excitation for GCaMP) will be automatically separated during preprocessing, which will yield a corrected ∆F signal.
+Dual-channel recordings with an accompanying haemodynamic response channel (e.g. using both 470nm and 405nm excitation for GCaMP) will be automatically separated during preprocessing and yield a corrected ∆F signal.
 
 An example acquisition script (designed for FLIR BlackFly cameras) can be found [here](https://gist.github.com/celefthe/d069e4e90397039b3aaf53292446fbd1).
 
