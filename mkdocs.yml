@@ -104,5 +104,6 @@ nav:
     - Using mesoscopy as a library: how-to/using-mesoscopy-as-a-library.md
   - Design principles:
     - Overview: design-principles/index.md
+    - Data structure: design-principles/data-structure.md
   - Reference:
     - Overview: reference/index.md
