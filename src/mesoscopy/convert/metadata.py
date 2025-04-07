@@ -25,7 +25,18 @@ import json
 import yaml
 
 
-def read_yaml(): ...
+DEFAULT_METADATA = {
+    "subject_id": "sub-unknown",
+    "sex": "Unknown",
+    "genotype": "Unknown",
+    "species": "Unknown",
+    "strain": "Unknown",
+    "dob": "1900-01-01",
+    "session_description": "No description",
+}
 
 
-def read_json(): ...
+def read_yaml(path) -> dict: ...
+
+
+def read_json(path) -> dict: ...
