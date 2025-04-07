@@ -30,18 +30,36 @@ import typing
     "input_path",
     type=click.Path(exists=True),
 )
-@click.argument(
+@click.option(
     "-o",
     "--out-dir",
     type=click.Path(),
     default="./",
     help="Output directory for converted file, defaults to current working directory. Will be created if it doesn't exist.",
 )
-@click.argument(
+@click.option(
     "-m", "--meta", type=click.Path(exists=True), help="Path to animal metadata file. Must be YAML or JSON format."
 )
+@click.option("--subject-id", type=str, help="Metadata field - subject identifier.")
+@click.option("--sex", type=click.Choice(["M", "F"]), case_sensitive=False, help="Metadata field - subject sex.")
+@click.option("--genotype", type=str, help="Metadata field - subject genotype.")
+@click.option("--species", type=str, help="Metadata field - subject species.")
+@click.option("--strain", type=str, help="Metadata field - subject strain.")
+@click.option("--description", type=str, help="Metadata field - session description")
 def convert_cmd(**kwargs: typing.Any) -> None:
     """Convert a raw mesoscale calcium recording session to an NWB file compatible with mesoscopy."""
+    convert(**kwargs)
 
 
-def convert(): ...
+def convert(
+    input_path: str,
+    out_dir: str,
+    meta_path: typing.Optional[str] = None,
+    subject_id: typing.Optional[str] = None,
+    sex: typing.Optional[str] = None,
+    genotype: typing.Optional[str] = None,
+    species: typing.Optional[str] = None,
+    strain: typing.Optional[str] = None,
+    dob: typing.Optional[str] = None,
+    session_description: typing.Optional[str] = None,
+): ...
