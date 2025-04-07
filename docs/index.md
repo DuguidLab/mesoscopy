@@ -1,3 +1,7 @@
+![https://www.mesoscopy.org](../assets/mesoscopy-logo-banner.png)
+
+---
+
 # Getting Started
 
 Mesoscopy is an open-source package for the analysis of mesoscale calcium recordings. It handles the preprocessing of mesoscale recording files to extract ∆F responses, the anatomical registration of recordings to the Allen Brain atlas as well as analysis of recordings captured at rest or with behaviour.
