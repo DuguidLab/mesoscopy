@@ -1,14 +1,14 @@
 site_name: Mesoscopy
 site_url: https://docs.mesoscopy.org/
 repo_url: https://github.com/DuguidLab/mesoscopy
-repo_name: DuguidLab/visiomode
+repo_name: DuguidLab/mesoscopy
 
 theme:
   name: material
   # favicon: assets/mesoscopy_logo_icon.png
   # custom_dir: docs/overrides
   font:
-    text: Montserrat
+    text: Montserrat 
   # logo: assets/mesoscopy_logo_icon.png
   icon:
     repo: fontawesome/brands/github
@@ -28,18 +28,27 @@ theme:
     - navigation.footer
   palette:
     - media: "(prefers-color-scheme: light)"
-      scheme: default
+      primary: deep purple
+      accent: blue
       toggle:
-        icon: material/eye
+        icon: material/moon-waxing-crescent
         name: Switch to dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
+      primary: deep purple
+      accent: blue
       toggle:
-        icon: material/eye-outline
+        icon: material/weather-sunny
         name: Switch to light mode
 
 extra_css:
   - stylesheets/extra.css
+  # - stylesheets/dark-hc.css
+  # - stylesheets/dark-mc.css
+  # - stylesheets/dark.css
+  # - stylesheets/light-hc.css
+  # - stylesheets/light-mc.css
+  # - stylesheets/light.css
 
 plugins:
   - mkdocstrings:
@@ -51,6 +60,7 @@ plugins:
             show_source: true
             docstring_style: google
             docstring_section_style: list
+            members_order: source
   - search
   # - material-plausible
 
@@ -63,6 +73,7 @@ markdown_extensions:
       line_spans: __span
   - pymdownx.inlinehilite
   - pymdownx.snippets
+  - mkdocs-click
 
 extra:
   homepage: https://mesoscopy.org
@@ -80,9 +91,34 @@ copyright: Copyright &copy; 2024 Constantinos Eleftheriou
 nav:
   - Getting started:
     - Installation: index.md
+    - Typical workflow: typical-workflow.md
+    - Where to go from here: where-to-go.md
+    - Contributing: contributing.md
+    - Troubleshooting: troubleshooting.md
   - How-to:
     - Overview: how-to/index.md
+    - Preprocessing: how-to/preprocessing.md
+    - Registration to the ABA: how-to/registration.md
+    - Quality control: how-to/qa.md
+    - Resting-state recordings: how-to/resting-state-analysis.md
+    - Imaging with behaviour: how-to/imaging-with-behaviour-analysis.md
+    - Converting video files to HDF5: how-to/convert-video-to-h5.md
+    - Using mesoscopy as a library: how-to/using-mesoscopy-as-a-library.md
   - Design principles:
     - Overview: design-principles/index.md
+    - Data structure: design-principles/data-structure.md
+    - Haemodynamic correction: design-principles/haemodynamics.md
+    - Channel separation in mixed recordings: design-principles/channel-separation.md
+    - Landmark registration & the Allen Brain Atlas: design-principles/registration.md
   - Reference:
     - Overview: reference/index.md
+    - Mesoscopy CLI: reference/cli-mesoscopy.md
+    - Mesoscopy API: 
+      - mesoscopy: reference/api-mesoscopy.md
+      - mesoscopy.io: reference/api-mesoscopy-io.md
+      - mesoscopy.plots: reference/api-mesoscopy-plots.md
+      - mesoscopy.preprocess: reference/api-mesoscopy-preprocess.md
+      - mesoscopy.register: reference/api-mesoscopy-register.md
+      - mesoscopy.process: reference/api-mesoscopy-process.md
+      - mesoscopy.postprocess: reference/api-mesoscopy-postprocess.md
+      - mesoscopy.resources: reference/api-mesoscopy-resources.md

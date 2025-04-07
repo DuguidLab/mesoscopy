@@ -1,0 +1,3 @@
+# Plotting API
+
+::: mesoscopy.plots
