@@ -21,8 +21,12 @@
 
 """File conversion CLI."""
 
+import os
+
 import click
 import typing
+
+import mesoscopy.convert.metadata as mtd
 
 
 @click.command("convert")
@@ -62,4 +66,50 @@ def convert(
     strain: typing.Optional[str] = None,
     dob: typing.Optional[str] = None,
     session_description: typing.Optional[str] = None,
-): ...
+):
+    """_summary_
+
+    Args:
+        input_path (str): _description_
+        out_dir (str): _description_
+        meta_path (typing.Optional[str], optional): _description_. Defaults to None.
+        subject_id (typing.Optional[str], optional): _description_. Defaults to None.
+        sex (typing.Optional[str], optional): _description_. Defaults to None.
+        genotype (typing.Optional[str], optional): _description_. Defaults to None.
+        species (typing.Optional[str], optional): _description_. Defaults to None.
+        strain (typing.Optional[str], optional): _description_. Defaults to None.
+        dob (typing.Optional[str], optional): _description_. Defaults to None.
+        session_description (typing.Optional[str], optional): _description_. Defaults to None.
+    """
+    subject_metadata = mtd.DEFAULT_METADATA
+
+    if meta_path:
+        if meta_path.endswith(".yaml") or meta_path.endswith(".yml"):
+            subject_metadata = mtd.read_yaml(meta_path)
+        elif meta_path.endswith(".json"):
+            subject_metadata = mtd.read_json(meta_path)
+        else:
+            click.echo("WARNING - Invalid metadata file provided, skipping...")
+
+    # Infer subject_id if not provided.
+    if not subject_id:
+        try:
+            # Assume NWB-style file-naming.
+            subject_metadata["subject_id"] = input_path.split(os.sep)[-1].split("_")[-1]
+        except IndexError:
+            click.echo(
+                "WARNING - Subject ID not provided and could not be inferred, using a default placeholder value. This might get confusing!"
+            )
+
+    if sex:
+        subject_metadata["sex"] = sex
+    if genotype:
+        subject_metadata["genotype"] = genotype
+    if species:
+        subject_metadata["species"] = species
+    if strain:
+        subject_metadata["strain"] = strain
+    if dob:
+        subject_metadata["dob"] = dob
+    if session_description:
+        subject_metadata["session_description"] = session_description
