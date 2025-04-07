@@ -9,19 +9,19 @@ mesoscopy convert /path/to/example-recording.h5
 !!! note
     See also our guide to [converting video files to HDF5](how-to/convert-video-to-h5.md) if you're recording videos in AVI or MP4 format. 
 
-## Inspecting raw data
+## Inspect raw data
 
 ```bash
 mesoscopy inspect /path/to/example-recording.nwb
 ```
 
-## Preprocessing
+## Preprocess to correct for haemodynamics and extract ∆F signal
 
 ```bash
 mesoscopy preprocess /path/to/example-recording.nwb
 ```
 
-## Registration
+## Register to the Allen Brain Atlas
 
 ```bash
 mesoscopy register mark-landmarks /path/to/example-recording.nwb
@@ -34,7 +34,7 @@ mesoscopy register landmarks --template-points example-recording_landmarks.csv /
 ```
 
 
-## Extracting area responses
+## Extract area responses
 
 ```bash
 mesoscopy process area-responses /path/to/example-recording.nwb
