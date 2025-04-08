@@ -30,7 +30,7 @@ import mesoscopy.io as io
 
 from datetime import datetime
 
-from pynwb import NWBFile, NWBHDF5IO
+from pynwb import NWBFile
 from pynwb.file import Subject
 from pynwb.ophys import OpticalChannel, OnePhotonSeries
 
