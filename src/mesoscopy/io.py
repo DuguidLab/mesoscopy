@@ -37,14 +37,10 @@ def read_nwb(path: str, mode: str = "a") -> NWBFile: ...
 
 
 @typing.overload
-def read_nwb(
-    path: str, mode: str = "a", return_io: bool = True
-) -> typing.Tuple[NWBFile, NWBHDF5IO]: ...
+def read_nwb(path: str, mode: str = "a", return_io: bool = True) -> typing.Tuple[NWBFile, NWBHDF5IO]: ...
 
 
-def read_nwb(
-    path: str, mode: str = "a", return_io: bool = False
-) -> NWBFile | typing.Tuple[NWBFile, NWBHDF5IO]:
+def read_nwb(path: str, mode: str = "a", return_io: bool = False) -> NWBFile | typing.Tuple[NWBFile, NWBHDF5IO]:
     """Read an NWB file.
 
     Args:
@@ -63,9 +59,7 @@ def read_nwb(
     return nwbfile
 
 
-def write_nwb(
-    path: str, nwbfile: NWBFile, mode: str = "a", io: NWBHDF5IO = None
-) -> None:
+def write_nwb(path: str, nwbfile: NWBFile, mode: str = "a", io: NWBHDF5IO = None) -> None:
     """Write an NWB file.
 
     Args:
@@ -176,9 +170,7 @@ def _read_csv_points(path: str) -> dict[str, tuple[float, float]]:
     """
     with open(path, "r") as fp:
         csv_reader = csv.DictReader(fp)
-        points = OrderedDict(
-            {row["landmark"]: (float(row["y"]), float(row["x"])) for row in csv_reader}
-        )
+        points = OrderedDict({row["landmark"]: (float(row["y"]), float(row["x"])) for row in csv_reader})
 
     return points
 

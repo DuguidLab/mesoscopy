@@ -48,6 +48,16 @@ from pynwb.ophys import OpticalChannel, OnePhotonSeries
     help="Output directory for converted file, defaults to current working directory. Will be created if it doesn't exist.",
 )
 @click.option(
+    "-f", "--frames-group", type=str, default="frames", help="HDF group path under which frame data is stored."
+)
+@click.option(
+    "-t",
+    "--timestamp-group",
+    type=str,
+    default="timestamps",
+    help="HDF group path under which timestamp data is stored.",
+)
+@click.option(
     "-m", "--meta", type=click.Path(exists=True), help="Path to animal metadata file. Must be YAML or JSON format."
 )
 @click.option("--subject-id", type=str, help="Metadata field - subject identifier.")
@@ -68,6 +78,8 @@ def convert_cmd(**kwargs: typing.Any) -> None:
 def convert(
     input_path: str,
     out_dir: str,
+    frames_group: str = "frames",
+    timestamps_group: str = "timestamps",
     meta_path: typing.Optional[str] = None,
     subject_id: typing.Optional[str] = None,
     sex: typing.Optional[str] = None,
@@ -87,6 +99,8 @@ def convert(
     Args:
         input_path (str): Path to raw HDF5 file.
         out_dir (str): Output directory.
+        frames_group (str): HDF group path under which frame data is stored. Defaults to "frames".
+        timestamps_group (str): HDF group path under which timestamp data is stored. Defaults to "timestamps".
         meta_path (typing.Optional[str], optional): Path to metadata file in JSON or YAML format. Defaults to None.
         subject_id (typing.Optional[str], optional): Subject ID. Defaults to None.
         sex (typing.Optional[str], optional): Subject sex. Defaults to None.
@@ -99,9 +113,20 @@ def convert(
         lab (typing.Optional[str], optional): Laboratory experiment was done in. Defaults to None.
         institution (typing.Optional[str], optional): Institution experiment was done in. Defaults to None
 
+    Raises:
+        ValueError: Raised if declared frames or timestamp groups don't exist in the HDF5 file.
+
     Returns:
         str: Path to new NWB file.
     """
+    h5file = io.read_h5(input_path)
+
+    # Validate frame and timestamp groups actually exist.
+    if (frames_group not in h5file) or (timestamps_group not in h5file):
+        raise ValueError("Could not find frame or timestamp data, did you use the right group names?")
+
+    session_start_time = h5file[f"{timestamps_group}"][0]  # Use first timestamp as session start
+
     session_identifier = input_path.split(os.sep)[-1].replace(".h5", "")
     subject_meta = mtd.DEFAULT_METADATA
 
@@ -145,7 +170,7 @@ def convert(
     nwbfile = NWBFile(
         session_description=f"{session_description}",
         identifier=session_identifier,
-        # session_start_time=session_start_time,  # required
+        session_start_time=session_start_time,  # Use first timestamp as session start
         experimenter=subject_meta.get("experimenter"),
         lab=subject_meta.get("lab"),
         institution=subject_meta.get("institution"),
