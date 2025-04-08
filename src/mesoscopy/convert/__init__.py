@@ -49,6 +49,7 @@ import mesoscopy.convert.metadata as mtd
 @click.option("--genotype", type=str, help="Metadata field - subject genotype.")
 @click.option("--species", type=str, help="Metadata field - subject species.")
 @click.option("--strain", type=str, help="Metadata field - subject strain.")
+@click.option("--dob", type=str, help="Metadata field - subject date of birth in YYYY-MM-DD format (i.e. 1900-01-31).")
 @click.option("--description", type=str, help="Metadata field - session description")
 def convert_cmd(**kwargs: typing.Any) -> None:
     """Convert a raw mesoscale calcium recording session to an NWB file compatible with mesoscopy."""
@@ -67,19 +68,21 @@ def convert(
     dob: typing.Optional[str] = None,
     session_description: typing.Optional[str] = None,
 ):
-    """_summary_
+    """Convert a mesoscale recording session from HDF5 to NWB. Optionally add subject metadata.
+
+    Metadata can be parsed from a compatible YAML or JSON file. Individual metadata arguments passed to this function (e.g. subject ID) will take precedence over the contents of a metadata file, if both are provided.
 
     Args:
-        input_path (str): _description_
-        out_dir (str): _description_
-        meta_path (typing.Optional[str], optional): _description_. Defaults to None.
-        subject_id (typing.Optional[str], optional): _description_. Defaults to None.
-        sex (typing.Optional[str], optional): _description_. Defaults to None.
-        genotype (typing.Optional[str], optional): _description_. Defaults to None.
-        species (typing.Optional[str], optional): _description_. Defaults to None.
-        strain (typing.Optional[str], optional): _description_. Defaults to None.
-        dob (typing.Optional[str], optional): _description_. Defaults to None.
-        session_description (typing.Optional[str], optional): _description_. Defaults to None.
+        input_path (str): Path to raw HDF5 file.
+        out_dir (str): Output directory.
+        meta_path (typing.Optional[str], optional): Path to metadata file in JSON or YAML format. Defaults to None.
+        subject_id (typing.Optional[str], optional): Subject ID. Defaults to None.
+        sex (typing.Optional[str], optional): Subject sex. Defaults to None.
+        genotype (typing.Optional[str], optional): Subject genotype. Defaults to None.
+        species (typing.Optional[str], optional): Subject species. Defaults to None.
+        strain (typing.Optional[str], optional): Subject strain. Defaults to None.
+        dob (typing.Optional[str], optional): Subject date of birth. Defaults to None.
+        session_description (typing.Optional[str], optional): Session description. Defaults to None.
     """
     subject_metadata = mtd.DEFAULT_METADATA
 
