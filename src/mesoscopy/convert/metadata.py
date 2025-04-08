@@ -36,7 +36,55 @@ DEFAULT_METADATA = {
 }
 
 
-def read_yaml(path) -> dict: ...
+def read_yaml(path: str) -> dict:
+    """Read a yaml metadata file.
+
+    Args:
+        path (str): Path to file.
+
+    Raises:
+        ValueError: Raised if file contains fields not in DEFAULT_METADATA.
+
+    Returns:
+        dict: Subject metadata.
+    """
+    with open(path, "r") as fp:
+        metadata = yaml.safe_load(fp)
+
+        if metadata.keys() not in DEFAULT_METADATA.keys():
+            raise ValueError(
+                f"Invalid file contents. Expected keys to be {DEFAULT_METADATA.keys()}, got {metadata.keys()} instead."
+            )
+
+        for field in DEFAULT_METADATA.keys():
+            if field not in metadata.keys():
+                metadata[field] = DEFAULT_METADATA.get(field)
+
+        return metadata
 
 
-def read_json(path) -> dict: ...
+def read_json(path: str) -> dict:
+    """Read a json metadata file.
+
+    Args:
+        path (str): Path to file.
+
+    Raises:
+        ValueError: Raised if file contains fields not in DEFAULT_METADATA.
+
+    Returns:
+        dict: Subject metadata.
+    """
+    with open(path, "r") as fp:
+        metadata = json.load(fp)
+
+        if metadata.keys() not in DEFAULT_METADATA.keys():
+            raise ValueError(
+                f"Invalid file contents. Expected keys to be {DEFAULT_METADATA.keys()}, got {metadata.keys()} instead."
+            )
+
+        for field in DEFAULT_METADATA.keys():
+            if field not in metadata.keys():
+                metadata[field] = DEFAULT_METADATA.get(field)
+
+        return metadata
