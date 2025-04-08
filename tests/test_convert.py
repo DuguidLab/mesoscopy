@@ -1,0 +1,30 @@
+import pytest
+
+import mesoscopy.convert as convert
+
+
+def test_metadata_yaml(): ...
+
+
+def test_metadata_yaml_partial(): ...
+
+
+def test_metadata_json(): ...
+
+
+def test_metadata_json_partial(): ...
+
+
+def test_convert_linkonly(): ...
+
+
+def test_convert_eagercopy(): ...
+
+
+def test_convert_metadata_args(): ...
+
+
+def test_convert_metadata_args_partial(): ...
+
+
+def test_convert_metadata_args_file_mixed(): ...
