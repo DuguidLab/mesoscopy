@@ -22,12 +22,17 @@
 """File conversion CLI."""
 
 import os
-
 import click
 import typing
 
 import mesoscopy.convert.metadata as mtd
 import mesoscopy.io as io
+
+from datetime import datetime
+
+from pynwb import NWBFile, NWBHDF5IO
+from pynwb.file import Subject
+from pynwb.ophys import OpticalChannel, OnePhotonSeries
 
 
 @click.command("convert")
@@ -97,13 +102,14 @@ def convert(
     Returns:
         str: Path to new NWB file.
     """
-    subject_metadata = mtd.DEFAULT_METADATA
+    session_identifier = input_path.split(os.sep)[-1].replace(".h5", "")
+    subject_meta = mtd.DEFAULT_METADATA
 
     if meta_path:
         if meta_path.endswith(".yaml") or meta_path.endswith(".yml"):
-            subject_metadata = mtd.read_yaml(meta_path)
+            subject_meta = mtd.read_yaml(meta_path)
         elif meta_path.endswith(".json"):
-            subject_metadata = mtd.read_json(meta_path)
+            subject_meta = mtd.read_json(meta_path)
         else:
             click.echo("WARNING - Invalid metadata file provided, skipping...")
 
@@ -111,23 +117,72 @@ def convert(
     if not subject_id:
         try:
             # Assume NWB-style file-naming.
-            subject_metadata["subject_id"] = input_path.split(os.sep)[-1].split("_")[-1]
+            subject_meta["subject_id"] = input_path.split(os.sep)[-1].split("_")[-1]
         except IndexError:
             click.echo(
                 "WARNING - Subject ID not provided and could not be inferred, using a default placeholder value. This might get confusing!"
             )
 
     if sex:
-        subject_metadata["sex"] = sex
+        subject_meta["sex"] = sex
     if genotype:
-        subject_metadata["genotype"] = genotype
+        subject_meta["genotype"] = genotype
     if species:
-        subject_metadata["species"] = species
+        subject_meta["species"] = species
     if strain:
-        subject_metadata["strain"] = strain
+        subject_meta["strain"] = strain
     if dob:
-        subject_metadata["dob"] = dob
+        subject_meta["dob"] = dob
     if session_description:
-        subject_metadata["session_description"] = session_description
+        subject_meta["session_description"] = session_description
+    if experimenter:
+        subject_meta["experimenter"] = experimenter
+    if lab:
+        subject_meta["lab"] = lab
+    if institution:
+        subject_meta["institution"] = institution
+
+    nwbfile = NWBFile(
+        session_description=f"{session_description}",
+        identifier=session_identifier,
+        # session_start_time=session_start_time,  # required
+        experimenter=subject_meta.get("experimenter"),
+        lab=subject_meta.get("lab"),
+        institution=subject_meta.get("institution"),
+    )
+
+    nwbfile.subject = Subject(
+        subject_id=subject_meta.get("subject_id"),
+        species=subject_meta.get("species"),
+        strain=subject_meta.get("strain"),
+        sex=subject_meta.get("sex"),
+        date_of_birth=datetime.fromisoformat(subject_meta.get("dob", "1900-01-01")),
+        genotype=subject_meta.get("genotype"),
+    )
+
+    device = nwbfile.create_device(
+        name="Mesoscope",
+        description="Single-photon widefield imaging scope.",
+        manufacturer="",
+    )
+
+    optical_channel = OpticalChannel(
+        name="DualAcquisitionChannel",
+        description="Acquisition channel for GCaMP6s excited at 470 and 405 nm.",
+        emission_lambda=500.0,
+    )
+
+    imaging_plane = nwbfile.create_imaging_plane(
+        name="DualChannelImagingPlane",
+        optical_channel=optical_channel,
+        # imaging_rate=50.,
+        description="Dual excitation through the skull at 470 and 405 nm (25Hz per LED).",
+        device=device,
+        excitation_lambda=470.0,
+        indicator="GCaMP6s",
+        location="dorsal cortex",
+        grid_spacing=[20.0, 20.0],
+        grid_spacing_unit="micrometers",
+    )
 
     return ""
