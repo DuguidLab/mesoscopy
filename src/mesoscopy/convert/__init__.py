@@ -125,7 +125,7 @@ def convert(
     if (frames_group not in h5file) or (timestamps_group not in h5file):
         raise ValueError("Could not find frame or timestamp data, did you use the right group names?")
 
-    session_start_time = h5file[f"{timestamps_group}"][0]  # Use first timestamp as session start
+    session_start_time = h5file[f"/{timestamps_group}"][0]  # Use first timestamp as session start
 
     session_identifier = input_path.split(os.sep)[-1].replace(".h5", "")
     subject_meta = mtd.DEFAULT_METADATA
@@ -210,4 +210,32 @@ def convert(
         grid_spacing_unit="micrometers",
     )
 
-    return ""
+    source_data = h5file[f"/{frames_group}"]
+    source_timestamps = h5file[f"/{timestamps_group}"]
+
+    # recalculate timestamps to relative from session start
+    timestamps = [
+        (datetime.fromisoformat(timestamp.decode("utf-8")) - session_start_time).total_seconds()
+        for timestamp in source_timestamps
+    ]
+
+    imaging_series = OnePhotonSeries(
+        name="DualChannelImagingSeries",
+        imaging_plane=imaging_plane,
+        data=source_data,
+        timestamps=timestamps,
+        unit="pixel_intensity",
+        binning=2,
+        power=10.0,
+        exposure_time=0.01,
+        pmt_gain=10.0,
+        description="Widefield cortical images acquired at alternating 470 and 405 nm excitation.",
+        comments="This imaging series requires channel separation and haemodynamic subtraction before use.",
+    )
+
+    nwbfile.add_acquisition(imaging_series)
+
+    nwb_path = out_dir + os.sep + session_identifier + ".nwb"
+    io.write_nwb(path=nwb_path, nwbfile=nwbfile)
+
+    return nwb_path
