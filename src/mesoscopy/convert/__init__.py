@@ -48,6 +48,14 @@ from pynwb.ophys import OpticalChannel, OnePhotonSeries
     help="Output directory for converted file, defaults to current working directory. Will be created if it doesn't exist.",
 )
 @click.option(
+    "-l",
+    "--link-only",
+    is_flag=True,
+    show_default=True,
+    default=False,
+    help="Create a link to the HDF5 dataset instead of copying it over. If this is enabled, you MUST keep the raw HDF5 file - if you delete it, the data will also be gone.",
+)
+@click.option(
     "-f", "--frames-group", type=str, default="frames", help="HDF group path under which frame data is stored."
 )
 @click.option(
@@ -78,6 +86,7 @@ def convert_cmd(**kwargs: typing.Any) -> None:
 def convert(
     input_path: str,
     out_dir: str,
+    link_only: bool = True,
     frames_group: str = "frames",
     timestamps_group: str = "timestamps",
     meta_path: typing.Optional[str] = None,
@@ -236,6 +245,10 @@ def convert(
     nwbfile.add_acquisition(imaging_series)
 
     nwb_path = out_dir + os.sep + session_identifier + ".nwb"
-    io.write_nwb(path=nwb_path, nwbfile=nwbfile)
+    io.write_nwb(
+        path=nwb_path,
+        nwbfile=nwbfile,
+        link_data=link_only,
+    )
 
     return nwb_path
