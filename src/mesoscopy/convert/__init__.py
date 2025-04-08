@@ -93,6 +93,9 @@ def convert(
         experimenter (typing.Optional[str], optional): Experimenter name. Defaults to None.
         lab (typing.Optional[str], optional): Laboratory experiment was done in. Defaults to None.
         institution (typing.Optional[str], optional): Institution experiment was done in. Defaults to None
+
+    Returns:
+        str: Path to new NWB file.
     """
     subject_metadata = mtd.DEFAULT_METADATA
 
