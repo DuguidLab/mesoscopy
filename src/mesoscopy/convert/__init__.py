@@ -27,6 +27,7 @@ import click
 import typing
 
 import mesoscopy.convert.metadata as mtd
+import mesoscopy.io as io
 
 
 @click.command("convert")
@@ -50,7 +51,10 @@ import mesoscopy.convert.metadata as mtd
 @click.option("--species", type=str, help="Metadata field - subject species.")
 @click.option("--strain", type=str, help="Metadata field - subject strain.")
 @click.option("--dob", type=str, help="Metadata field - subject date of birth in YYYY-MM-DD format (i.e. 1900-01-31).")
-@click.option("--description", type=str, help="Metadata field - session description")
+@click.option("--description", type=str, help="Metadata field - session description.")
+@click.option("--experimenter", type=str, help="Metadata field - experimenter name.")
+@click.option("--lab", type=str, help="Metadata field - lab experiment was done in.")
+@click.option("--institution", type=str, help="Metadata field - institution experiment was done in.")
 def convert_cmd(**kwargs: typing.Any) -> None:
     """Convert a raw mesoscale calcium recording session to an NWB file compatible with mesoscopy."""
     convert(**kwargs)
@@ -67,7 +71,10 @@ def convert(
     strain: typing.Optional[str] = None,
     dob: typing.Optional[str] = None,
     session_description: typing.Optional[str] = None,
-):
+    experimenter: typing.Optional[str] = None,
+    lab: typing.Optional[str] = None,
+    institution: typing.Optional[str] = None,
+) -> str:
     """Convert a mesoscale recording session from HDF5 to NWB. Optionally add subject metadata.
 
     Metadata can be parsed from a compatible YAML or JSON file. Individual metadata arguments passed to this function (e.g. subject ID) will take precedence over the contents of a metadata file, if both are provided.
@@ -83,6 +90,9 @@ def convert(
         strain (typing.Optional[str], optional): Subject strain. Defaults to None.
         dob (typing.Optional[str], optional): Subject date of birth. Defaults to None.
         session_description (typing.Optional[str], optional): Session description. Defaults to None.
+        experimenter (typing.Optional[str], optional): Experimenter name. Defaults to None.
+        lab (typing.Optional[str], optional): Laboratory experiment was done in. Defaults to None.
+        institution (typing.Optional[str], optional): Institution experiment was done in. Defaults to None
     """
     subject_metadata = mtd.DEFAULT_METADATA
 
@@ -116,3 +126,5 @@ def convert(
         subject_metadata["dob"] = dob
     if session_description:
         subject_metadata["session_description"] = session_description
+
+    return ""

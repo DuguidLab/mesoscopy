@@ -33,6 +33,9 @@ DEFAULT_METADATA = {
     "strain": "Unknown",
     "dob": "1900-01-01",
     "session_description": "No description",
+    "experimenter": "Unknown",
+    "lab": "Unknown",
+    "institution": "Unknown",
 }
 
 
