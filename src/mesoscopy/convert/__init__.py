@@ -101,13 +101,14 @@ def convert(
     lab: typing.Optional[str] = None,
     institution: typing.Optional[str] = None,
 ) -> str:
-    """Convert a mesoscale recording session from HDF5 to NWB. Optionally add subject metadata.
+    """Convert a mesoscale recording session from HDF5 to NWB. Optionally add session metadata.
 
     Metadata can be parsed from a compatible YAML or JSON file. Individual metadata arguments passed to this function (e.g. subject ID) will take precedence over the contents of a metadata file, if both are provided.
 
     Args:
         input_path (str): Path to raw HDF5 file.
         out_dir (str): Output directory.
+        link_only (bool): Create links to HDF5 datasets instead of copying them over. Defaults to False.
         frames_group (str): HDF group path under which frame data is stored. Defaults to "frames".
         timestamps_group (str): HDF group path under which timestamp data is stored. Defaults to "timestamps".
         meta_path (typing.Optional[str], optional): Path to metadata file in JSON or YAML format. Defaults to None.
