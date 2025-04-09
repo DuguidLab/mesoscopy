@@ -59,7 +59,7 @@ def read_nwb(path: str, mode: str = "a", return_io: bool = False) -> NWBFile | t
     return nwbfile
 
 
-def write_nwb(path: str, nwbfile: NWBFile, mode: str = "a", io: NWBHDF5IO = None, **kwargs) -> None:
+def write_nwb(path: str, nwbfile: NWBFile, mode: str = "w", io: NWBHDF5IO = None, **kwargs) -> None:
     """Write an NWB file.
 
     Args:
