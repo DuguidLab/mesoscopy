@@ -1,6 +1,9 @@
 import pytest
+from click.testing import CliRunner
 
 import os
+
+import mesoscopy
 import mesoscopy.convert as conv
 import mesoscopy.convert.metadata as mtd
 
@@ -81,4 +84,11 @@ def test_convert_h5_metadata_args(raw_h5, output_dir):
 def test_convert_h5_metadata_args_file_mixed(raw_h5, output_dir): ...
 
 
-def test_convert_h5_cli(raw_h5, output_dir): ...
+def test_cmd_parity(raw_h5, output_dir):
+    """Check if click convert cmd caller works"""
+    runner = CliRunner()
+    result = runner.invoke(
+        mesoscopy.cli,
+        args=f"convert --out-dir {output_dir} {raw_h5}",
+    )
+    assert result.exit_code == 0
