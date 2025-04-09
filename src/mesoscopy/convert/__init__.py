@@ -151,15 +151,20 @@ def convert(
             click.echo("WARNING - Invalid metadata file provided, skipping...")
 
     # Infer subject_id if not provided.
-    if not subject_id:
+    if not subject_id and not meta_path:
         try:
-            # Assume NWB-style file-naming.
-            subject_meta["subject_id"] = input_path.split(os.sep)[-1].split("_")[-1].replace("sub-", "")
+            # Check if NWB-style file-naming
+            if "sub-" in input_path.split(os.sep)[-1]:
+                subject_meta["subject_id"] = (
+                    input_path.split(os.sep)[-1].split("_")[0].replace("sub-", "").replace(".h5", "")
+                )
         except IndexError:
             click.echo(
                 "WARNING - Subject ID not provided and could not be inferred, using a default placeholder value. This might get confusing!"
             )
 
+    if subject_id:
+        subject_meta["subject_id"] = subject_id
     if sex:
         subject_meta["sex"] = sex
     if genotype:
@@ -180,7 +185,7 @@ def convert(
         subject_meta["institution"] = institution
 
     nwbfile = NWBFile(
-        session_description=f"{session_description}",
+        session_description=subject_meta.get("session_description"),
         identifier=session_identifier,
         session_start_time=session_start_time,  # Use first timestamp as session start
         experimenter=subject_meta.get("experimenter"),
