@@ -26,7 +26,7 @@ import yaml
 
 
 DEFAULT_METADATA = {
-    "subject_id": "sub-unknown",
+    "subject_id": "unknown",
     "sex": "Unknown",
     "genotype": "Unknown",
     "species": "Unknown",
@@ -54,10 +54,9 @@ def read_yaml(path: str) -> dict:
     with open(path, "r") as fp:
         metadata = yaml.safe_load(fp)
 
-        if metadata.keys() not in DEFAULT_METADATA.keys():
-            raise ValueError(
-                f"Invalid file contents. Expected keys to be {DEFAULT_METADATA.keys()}, got {metadata.keys()} instead."
-            )
+        for key in metadata.keys():
+            if key not in list(DEFAULT_METADATA.keys()):
+                raise ValueError(f"Invalid file contents - unrecognised key <{key}>.")
 
         for field in DEFAULT_METADATA.keys():
             if field not in metadata.keys():
@@ -81,10 +80,9 @@ def read_json(path: str) -> dict:
     with open(path, "r") as fp:
         metadata = json.load(fp)
 
-        if metadata.keys() not in DEFAULT_METADATA.keys():
-            raise ValueError(
-                f"Invalid file contents. Expected keys to be {DEFAULT_METADATA.keys()}, got {metadata.keys()} instead."
-            )
+        for key in metadata.keys():
+            if key not in list(DEFAULT_METADATA.keys()):
+                raise ValueError(f"Invalid file contents - unrecognised key <{key}>.")
 
         for field in DEFAULT_METADATA.keys():
             if field not in metadata.keys():
