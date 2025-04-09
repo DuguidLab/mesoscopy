@@ -69,7 +69,7 @@ from pynwb.ophys import OpticalChannel, OnePhotonSeries
     "-m", "--meta", type=click.Path(exists=True), help="Path to animal metadata file. Must be YAML or JSON format."
 )
 @click.option("--subject-id", type=str, help="Metadata field - subject identifier.")
-@click.option("--sex", type=click.Choice(["M", "F"]), case_sensitive=False, help="Metadata field - subject sex.")
+@click.option("--sex", type=click.Choice(["M", "F"], case_sensitive=False), help="Metadata field - subject sex.")
 @click.option("--genotype", type=str, help="Metadata field - subject genotype.")
 @click.option("--species", type=str, help="Metadata field - subject species.")
 @click.option("--strain", type=str, help="Metadata field - subject strain.")
@@ -152,7 +152,7 @@ def convert(
     if not subject_id:
         try:
             # Assume NWB-style file-naming.
-            subject_meta["subject_id"] = input_path.split(os.sep)[-1].split("_")[-1]
+            subject_meta["subject_id"] = input_path.split(os.sep)[-1].split("_")[-1].replace("sub-", "")
         except IndexError:
             click.echo(
                 "WARNING - Subject ID not provided and could not be inferred, using a default placeholder value. This might get confusing!"
