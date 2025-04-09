@@ -4,6 +4,8 @@ import os
 import mesoscopy.convert as conv
 import mesoscopy.convert.metadata as mtd
 
+from pynwb import NWBHDF5IO
+
 
 def test_metadata_yaml(meta_yaml):
     expected_keys = list(mtd.DEFAULT_METADATA.keys())
@@ -37,7 +39,43 @@ def test_convert_h5_eagercopy(raw_h5, output_dir):
     assert os.path.getsize(raw_h5) <= os.path.getsize(nwb_outpath)
 
 
-def test_convert_h5_metadata_args(raw_h5, output_dir): ...
+def test_convert_h5_metadata_yaml(raw_h5, output_dir, meta_yaml):
+    nwb_outpath = conv.convert(raw_h5, out_dir=output_dir, meta_path=meta_yaml)
+
+    io = NWBHDF5IO(nwb_outpath, mode="r")
+    nwbfile = io.read()
+    assert nwbfile.subject.subject_id == "testyaml"
+
+
+def test_convert_h5_metadata_json(raw_h5, output_dir, meta_json):
+    nwb_outpath = conv.convert(raw_h5, out_dir=output_dir, meta_path=meta_json)
+
+    io = NWBHDF5IO(nwb_outpath, mode="r")
+    nwbfile = io.read()
+    assert nwbfile.subject.subject_id == "testjson"
+
+
+def test_convert_h5_metadata_args(raw_h5, output_dir):
+    nwb_outpath = conv.convert(
+        raw_h5,
+        out_dir=output_dir,
+        subject_id="sometest",
+        sex="F",
+        genotype="Wt",
+        species="Mus",
+        strain="c57",
+        dob="1999-01-02",
+        session_description="somedesc",
+        experimenter="Python Test",
+        lab="well funded lab",
+        institution="University of Great Science",
+    )
+
+    io = NWBHDF5IO(nwb_outpath, mode="r")
+    nwbfile = io.read()
+    assert nwbfile.subject.subject_id == "sometest"
+    assert nwbfile.session_description == "somedesc"
+    assert nwbfile.experimenter == ("Python Test",)
 
 
 def test_convert_h5_metadata_args_file_mixed(raw_h5, output_dir): ...
