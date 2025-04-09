@@ -60,13 +60,17 @@ from pynwb.ophys import OpticalChannel, OnePhotonSeries
 )
 @click.option(
     "-t",
-    "--timestamp-group",
+    "--timestamps-group",
     type=str,
     default="timestamps",
     help="HDF group path under which timestamp data is stored.",
 )
 @click.option(
-    "-m", "--meta", type=click.Path(exists=True), help="Path to animal metadata file. Must be YAML or JSON format."
+    "-m",
+    "--meta",
+    "meta_path",
+    type=click.Path(exists=True),
+    help="Path to animal metadata file. Must be YAML or JSON format.",
 )
 @click.option("--subject-id", type=str, help="Metadata field - subject identifier.")
 @click.option("--sex", type=click.Choice(["M", "F"], case_sensitive=False), help="Metadata field - subject sex.")
@@ -74,7 +78,7 @@ from pynwb.ophys import OpticalChannel, OnePhotonSeries
 @click.option("--species", type=str, help="Metadata field - subject species.")
 @click.option("--strain", type=str, help="Metadata field - subject strain.")
 @click.option("--dob", type=str, help="Metadata field - subject date of birth in YYYY-MM-DD format (i.e. 1900-01-31).")
-@click.option("--description", type=str, help="Metadata field - session description.")
+@click.option("--description", "session_description", type=str, help="Metadata field - session description.")
 @click.option("--experimenter", type=str, help="Metadata field - experimenter name.")
 @click.option("--lab", type=str, help="Metadata field - lab experiment was done in.")
 @click.option("--institution", type=str, help="Metadata field - institution experiment was done in.")
