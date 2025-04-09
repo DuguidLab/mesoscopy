@@ -1,5 +1,8 @@
 import pytest
 
+import yaml
+import json
+
 import numpy as np
 import h5py as h5
 import tables
@@ -63,14 +66,10 @@ def nwbfile(tmp_path_factory, random_idx):
     mock_isosb = np.random.normal(65, 50, size=(300, 40, 40))
 
     # Merge the two channels in random order
-    mock_dual_channel = np.insert(
-        mock_gcamp, random_idx - np.arange(len(random_idx)), mock_isosb, axis=0
-    )
+    mock_dual_channel = np.insert(mock_gcamp, random_idx - np.arange(len(random_idx)), mock_isosb, axis=0)
 
     frames_num = 600
-    timestamps = [
-        (timedelta(milliseconds=i)).total_seconds() for i in range(frames_num)
-    ]
+    timestamps = [(timedelta(milliseconds=i)).total_seconds() for i in range(frames_num)]
 
     imaging_series = OnePhotonSeries(
         name="DualChannelImagingSeries",
@@ -102,11 +101,7 @@ def raw_h5(tmp_path_factory, random_idx):
     tmpfile = tmp_path_factory.mktemp("data") / "preproc_test.h5"
     # Create timestamps
     timestamps = [
-        (datetime.now() + timedelta(milliseconds=i))
-        .isoformat()
-        .replace("-", "")
-        .replace(":", "")
-        .replace(".", "")
+        (datetime.now() + timedelta(milliseconds=i)).isoformat().replace("-", "").replace(":", "").replace(".", "")
         for i in range(600)
     ]
     # Generate mock dual-channel imaging data
@@ -114,9 +109,7 @@ def raw_h5(tmp_path_factory, random_idx):
     mock_isosb = np.random.normal(65, 50, size=(300, 40, 40))
 
     # Merge the two channels in random order
-    mock_dual_channel = np.insert(
-        mock_gcamp, random_idx - np.arange(len(random_idx)), mock_isosb, axis=0
-    )
+    mock_dual_channel = np.insert(mock_gcamp, random_idx - np.arange(len(random_idx)), mock_isosb, axis=0)
 
     # Create an HDF5 file
     with h5.File(str(tmpfile), "w") as f:
@@ -134,9 +127,7 @@ def preproc_h5(tmp_path_factory):
     # Create a temporary file
     tmpfile = tmp_path_factory.mktemp("data") / "preproc.h5"
     frames_num = 300
-    timestamps = [
-        (timedelta(milliseconds=i)).total_seconds() for i in range(frames_num)
-    ]
+    timestamps = [(timedelta(milliseconds=i)).total_seconds() for i in range(frames_num)]
     # Create an HDF5 file
     with h5.File(str(tmpfile), "w") as f:
         f.create_dataset("/data", data=np.random.rand(frames_num, 40, 40))
@@ -159,9 +150,7 @@ def preproc_nwb(nwbfile, preproc_h5):
         comments="This imaging series is corrected for the haemodynamic response.",
     )
 
-    ophys_module = nwb.create_processing_module(
-        name="ophys", description="optical physiology processed data"
-    )
+    ophys_module = nwb.create_processing_module(name="ophys", description="optical physiology processed data")
 
     ophys_module.add(deltaF_series)
 
@@ -174,3 +163,57 @@ def preproc_nwb(nwbfile, preproc_h5):
 def output_dir(tmp_path_factory):
     """Create a temporary directory for output."""
     return str(tmp_path_factory.mktemp("output"))
+
+
+@pytest.fixture()
+def meta_yaml(tmp_path_factory, partial=False):
+    tmpfile = tmp_path_factory.mktemp("data") / "test_meta.yml"
+
+    metadata = {
+        "subject_id": "testyaml",
+        "sex": "Male",
+        "genotype": "Wt",
+        "species": "Mus musculus",
+        "strain": "C57/B6",
+        "dob": "2025-01-11",
+        "session_description": "This is but a test.",
+        "experimenter": "John Doe",
+        "lab": "Doe lab",
+        "institution": "University of Someplace with lots of funding",
+    }
+
+    if partial:
+        metadata.pop("lab")
+        metadata.pop("genotype")
+
+    with open(tmpfile, "w") as fp:
+        yaml.safe_dump(metadata, fp)
+
+    return str(tmpfile)
+
+
+@pytest.fixture()
+def meta_json(tmp_path_factory, partial=False):
+    tmpfile = tmp_path_factory.mktemp("data") / "test_meta.json"
+
+    metadata = {
+        "subject_id": "testjson",
+        "sex": "Male",
+        "genotype": "Wt",
+        "species": "Mus musculus",
+        "strain": "C57/B6",
+        "dob": "2025-01-11",
+        "session_description": "This is but a test.",
+        "experimenter": "John Doe",
+        "lab": "Doe lab",
+        "institution": "University of Someplace with lots of funding",
+    }
+
+    if partial:
+        metadata.pop("lab")
+        metadata.pop("genotype")
+
+    with open(tmpfile, "w") as fp:
+        json.dump(metadata, fp)
+
+    return str(tmpfile)

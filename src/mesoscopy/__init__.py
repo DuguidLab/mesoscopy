@@ -28,6 +28,7 @@ import mesoscopy.preprocess as preprocess
 import mesoscopy.register as reg
 import mesoscopy.process as process
 import mesoscopy.postprocess as postprocess
+import mesoscopy.convert as convert
 
 from matplotlib import pyplot as plt
 
@@ -57,11 +58,7 @@ def sample(path, out_dir, index, crop=0, vmin=0, vmax=255, key="frames"):
     d = f["/{}".format(key)]
 
     os.makedirs(out_dir, exist_ok=True)
-    outpath = (
-        out_dir
-        + os.sep
-        + path.split("/")[-1].replace(".h5", "_sample-{}.png".format(index))
-    )
+    outpath = out_dir + os.sep + path.split("/")[-1].replace(".h5", "_sample-{}.png".format(index))
 
     if crop > 0:
         plt.imsave(outpath, d[index, crop:-crop, crop:-crop], vmin=vmin, vmax=vmax)
@@ -74,3 +71,4 @@ cli.add_command(preprocess.preprocess_cmd)
 cli.add_command(process.process_cmd)
 cli.add_command(postprocess.postprocess_cmd)
 cli.add_command(reg.register_cmd)
+cli.add_command(convert.convert_cmd)

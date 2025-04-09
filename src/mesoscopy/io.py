@@ -37,14 +37,10 @@ def read_nwb(path: str, mode: str = "a") -> NWBFile: ...
 
 
 @typing.overload
-def read_nwb(
-    path: str, mode: str = "a", return_io: bool = True
-) -> typing.Tuple[NWBFile, NWBHDF5IO]: ...
+def read_nwb(path: str, mode: str = "a", return_io: bool = True) -> typing.Tuple[NWBFile, NWBHDF5IO]: ...
 
 
-def read_nwb(
-    path: str, mode: str = "a", return_io: bool = False
-) -> NWBFile | typing.Tuple[NWBFile, NWBHDF5IO]:
+def read_nwb(path: str, mode: str = "a", return_io: bool = False) -> NWBFile | typing.Tuple[NWBFile, NWBHDF5IO]:
     """Read an NWB file.
 
     Args:
@@ -63,20 +59,19 @@ def read_nwb(
     return nwbfile
 
 
-def write_nwb(
-    path: str, nwbfile: NWBFile, mode: str = "a", io: NWBHDF5IO = None
-) -> None:
+def write_nwb(path: str, nwbfile: NWBFile, mode: str = "w", io: NWBHDF5IO = None, **kwargs) -> None:
     """Write an NWB file.
 
     Args:
         path (str): Path to the NWB file.
         nwbfile (NWBFile): NWB file object.
         mode (str, optional): File write mode (i.e. write/append). Defaults to "w".
+        **kwargs: Parameters passed to NWBHDF5IO.write.
     """
     if io:
-        return io.write(nwbfile)
+        return io.write(nwbfile, **kwargs)
     with NWBHDF5IO(path, mode=mode) as io:
-        return io.write(nwbfile)
+        return io.write(nwbfile, **kwargs)
 
 
 def read_h5(path: str) -> h5py.File:
@@ -176,9 +171,7 @@ def _read_csv_points(path: str) -> dict[str, tuple[float, float]]:
     """
     with open(path, "r") as fp:
         csv_reader = csv.DictReader(fp)
-        points = OrderedDict(
-            {row["landmark"]: (float(row["y"]), float(row["x"])) for row in csv_reader}
-        )
+        points = OrderedDict({row["landmark"]: (float(row["y"]), float(row["x"])) for row in csv_reader})
 
     return points
 
