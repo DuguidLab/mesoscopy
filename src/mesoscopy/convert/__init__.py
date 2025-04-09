@@ -135,7 +135,9 @@ def convert(
     if (frames_group not in h5file) or (timestamps_group not in h5file):
         raise ValueError("Could not find frame or timestamp data, did you use the right group names?")
 
-    session_start_time = h5file[f"/{timestamps_group}"][0]  # Use first timestamp as session start
+    session_start_time = datetime.fromisoformat(
+        h5file[f"/{timestamps_group}"][0].decode("utf-8")
+    )  # Use first timestamp as session start
 
     session_identifier = input_path.split(os.sep)[-1].replace(".h5", "")
     subject_meta = mtd.DEFAULT_METADATA
