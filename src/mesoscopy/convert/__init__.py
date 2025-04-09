@@ -144,7 +144,7 @@ def convert(
     )  # Use first timestamp as session start
 
     session_identifier = input_path.split(os.sep)[-1].replace(".h5", "")
-    subject_meta = mtd.DEFAULT_METADATA
+    subject_meta = mtd.DEFAULT_METADATA.copy()
 
     if meta_path:
         if meta_path.endswith(".yaml") or meta_path.endswith(".yml"):
