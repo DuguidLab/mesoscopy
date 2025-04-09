@@ -86,7 +86,7 @@ def convert_cmd(**kwargs: typing.Any) -> None:
 def convert(
     input_path: str,
     out_dir: str,
-    link_only: bool = True,
+    link_only: bool = False,
     frames_group: str = "frames",
     timestamps_group: str = "timestamps",
     meta_path: typing.Optional[str] = None,
