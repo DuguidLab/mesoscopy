@@ -35,7 +35,7 @@ def inspect_cmd(input_path: str):
 
 
 def inspect(input_path: str) -> None:
-    """Inspect a mesoscale recording NWB file, alongside any associated preprocessing data.
+    """Inspect a mesoscale recording NWB file, alongside any associated preprocessing data, using the inspection GUI.
 
     Args:
         input_path (str): Path to NWB file.
