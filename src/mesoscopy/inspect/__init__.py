@@ -23,6 +23,8 @@
 
 import click
 
+import mesoscopy.io as io
+
 
 @click.command("inspect")
 @click.argument(
@@ -40,3 +42,4 @@ def inspect(input_path: str) -> None:
     Args:
         input_path (str): Path to NWB file.
     """
+    nwbfile = io.read_nwb(input_path)
