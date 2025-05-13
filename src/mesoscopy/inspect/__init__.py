@@ -31,15 +31,81 @@ import mesoscopy.io as io
     "input_path",
     type=click.Path(exists=True),
 )
-def inspect_cmd(input_path: str):
+@click.option(
+    "--meta-only",
+    "info_level",
+    flag_value="meta_only",
+    default=True,
+)
+@click.option(
+    "--acquisition",
+    "info_level",
+    flag_value="acquisition",
+)
+@click.option(
+    "--processing",
+    "info_level",
+    flag_value="processing",
+)
+@click.option(
+    "--analysis",
+    "info_level",
+    flag_value="analysis",
+)
+@click.option(
+    "--qa",
+    "info_level",
+    flag_value="qa",
+)
+def inspect_cmd(input_path: str, info_level: str):
     """Inspect a calcium recording session and associated preprocessing output. Files must be in NWB format."""
-    inspect(input_path=input_path)
+    inspect(input_path=input_path, info_level=info_level)
 
 
-def inspect(input_path: str) -> None:
+def inspect(input_path: str, info_level: str = "meta_only") -> None:
     """Inspect a mesoscale recording NWB file, alongside any associated preprocessing data, using the inspection GUI.
 
     Args:
         input_path (str): Path to NWB file.
+        info_level (str): Inspection level. Defaults to metadata only.
     """
     nwbfile = io.read_nwb(input_path)
+
+    click.echo("-" * (len(input_path) + 14))
+    click.secho(f"Metadata for {input_path}", bold=True)
+    click.echo("-" * (len(input_path) + 14))
+    click.echo("")
+    click.echo(f"File identifier: \t {nwbfile.identifier}")
+    click.echo(f"Subject ID: \t\t {nwbfile.subject.subject_id}")
+    click.echo(f"Session date: \t\t {nwbfile.session_start_time.date()}")
+    click.echo(f"Session description: \t {nwbfile.session_description}")
+    click.echo(f"Experimenter: \t\t {nwbfile.experimenter[0]} ({nwbfile.lab}, {nwbfile.institution})")
+    click.echo("")
+    click.echo(f"Subject DOB: \t\t {nwbfile.subject.date_of_birth.date()}")
+    click.echo(f"Subject sex: \t\t {nwbfile.subject.sex}")
+    click.echo(f"Subject species: \t {nwbfile.subject.species}")
+    click.echo(f"Subject strain: \t {nwbfile.subject.strain}")
+    click.echo(f"Subject genotype: \t {nwbfile.subject.genotype}")
+    click.echo("")
+    click.echo(f"Behavior trials: \t {f"{len(nwbfile.trials.id)} trials" if nwbfile.trials else "None found"}")
+    click.echo(
+        f"Acquisition modules: \t {', '.join(list(nwbfile.acquisition.keys())) if nwbfile.acquisition else 'None found'}"
+    )
+    click.echo(
+        f"Processing modules: \t {', '.join(list(nwbfile.processing.keys())) if nwbfile.processing else 'None found'}"
+    )
+    click.echo(f"Analysis modules: \t {', '.join(list(nwbfile.analysis.keys())) if nwbfile.analysis else 'None found'}")
+    click.echo("")
+    if nwbfile.processing and nwbfile.processing.get("ophys"):
+        click.echo(click.style("Mesoscopy processing progress:", bold=True))
+        click.echo(
+            f"\t{f"{click.style("✅ Preprocessed (DeltaF extracted)", fg="green")}" if nwbfile.processing.get("ophys").get("DeltaFSeries") else f"{click.style("❌ Not preprocessed", fg="red")}"}"
+        )
+        click.echo(
+            f"\t{f"{click.style("✅ Registered", fg="green")}" if nwbfile.processing.get("ophys").get("CCFRegisteredSeries") else f"{click.style("❌ Not registered", fg="red")}"}"
+        )
+        click.echo(
+            f"\t{f"{click.style(f"✅ Analysed ({', '.join(list(nwbfile.analysis.keys()))})", fg="green")}" if nwbfile.analysis else f"{click.style("❌ No analysis found", fg="red")}"}"
+        )
+    else:
+        click.echo(click.style("No ophys processing found.", bold=True))
