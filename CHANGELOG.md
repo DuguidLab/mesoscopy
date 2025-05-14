@@ -8,6 +8,7 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 - Registration GUI with Napari for identifying anatomical landmarks.
 - Conversion CLI command to create NWB files from raw HDF5 recordings.
+- Mesoscopy NWB file inspection with the new `inspect` command.
 
 ### Changed
 
