@@ -19,9 +19,18 @@
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
 
-"""Data inspection GUI, based on Napari."""
+"""Data inspection GUIs, based on Napari."""
 
 import napari
 
 
-def data_viewer(): ...
+def acquisition_viewer(nwbfile): ...
+
+
+def processing_viewer(nwbfile): ...
+
+
+def analysis_viewer(nwbfile): ...
+
+
+def qa_viewer(nwbfile): ...
