@@ -108,4 +108,4 @@ def inspect(input_path: str, info_level: str = "meta_only") -> None:
             f"\t{f"{click.style(f"✅ Analysed ({', '.join(list(nwbfile.analysis.keys()))})", fg="green")}" if nwbfile.analysis else f"{click.style("❌ No analysis found", fg="red")}"}"
         )
     else:
-        click.echo(click.style("No ophys processing found.", bold=True))
+        click.echo(click.style("No mesoscopy processing found.", bold=True))
