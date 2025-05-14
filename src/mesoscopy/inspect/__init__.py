@@ -109,3 +109,6 @@ def inspect(input_path: str, info_level: str = "meta_only") -> None:
         )
     else:
         click.echo(click.style("No mesoscopy processing found.", bold=True))
+
+    if info_level == "meta_only":
+        return
