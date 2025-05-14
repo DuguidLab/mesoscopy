@@ -29,6 +29,7 @@ import mesoscopy.register as reg
 import mesoscopy.process as process
 import mesoscopy.postprocess as postprocess
 import mesoscopy.convert as convert
+import mesoscopy.inspect as inspect
 
 from matplotlib import pyplot as plt
 
@@ -72,3 +73,4 @@ cli.add_command(process.process_cmd)
 cli.add_command(postprocess.postprocess_cmd)
 cli.add_command(reg.register_cmd)
 cli.add_command(convert.convert_cmd)
+cli.add_command(inspect.inspect_cmd)
