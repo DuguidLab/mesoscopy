@@ -99,7 +99,7 @@ def inspect(input_path: str, info_level: str = "meta_only") -> None:
     if nwbfile.processing and nwbfile.processing.get("ophys"):
         click.echo(click.style("Mesoscopy processing progress:", bold=True))
         click.echo(
-            f"\t{f"{click.style("✅ Preprocessed (DeltaF extracted)", fg="green")}" if nwbfile.processing.get("ophys").get("DeltaFSeries") else f"{click.style("❌ Not preprocessed", fg="red")}"}"
+            f"\t{f"{click.style("✅ Preprocessed", fg="green")}" if nwbfile.processing.get("ophys").get("DeltaFSeries") else f"{click.style("❌ Not preprocessed", fg="red")}"}"
         )
         click.echo(
             f"\t{f"{click.style("✅ Registered", fg="green")}" if nwbfile.processing.get("ophys").get("CCFRegisteredSeries") else f"{click.style("❌ Not registered", fg="red")}"}"
