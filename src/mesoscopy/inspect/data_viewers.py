@@ -22,15 +22,40 @@
 """Data inspection GUIs, based on Napari."""
 
 import napari
+from pynwb import NWBFile
 
 
-def acquisition_viewer(nwbfile): ...
+def acquisition_viewer(nwbfile: NWBFile) -> None:
+    """Napari viewer for raw acquisition data.
+
+    Args:
+        nwbfile (NWBFile): NWB file object.
+    """
+    viewer = napari.view_image(
+        nwbfile.acquisition.get("DualChannelImagingSeries").data, name="DualChannelImagingSeries"
+    )
+
+    napari.run()
 
 
-def processing_viewer(nwbfile): ...
+def deltaf_viewer(nwbfile):
+    viewer = napari.view_image(nwbfile.processing.get("ophys").get("DeltaFSeries").data, name="DeltaFSeries")
+
+    napari.run()
 
 
-def analysis_viewer(nwbfile): ...
+def ccfregistered_viewer(nwbfile):
+    viewer = napari.view_image(
+        nwbfile.processing.get("ophys").get("CCFRegisteredSeries").corrected.data, name="CCFRegisteredSeries"
+    )
+
+    napari.run()
+
+
+def analysis_viewer(nwbfile):
+    viewer = napari.view_image(nwbfile.analysis.get("ridge_regression").images, name="ridge_regression")
+
+    napari.run()
 
 
 def qa_viewer(nwbfile): ...
