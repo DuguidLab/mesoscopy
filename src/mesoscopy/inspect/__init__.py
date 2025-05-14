@@ -23,6 +23,7 @@
 
 import click
 
+import mesoscopy.inspect.data_viewers as dvs
 import mesoscopy.io as io
 
 
@@ -43,9 +44,14 @@ import mesoscopy.io as io
     flag_value="acquisition",
 )
 @click.option(
-    "--processing",
+    "--deltaf",
     "info_level",
-    flag_value="processing",
+    flag_value="deltaf",
+)
+@click.option(
+    "--registered",
+    "info_level",
+    flag_value="registered",
 )
 @click.option(
     "--analysis",
@@ -110,5 +116,27 @@ def inspect(input_path: str, info_level: str = "meta_only") -> None:
     else:
         click.echo(click.style("No mesoscopy processing found.", bold=True))
 
+    click.echo("")
+
     if info_level == "meta_only":
         return
+    if info_level == "acquisition":
+        if not nwbfile.acquisition.get("DualChannelImagingSeries"):
+            return click.secho("⚠️  No acquisition data found!", fg="red", bold=True)
+        click.echo("Launching acquisition viewer...")
+        return dvs.acquisition_viewer(nwbfile)
+    if info_level == "deltaf":
+        if not nwbfile.processing.get("ophys").get("DeltaFSeries"):
+            return click.secho("⚠️  No DeltaFSeries found!", fg="red", bold=True)
+        click.echo("Launching ∆F viewer...")
+        return dvs.deltaf_viewer(nwbfile)
+    if info_level == "registered":
+        if not nwbfile.processing.get("ophys").get("CCFRegisteredSeries"):
+            return click.secho("⚠️  No CCFRegisteredSeries found!", fg="red", bold=True)
+        click.echo("Launching CCF registered ∆F viewer...")
+        return dvs.ccfregistered_viewer(nwbfile)
+    if info_level == "analysis":
+        if not nwbfile.analysis.get("ridge_regression"):
+            return click.secho("⚠️  No regression analysis found!", fg="red", bold=True)
+        click.echo("Launching ridge regression output viewer...")
+        return dvs.analysis_viewer(nwbfile)
