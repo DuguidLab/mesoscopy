@@ -50,12 +50,3 @@ def ccfregistered_viewer(nwbfile):
     )
 
     napari.run()
-
-
-def analysis_viewer(nwbfile):
-    viewer = napari.view_image(nwbfile.analysis.get("ridge_regression").images, name="ridge_regression")
-
-    napari.run()
-
-
-def qa_viewer(nwbfile): ...

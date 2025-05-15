@@ -53,16 +53,6 @@ import mesoscopy.io as io
     "info_level",
     flag_value="registered",
 )
-@click.option(
-    "--analysis",
-    "info_level",
-    flag_value="analysis",
-)
-@click.option(
-    "--qa",
-    "info_level",
-    flag_value="qa",
-)
 def inspect_cmd(input_path: str, info_level: str):
     """Inspect a calcium recording session and associated preprocessing output. Files must be in NWB format."""
     inspect(input_path=input_path, info_level=info_level)
@@ -135,8 +125,3 @@ def inspect(input_path: str, info_level: str = "meta_only") -> None:
             return click.secho("⚠️  No CCFRegisteredSeries found!", fg="red", bold=True)
         click.echo("Launching CCF registered ∆F viewer...")
         return dvs.ccfregistered_viewer(nwbfile)
-    if info_level == "analysis":
-        if not nwbfile.analysis.get("ridge_regression"):
-            return click.secho("⚠️  No regression analysis found!", fg="red", bold=True)
-        click.echo("Launching ridge regression output viewer...")
-        return dvs.analysis_viewer(nwbfile)
