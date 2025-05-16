@@ -94,6 +94,28 @@ def nwbfile(tmp_path_factory, random_idx):
     return str(tmpfile)
 
 
+@pytest.fixture()
+def nwbfile_noacquisition(tmp_path_factory):
+    """Create an NWBFile object for testing."""
+    # Create a temporary file
+    tmpfile = tmp_path_factory.mktemp("data") / "test.nwb"
+    # Create an NWBFile object
+    session_start_time = datetime(2024, 1, 1, 14, 0, 0, tzinfo=tzlocal())
+
+    nwbfile = NWBFile(
+        session_description="Test file, not real data",
+        identifier="session_1234",
+        session_start_time=session_start_time,
+        # session_id="session_1234",
+    )
+
+    # Write the NWBFile object to file
+    with NWBHDF5IO(str(tmpfile), "w") as io:
+        io.write(nwbfile)
+    # Return the path to the temporary file
+    return str(tmpfile)
+
+
 @pytest.fixture(scope="session")
 def raw_h5(tmp_path_factory, random_idx):
     """Create an HDF5 file with fake raw data for testing."""
