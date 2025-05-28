@@ -52,6 +52,7 @@ def to_nwb(
     experimenter: typing.Optional[str] = None,
     lab: typing.Optional[str] = None,
     institution: typing.Optional[str] = None,
+    **kwargs,
 ) -> str:
     """Convert a mesoscale recording session from HDF5 to NWB. Optionally add session metadata.
 

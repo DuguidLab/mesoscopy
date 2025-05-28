@@ -80,5 +80,76 @@ def convert_cmd(): ...
 @click.option("--lab", type=str, help="Metadata field - lab experiment was done in.")
 @click.option("--institution", type=str, help="Metadata field - institution experiment was done in.")
 def convert_h5_cmd(**kwargs: typing.Any) -> None:
-    """Convert a raw mesoscale calcium recording session to an NWB file compatible with mesoscopy."""
+    """Convert a raw mesoscale calcium recording session from HDF5 to an NWB file compatible with mesoscopy."""
     conv_h5.to_nwb(**kwargs)
+
+
+@convert_cmd.command("video")
+@click.argument(
+    "input_path",
+    type=click.Path(exists=True),
+)
+@click.option(
+    "-o",
+    "--out-dir",
+    type=click.Path(),
+    default="./",
+    help="Output directory for converted file, defaults to current working directory. Will be created if it doesn't exist.",
+)
+@click.option(
+    "-t",
+    "--ts-path",
+    type=click.Path(exists=True),
+    help="Path to timestamps file. Must be plain text or delimited.",
+)
+@click.option(
+    "-d",
+    "--ts-delimiter",
+    type=click.Choice([",", "\t", " "], case_sensitive=False),
+    default=",",
+    help="Timestamp file delimiter, if file is delimited.",
+)
+@click.option(
+    "-c",
+    "--ts-column",
+    type=int,
+    help="Column in timestamp file to be used as timestamps. Must be provided if file is delimited and has more than one column.",
+)
+@click.option(
+    "--ts-has-header",
+    type=bool,
+    is_flag=True,
+    default=False,
+    help="Flag signifying whether or not the timestamps file has a header row.",
+)
+@click.option(
+    "-l",
+    "--hdf5-only",
+    is_flag=True,
+    show_default=True,
+    default=False,
+    help="Generate an HDF5 linker file only without converting to NWB.",
+)
+@click.option(
+    "-m",
+    "--meta",
+    "meta_path",
+    type=click.Path(exists=True),
+    help="Path to animal metadata file. Must be YAML or JSON format.",
+)
+@click.option("--subject-id", type=str, help="Metadata field - subject identifier.")
+@click.option("--sex", type=click.Choice(["M", "F"], case_sensitive=False), help="Metadata field - subject sex.")
+@click.option("--genotype", type=str, help="Metadata field - subject genotype.")
+@click.option("--species", type=str, help="Metadata field - subject species.")
+@click.option("--strain", type=str, help="Metadata field - subject strain.")
+@click.option("--dob", type=str, help="Metadata field - subject date of birth in YYYY-MM-DD format (i.e. 1900-01-31).")
+@click.option("--description", "session_description", type=str, help="Metadata field - session description.")
+@click.option("--experimenter", type=str, help="Metadata field - experimenter name.")
+@click.option("--lab", type=str, help="Metadata field - lab experiment was done in.")
+@click.option("--institution", type=str, help="Metadata field - institution experiment was done in.")
+def convert_video_cmd(**kwargs: typing.Any) -> None:
+    """Convert a raw mesoscale calcium recording session from video to an NWB file compatible with mesoscopy."""
+    if kwargs.pop("hdf5_only"):
+        conv_vid.to_hdf5(**kwargs)
+    else:
+        conv_vid.to_nwb(**kwargs)
