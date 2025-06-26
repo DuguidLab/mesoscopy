@@ -21,6 +21,8 @@
 
 """Video conversion utilities."""
 
+import os
+import h5py as h5
 import typing
 import skvideo.io
 import pandas as pd
@@ -48,8 +50,17 @@ def to_hdf5(
         )
 
         timestamps = pd.to_datetime(ts_df.loc[:, ts_column]).values
+    else:
+        timestamps = range(len(video_data))
 
-    return ""
+    fname = input_path.split(os.sep)[-1].split(".")[0]
+    out_path = f"{out_dir}{os.sep}{fname}.h5"
+
+    with h5.File(out_path, "w") as f:
+        f.create_dataset("frames", data=video_data)
+        f.create_dataset("timestamps", data=timestamps)
+
+    return out_path
 
 
 def to_nwb(input_path: str, **kwargs: typing.Any) -> str:
