@@ -6,6 +6,7 @@ import os
 import mesoscopy
 import mesoscopy.convert as conv
 import mesoscopy.convert.hdf5 as conv_h5
+import mesoscopy.convert.video as conv_vid
 import mesoscopy.convert.metadata as mtd
 
 from pynwb import NWBHDF5IO
@@ -93,3 +94,8 @@ def test_h5_cmd_parity(raw_h5, output_dir):
         args=f"convert h5 --out-dir {output_dir} {raw_h5}",
     )
     assert result.exit_code == 0
+
+
+def test_avi_h5_converter(raw_avi, output_dir):
+    h5_outpath = conv_vid.to_hdf5(raw_avi, output_dir)
+    assert os.path.isfile(h5_outpath)
