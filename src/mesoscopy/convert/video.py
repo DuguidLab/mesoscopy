@@ -24,8 +24,10 @@
 import os
 import h5py as h5
 import typing
-import skvideo.io
+import pims
 import pandas as pd
+from tqdm import tqdm
+import numpy as np
 
 import mesoscopy.convert.hdf5 as conv_h5
 
@@ -39,7 +41,7 @@ def to_hdf5(
     ts_has_header: bool = False,
     **kwargs: typing.Any,
 ) -> str:
-    video_data = skvideo.io.vread(input_path)
+    video_data = pims.as_gray(pims.PyAVVideoReader(input_path))
 
     if ts_path:
         header_row = 0 if ts_has_header else None
@@ -57,8 +59,20 @@ def to_hdf5(
     out_path = f"{out_dir}{os.sep}{fname}.h5"
 
     with h5.File(out_path, "w") as f:
-        f.create_dataset("frames", data=video_data)
         f.create_dataset("timestamps", data=timestamps)
+        f.create_dataset(
+            "frames",
+            shape=(len(video_data), *video_data[0].shape),
+            chunks=True,
+            dtype=np.int8,
+        )
+
+        for idx, frame in tqdm(
+            enumerate(video_data),
+            desc="Converting video to HDF5",
+            total=len(video_data),
+        ):
+            f["frames"][idx] = frame
 
     return out_path
 
