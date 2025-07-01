@@ -1,3 +1,4 @@
+import importlib.resources
 import pytest
 
 import yaml
@@ -5,7 +6,9 @@ import json
 
 import numpy as np
 import h5py as h5
-import tables
+
+import importlib
+import tests.resources
 
 from datetime import datetime, timedelta
 from dateutil.tz import tzlocal
@@ -141,6 +144,18 @@ def raw_h5(tmp_path_factory, random_idx):
 
     # Return the path to the temporary file
     return str(tmpfile)
+
+
+@pytest.fixture
+def raw_avi():
+    with importlib.resources.path(tests.resources, "example_recording.avi") as path:
+        return str(path)
+
+
+@pytest.fixture
+def raw_timestamps():
+    with importlib.resources.path(tests.resources, "example_recording_ts.csv") as path:
+        return str(path)
 
 
 @pytest.fixture

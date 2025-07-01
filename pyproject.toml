@@ -34,9 +34,12 @@ dependencies = [
     "zarr>=2,<3", 
     "xmltodict", 
     "scikit-image", 
+    "scikit-video",
     "pandas", 
     "pynwb>=2.3.1",
-    "napari[all]>=0.4.19"
+    "napari[all]>=0.4.19",
+    "av>=14.4.0",
+    "pims>=0.7",
 ]
 dynamic = ["version"]
 

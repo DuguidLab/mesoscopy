@@ -75,17 +75,17 @@ def inspect(input_path: str, info_level: str = "meta_only") -> None:
     click.echo(f"Session date: \t\t {nwbfile.session_start_time.date()}")
     click.echo(f"Session description: \t {nwbfile.session_description}")
     click.echo(
-        f"Experimenter: \t\t {nwbfile.experimenter[0] if nwbfile.experimenter else "Unknown"} ({nwbfile.lab}, {nwbfile.institution})"
+        f"Experimenter: \t\t {nwbfile.experimenter[0] if nwbfile.experimenter else 'Unknown'} ({nwbfile.lab}, {nwbfile.institution})"
     )
     click.echo("")
-    click.echo(f"Subject ID: \t\t {nwbfile.subject.subject_id if nwbfile.subject else "Unknown"}")
-    click.echo(f"Subject DOB: \t\t {nwbfile.subject.date_of_birth.date() if nwbfile.subject else "Unknown"}")
-    click.echo(f"Subject sex: \t\t {nwbfile.subject.sex if nwbfile.subject else "Unknown"}")
-    click.echo(f"Subject species: \t {nwbfile.subject.species if nwbfile.subject else "Unknown"}")
-    click.echo(f"Subject strain: \t {nwbfile.subject.strain if nwbfile.subject else "Unknown"}")
-    click.echo(f"Subject genotype: \t {nwbfile.subject.genotype if nwbfile.subject else "Unknown"}")
+    click.echo(f"Subject ID: \t\t {nwbfile.subject.subject_id if nwbfile.subject else 'Unknown'}")
+    click.echo(f"Subject DOB: \t\t {nwbfile.subject.date_of_birth.date() if nwbfile.subject else 'Unknown'}")
+    click.echo(f"Subject sex: \t\t {nwbfile.subject.sex if nwbfile.subject else 'Unknown'}")
+    click.echo(f"Subject species: \t {nwbfile.subject.species if nwbfile.subject else 'Unknown'}")
+    click.echo(f"Subject strain: \t {nwbfile.subject.strain if nwbfile.subject else 'Unknown'}")
+    click.echo(f"Subject genotype: \t {nwbfile.subject.genotype if nwbfile.subject else 'Unknown'}")
     click.echo("")
-    click.echo(f"Behavior trials: \t {f"{len(nwbfile.trials.id)} trials" if nwbfile.trials else "None found"}")
+    click.echo(f"Behavior trials: \t {f'{len(nwbfile.trials.id)} trials' if nwbfile.trials else 'None found'}")
     click.echo(
         f"Acquisition modules: \t {', '.join(list(nwbfile.acquisition.keys())) if nwbfile.acquisition else 'None found'}"
     )
@@ -97,13 +97,13 @@ def inspect(input_path: str, info_level: str = "meta_only") -> None:
     if nwbfile.processing and nwbfile.processing.get("ophys"):
         click.echo(click.style("Mesoscopy processing progress:", bold=True))
         click.echo(
-            f"\t{f"{click.style("✅ Preprocessed", fg="green")}" if nwbfile.processing.get("ophys").get("DeltaFSeries") else f"{click.style("❌ Not preprocessed", fg="red")}"}"
+            f"\t{f'{click.style("✅ Preprocessed", fg="green")}' if nwbfile.processing.get('ophys').get('DeltaFSeries') else f'{click.style("❌ Not preprocessed", fg="red")}'}"
         )
         click.echo(
-            f"\t{f"{click.style("✅ Registered", fg="green")}" if "CCFRegisteredSeries" in nwbfile.processing.get("ophys").data_interfaces.keys() else f"{click.style("❌ Not registered", fg="red")}"}"
+            f"\t{f'{click.style("✅ Registered", fg="green")}' if 'CCFRegisteredSeries' in nwbfile.processing.get('ophys').data_interfaces.keys() else f'{click.style("❌ Not registered", fg="red")}'}"
         )
         click.echo(
-            f"\t{f"{click.style(f"✅ Analysed ({', '.join(list(nwbfile.analysis.keys()))})", fg="green")}" if nwbfile.analysis else f"{click.style("❌ No analysis found", fg="red")}"}"
+            f"\t{f'{click.style(f"✅ Analysed ({', '.join(list(nwbfile.analysis.keys()))})", fg="green")}' if nwbfile.analysis else f'{click.style("❌ No analysis found", fg="red")}'}"
         )
     else:
         click.echo(click.style("No mesoscopy processing found.", bold=True))
