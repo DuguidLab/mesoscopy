@@ -153,6 +153,12 @@ def raw_avi():
 
 
 @pytest.fixture
+def raw_timestamps():
+    with importlib.resources.path(tests.resources, "example_recording_ts.csv") as path:
+        return str(path)
+
+
+@pytest.fixture
 def preproc_h5(tmp_path_factory):
     """Create an HDF5 file with fake preprocessed data for testing."""
     # Create a temporary file

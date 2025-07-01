@@ -97,5 +97,15 @@ def test_h5_cmd_parity(raw_h5, output_dir):
 
 
 def test_avi_h5_converter(raw_avi, output_dir):
-    h5_outpath = conv_vid.to_hdf5(raw_avi, output_dir)
+    h5_outpath = conv_vid.to_hdf5(raw_avi, out_dir=output_dir)
+    assert os.path.isfile(h5_outpath)
+
+
+def test_avi_h5_converter_with_timestamps(raw_avi, raw_timestamps, output_dir):
+    h5_outpath = conv_vid.to_hdf5(raw_avi, output_dir, ts_path=raw_timestamps)
+    assert os.path.isfile(h5_outpath)
+
+
+def test_avi_nwb_converter(raw_avi, output_dir):
+    h5_outpath = conv_vid.to_nwb(raw_avi, out_dir=output_dir)
     assert os.path.isfile(h5_outpath)
