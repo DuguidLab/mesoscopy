@@ -29,6 +29,8 @@ import pandas as pd
 from tqdm import tqdm
 import numpy as np
 
+import datetime
+
 import mesoscopy.convert.hdf5 as conv_h5
 
 
@@ -51,9 +53,9 @@ def to_hdf5(
             header=header_row,
         )
 
-        timestamps = pd.to_datetime(ts_df.loc[:, ts_column]).values
+        timestamps = ts_df.loc[:, ts_column].values
     else:
-        timestamps = range(len(video_data))
+        timestamps = [str(datetime.datetime.now()).replace(" ", "T") for _ in range(len(video_data))]
 
     fname = input_path.split(os.sep)[-1].split(".")[0]
     out_path = f"{out_dir}{os.sep}{fname}.h5"
