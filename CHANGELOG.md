@@ -22,6 +22,7 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 ### Fixed
 
 - Registration uses DeltaF series instead of raw fluorescence series when reading from NWB.
+- Fix padding insertion error when calculating dF/F, remove redundant padding to cumsum vector. 
 
 ### Removed
 
