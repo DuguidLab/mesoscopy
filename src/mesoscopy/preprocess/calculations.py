@@ -147,9 +147,7 @@ def channel_dff(
     if window_width % 2 != 0:
         window_width = window_width + 1
 
-    cumsum_vec = da.cumsum(
-        da.insert(array[channel_filter], 0, 0, axis=0), dtype=np.uint32, axis=0
-    )
+    cumsum_vec = da.cumsum(array[channel_filter], dtype=np.uint32, axis=0)
 
     interim_path = interim_dir + os.sep + session_id + "_" + channel_name + "_cumsum"
     cumsum_vec = io.store_interim(cumsum_vec, interim_path)
@@ -163,22 +161,13 @@ def channel_dff(
     interim_path = interim_dir + os.sep + session_id + "_" + channel_name + "_f0"
     f0 = io.store_interim(f0, interim_path)
 
-    f0_start = da.mean(f0[: int(window_width / 2)]).compute()
-    f0_end = da.mean(f0[-int(window_width / 2) :]).compute()
+    f0_start = da.mean(f0[: window_width // 2]).compute()
+    padding_start = da.zeros((window_width // 2, *array.shape[1:3])) + f0_start
+    f0_end = da.mean(f0[-(window_width // 2) :]).compute()
+    padding_end = da.zeros((window_width // 2, *array.shape[1:3])) + f0_end
 
-    f0 = da.insert(
-        f0,
-        da.arange(0, int(window_width / 2) - 1),
-        f0_start,
-        axis=0,
-    )
-
-    f0 = da.insert(
-        f0,
-        da.arange(f0.shape[0] - int(window_width / 2), f0.shape[0]),
-        f0_end,
-        axis=0,
-    )
+    f0 = da.insert(f0, [0], padding_start, axis=0)
+    f0 = da.insert(f0, [f0.shape[0]], padding_end, axis=0)
 
     interim_path = (
         interim_dir + os.sep + session_id + "_" + channel_name + "_f0_appended"

@@ -1,8 +1,11 @@
+import pathlib
+
 import pytest
 from click.testing import CliRunner
 
 import numpy as np
 from dask import array as da
+import zarr
 
 import mesoscopy
 
@@ -164,6 +167,37 @@ def test_channel_dff_invalid_window(output_dir, random_idx):
             session_id="null",
             window_width=700,
         )
+
+
+def test_channel_dff_insert(output_dir, random_idx):
+    # Generate mock dual-channel imaging data
+    mock_gcamp = np.random.normal(70, 200, size=(300, 20, 20))
+    mock_isosb = np.random.normal(65, 50, size=(300, 20, 20))
+
+    # Merge the two channels in random order
+    mock_dual_channel = np.insert(
+        mock_gcamp, random_idx - np.arange(len(random_idx)), mock_isosb, axis=0
+    )
+
+    gcamp_filter, isosb_filter = calculations.separate_channels(
+        array=da.from_array(mock_dual_channel, chunks=(100, 20, 20)),
+        qa_dir=output_dir,
+        session_id="null",
+        flip_channels=True,
+    )
+
+    _ = calculations.channel_dff(
+        array=mock_dual_channel,
+        channel_filter=gcamp_filter,
+        interim_dir=output_dir,
+        session_id="null",
+        window_width=10,
+    )
+
+    # Assert insertion happens in a block
+    f0 = zarr.load(pathlib.Path(output_dir) / "null_null_f0_appended.zarr")
+    assert da.all(da.equal(f0[0], f0[1]))
+    assert da.all(da.equal(f0[-2], f0[-1]))
 
 
 def test_preprocess_h5(raw_h5, output_dir):
