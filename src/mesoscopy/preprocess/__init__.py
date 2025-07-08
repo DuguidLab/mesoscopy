@@ -251,15 +251,14 @@ def run_preprocessing(
 
     if window_width > binned_frames.shape[0]:
         click.echo(
-            f"WARNING: Default window width is larger than the number of frames. Setting window width to { binned_frames.shape[0] // 4}."
+            f"WARNING: Default window width is larger than the number of frames. Setting window width to {binned_frames.shape[0] // 4}."
         )
         window_width = binned_frames.shape[0] // 4
 
     click.echo("Calculating ∂F for the gcamp channel...")
     start = time.time()
     gcamp_dff = calc.channel_dff(
-        binned_frames,
-        gcamp_filter,
+        binned_frames[gcamp_filter],
         window_width,
         channel_name="gcamp",
         interim_dir=interim_dir,
@@ -271,8 +270,7 @@ def run_preprocessing(
     click.echo("Calculating ∂F for the isosb channel...")
     start = time.time()
     isosb_dff = calc.channel_dff(
-        binned_frames,
-        isosb_filter,
+        binned_frames[isosb_filter],
         window_width,
         channel_name="isosb",
         interim_dir=interim_dir,

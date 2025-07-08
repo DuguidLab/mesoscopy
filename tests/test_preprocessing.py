@@ -54,9 +54,7 @@ def test_separate_channels(output_dir, random_idx):
     mock_isosb = np.random.normal(65, 50, size=(300, 40, 40))
 
     # Merge the two channels in random order
-    mock_dual_channel = np.insert(
-        mock_gcamp, random_idx - np.arange(len(random_idx)), mock_isosb, axis=0
-    )
+    mock_dual_channel = np.insert(mock_gcamp, random_idx - np.arange(len(random_idx)), mock_isosb, axis=0)
 
     gcamp_filter, isosb_filter = calculations.separate_channels(
         array=da.from_array(mock_dual_channel, chunks=(100, 40, 40)),
@@ -75,9 +73,7 @@ def test_separate_channels_use_means(output_dir, random_idx):
     mock_isosb = np.random.normal(65, 50, size=(300, 40, 40))
 
     # Merge the two channels in random order
-    mock_dual_channel = np.insert(
-        mock_gcamp, random_idx - np.arange(len(random_idx)), mock_isosb, axis=0
-    )
+    mock_dual_channel = np.insert(mock_gcamp, random_idx - np.arange(len(random_idx)), mock_isosb, axis=0)
 
     gcamp_filter, isosb_filter = calculations.separate_channels(
         array=da.from_array(mock_dual_channel, chunks=(100, 40, 40)),
@@ -97,9 +93,7 @@ def test_separate_channels_flip_channels(output_dir, random_idx):
     mock_isosb = np.random.normal(65, 50, size=(300, 40, 40))
 
     # Merge the two channels in random order
-    mock_dual_channel = np.insert(
-        mock_gcamp, random_idx - np.arange(len(random_idx)), mock_isosb, axis=0
-    )
+    mock_dual_channel = np.insert(mock_gcamp, random_idx - np.arange(len(random_idx)), mock_isosb, axis=0)
 
     gcamp_filter, isosb_filter = calculations.separate_channels(
         array=da.from_array(mock_dual_channel, chunks=(100, 40, 40)),
@@ -119,9 +113,7 @@ def test_channel_dff(output_dir, random_idx):
     mock_isosb = np.random.normal(65, 50, size=(300, 20, 20))
 
     # Merge the two channels in random order
-    mock_dual_channel = np.insert(
-        mock_gcamp, random_idx - np.arange(len(random_idx)), mock_isosb, axis=0
-    )
+    mock_dual_channel = np.insert(mock_gcamp, random_idx - np.arange(len(random_idx)), mock_isosb, axis=0)
 
     gcamp_filter, isosb_filter = calculations.separate_channels(
         array=da.from_array(mock_dual_channel, chunks=(100, 20, 20)),
@@ -130,11 +122,8 @@ def test_channel_dff(output_dir, random_idx):
         flip_channels=True,
     )
 
-    print(len(gcamp_filter))
-
     dff = calculations.channel_dff(
-        array=mock_dual_channel,
-        channel_filter=gcamp_filter,
+        array=mock_dual_channel[gcamp_filter],
         interim_dir=output_dir,
         session_id="null",
         window_width=10,
@@ -148,9 +137,7 @@ def test_channel_dff_invalid_window(output_dir, random_idx):
     mock_isosb = np.random.normal(65, 50, size=(300, 20, 20))
 
     # Merge the two channels in random order
-    mock_dual_channel = np.insert(
-        mock_gcamp, random_idx - np.arange(len(random_idx)), mock_isosb, axis=0
-    )
+    mock_dual_channel = np.insert(mock_gcamp, random_idx - np.arange(len(random_idx)), mock_isosb, axis=0)
 
     gcamp_filter, isosb_filter = calculations.separate_channels(
         array=da.from_array(mock_dual_channel, chunks=(100, 20, 20)),
@@ -161,8 +148,7 @@ def test_channel_dff_invalid_window(output_dir, random_idx):
 
     with pytest.raises(ValueError):
         calculations.channel_dff(
-            array=mock_dual_channel,
-            channel_filter=gcamp_filter,
+            array=mock_dual_channel[gcamp_filter],
             interim_dir=output_dir,
             session_id="null",
             window_width=700,
@@ -175,9 +161,7 @@ def test_channel_dff_insert(output_dir, random_idx):
     mock_isosb = np.random.normal(65, 50, size=(300, 20, 20))
 
     # Merge the two channels in random order
-    mock_dual_channel = np.insert(
-        mock_gcamp, random_idx - np.arange(len(random_idx)), mock_isosb, axis=0
-    )
+    mock_dual_channel = np.insert(mock_gcamp, random_idx - np.arange(len(random_idx)), mock_isosb, axis=0)
 
     gcamp_filter, isosb_filter = calculations.separate_channels(
         array=da.from_array(mock_dual_channel, chunks=(100, 20, 20)),
@@ -187,8 +171,7 @@ def test_channel_dff_insert(output_dir, random_idx):
     )
 
     _ = calculations.channel_dff(
-        array=mock_dual_channel,
-        channel_filter=gcamp_filter,
+        array=mock_dual_channel[gcamp_filter],
         interim_dir=output_dir,
         session_id="null",
         window_width=10,
@@ -201,15 +184,11 @@ def test_channel_dff_insert(output_dir, random_idx):
 
 
 def test_preprocess_h5(raw_h5, output_dir):
-    preprocess.run_preprocessing(
-        path=raw_h5, out_dir=output_dir, interim_dir=output_dir
-    )
+    preprocess.run_preprocessing(path=raw_h5, out_dir=output_dir, interim_dir=output_dir)
 
 
 def test_preprocess_h5_crop(raw_h5, output_dir):
-    preprocess.run_preprocessing(
-        path=raw_h5, out_dir=output_dir, interim_dir=output_dir, crop=5
-    )
+    preprocess.run_preprocessing(path=raw_h5, out_dir=output_dir, interim_dir=output_dir, crop=5)
 
 
 def test_preprocess_h5_frameskip(raw_h5, output_dir):
@@ -233,27 +212,19 @@ def test_preprocess_h5_frameskip(raw_h5, output_dir):
 
 
 def test_preprocess_h5_bin(raw_h5, output_dir):
-    preprocess.run_preprocessing(
-        path=raw_h5, out_dir=output_dir, interim_dir=output_dir, bins=4
-    )
+    preprocess.run_preprocessing(path=raw_h5, out_dir=output_dir, interim_dir=output_dir, bins=4)
 
 
 def test_preprocess_h5_channelmeansonly(raw_h5, output_dir):
-    preprocess.run_preprocessing(
-        path=raw_h5, out_dir=output_dir, interim_dir=output_dir, channel_means_only=True
-    )
+    preprocess.run_preprocessing(path=raw_h5, out_dir=output_dir, interim_dir=output_dir, channel_means_only=True)
 
 
 def test_preprocess_nwb(nwbfile, output_dir):
-    preprocess.run_preprocessing(
-        path=nwbfile, out_dir=output_dir, interim_dir=output_dir
-    )
+    preprocess.run_preprocessing(path=nwbfile, out_dir=output_dir, interim_dir=output_dir)
 
 
 def test_preprocess_nwb_crop(nwbfile, output_dir):
-    preprocess.run_preprocessing(
-        path=nwbfile, out_dir=output_dir, interim_dir=output_dir, crop=5
-    )
+    preprocess.run_preprocessing(path=nwbfile, out_dir=output_dir, interim_dir=output_dir, crop=5)
 
 
 def test_preprocess_nwb_frameskip_odd(nwbfile, output_dir):
@@ -279,9 +250,7 @@ def test_preprocess_nwb_frameskip_even(nwbfile, output_dir):
 
 
 def test_preprocess_nwb_bin(nwbfile, output_dir):
-    preprocess.run_preprocessing(
-        path=nwbfile, out_dir=output_dir, interim_dir=output_dir, bins=4
-    )
+    preprocess.run_preprocessing(path=nwbfile, out_dir=output_dir, interim_dir=output_dir, bins=4)
 
 
 def test_preprocess_nwb_channelmeansonly(nwbfile, output_dir):

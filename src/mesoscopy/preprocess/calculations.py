@@ -118,7 +118,6 @@ def separate_channels(
 
 def channel_dff(
     array: da.Array | npt.NDArray,
-    channel_filter: list,
     window_width: int = 750,
     channel_name: str = "null",
     interim_dir: str = ".",
@@ -127,8 +126,7 @@ def channel_dff(
     """Calculate dF/F for a channel in a mixed-channel array.
 
     Args:
-        array (Dask or NumPy Array): Array to be separated.
-        channel_filter (list): List of frame indices for the channel.
+        array (Dask or NumPy Array): Array to be separated. If array is a multi-channel recording, it needs to be filtered before it's passed to this function.
         window_width (int, optional): Window width for dF/F calculation. Defaults to 750.
         channel_name (str, optional): Channel name for interim path. Defaults to "null".
         interim_dir (str, optional): Directory to store interim dF/F data. Defaults to current working directory (".").
@@ -147,7 +145,7 @@ def channel_dff(
     if window_width % 2 != 0:
         window_width = window_width + 1
 
-    cumsum_vec = da.cumsum(array[channel_filter], dtype=np.uint32, axis=0)
+    cumsum_vec = da.cumsum(array, dtype=np.uint32, axis=0)
 
     interim_path = interim_dir + os.sep + session_id + "_" + channel_name + "_cumsum"
     cumsum_vec = io.store_interim(cumsum_vec, interim_path)
@@ -169,12 +167,10 @@ def channel_dff(
     f0 = da.insert(f0, [0], padding_start, axis=0)
     f0 = da.insert(f0, [f0.shape[0]], padding_end, axis=0)
 
-    interim_path = (
-        interim_dir + os.sep + session_id + "_" + channel_name + "_f0_appended"
-    )
+    interim_path = interim_dir + os.sep + session_id + "_" + channel_name + "_f0_appended"
     f0 = io.store_interim(f0, interim_path)
 
-    dff = da.true_divide(da.subtract(array[channel_filter], f0), f0, dtype=np.float32)
+    dff = da.true_divide(da.subtract(array, f0), f0, dtype=np.float32)
 
     interim_path = interim_dir + os.sep + session_id + "_" + channel_name + "_dff"
 
