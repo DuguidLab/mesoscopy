@@ -21,11 +21,40 @@
 """Export functions for mesoscopy-generated files."""
 
 import click
+import typing
 
-import mesoscopy.export as exp
+import mesoscopy.export.nwb as exp_nwb
 
 
 @click.group("export")
 def export_cmd() -> None:
     """Export mesoscopy-generated files."""
     pass
+
+
+@export_cmd.command("nwb")
+@click.argument("nwb_path", type=click.Path(exists=True, dir_okay=False, path_type=str))
+@click.option(
+    "--out-path",
+    type=click.Path(dir_okay=False, path_type=str),
+    default="",
+    help="Path to save the exported NWB file. If not provided, the output file will be named as the input file with '_export.nwb' appended.",
+)
+def export_nwb_cmd(**kwargs: typing.Any) -> None:
+    """Create a sharable copy of an NWB file by resolving external data links."""
+    click.echo("Exporting NWB file...")
+    export_path = export_nwb(**kwargs)
+    click.echo(f"NWB file exported to {export_path}")
+
+
+def export_nwb(nwb_path: str, out_path: str = "") -> str:
+    """Create a sharable copy of an NWB file by resolving external data links.
+
+    Args:
+        nwb_path (str): Path to the source NWB file.
+        out_path (str, optional): Path to save the exported NWB file. If not provided, the output file will be named as the input file with '_export.nwb' appended. Defaults to "".
+
+    Returns:
+        str: Path to the exported NWB file.
+    """
+    return exp_nwb.export_standalone(nwb_path, out_path)
