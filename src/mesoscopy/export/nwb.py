@@ -22,7 +22,7 @@
 from pynwb import NWBHDF5IO
 
 
-def nwb_sharing_export(nwb_path: str, out_path: str = "") -> str:
+def export_standalone(nwb_path: str, out_path: str = "") -> str:
     """Create a sharable copy of an NWB file by resolving external data links.
 
     This function reads an NWB file, generates a new unique identifier for the NWBFile,
