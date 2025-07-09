@@ -22,7 +22,6 @@
 
 import click
 
-import mesoscopy.io as io
 import mesoscopy.export as exp
 
 
