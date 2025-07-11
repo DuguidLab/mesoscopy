@@ -29,6 +29,8 @@ import time
 import mesoscopy.io as io
 import mesoscopy.plots as plots
 import mesoscopy.preprocess.calculations as calc
+import mesoscopy.preprocess.qa as qa
+import mesoscopy.timer as timer
 
 import numpy as np
 from dask import array as da
@@ -178,42 +180,49 @@ def run_preprocessing(
         "{}x{} binning to shape {} by {}".format(bins, bins, raw_frames.shape[1] // bins, raw_frames.shape[2] // bins)
     )
     start = time.time()
-    binned_frames = calc.bin_array(raw_frames, bins=bins, interim_dir=interim_dir, session_id=session_id)
-    end = time.time()
-    click.echo("Binned frames saved in {} s".format(end - start))
+
+    with timer.Timer(
+        f"Binning frames to shape {raw_frames.shape[1] // bins} by {raw_frames.shape[2] // bins} ({bins}x{bins})"
+    ):
+        binned_frames = calc.bin_array(
+            raw_frames,
+            bins=bins,
+            interim_dir=interim_dir,
+            session_id=session_id,
+        )
 
     del raw_frames
 
     # Channel separation
     # Get the global mean and std values for each frame
-    click.echo("Calculating frame means & standard deviations...")
-    start = time.time()
-    gcamp_filter, isosb_filter = calc.separate_channels(
-        binned_frames,
-        session_id=session_id,
-        use_means=use_means,
-        flip_channels=flip_channels,
-        qa_dir=qa_dir,
-    )
-    end = time.time()
-    click.echo("Frame means & standard deviations calculated in {} s".format(end - start))
+    with timer.Timer("Calculating frame means & standard deviations") as t:
+        frame_means, frame_stds = calc.calculate_frame_statistics(binned_frames)
+        qa.plot_frame_statistics(
+            frame_means,
+            frame_stds,
+            qa_dir,
+            session_id=session_id,
+        )
 
-    # Check that the separation works
-    click.echo("Separating channels...")
-    start = time.time()
-    gcamp_mean, isosb_mean = dask.compute(
-        binned_frames[gcamp_filter].mean(axis=(1, 2), dtype=np.float32),
-        binned_frames[isosb_filter].mean(axis=(1, 2), dtype=np.float32),
-    )
-    end = time.time()
-    click.echo("Channel means calculated in {} s".format(end - start))
+    # Generate the channel separation filters
+    with timer.Timer("Generating channel separation filters"):
+        gcamp_filter, isosb_filter = calc.channel_separation_filters(
+            frame_means,
+            frame_stds,
+            use_means=use_means,
+            flip_channels=flip_channels,
+        )
 
-    outpath = qa_dir + os.sep + session_id + "_qa_channel_means.png"
-    plots.plot_lines(
-        [gcamp_mean, isosb_mean],
-        outpath,
-        message="Saved channel means at {}".format(outpath),
-    )
+    with timer.Timer("Calculating channel mean timeseries"):
+        gcamp_mean, isosb_mean = dask.compute(
+            binned_frames[gcamp_filter].mean(axis=(1, 2), dtype=np.float32),
+            binned_frames[isosb_filter].mean(axis=(1, 2), dtype=np.float32),
+        )
+        qa.plot_dual_channel_timeseries(
+            (gcamp_mean, isosb_mean),
+            qa_dir=qa_dir,
+            session_id=session_id,
+        )
 
     if channel_means_only:
         click.echo("Channel means saved as txt files. Exiting.")

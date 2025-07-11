@@ -29,6 +29,8 @@ from dask import array as da
 import mesoscopy.io as io
 import mesoscopy.plots as plots
 
+import mesoscopy.preprocess.qa as qa
+
 
 def bin_array(
     array: da.Array | npt.NDArray,
@@ -61,46 +63,43 @@ def bin_array(
     return io.store_interim(binned_array, interim_path)
 
 
-def separate_channels(
-    array: da.Array | npt.NDArray,
-    qa_dir: str = ".",
-    session_id: str = "null",
+def calculate_frame_statistics(array: da.Array | npt.NDArray) -> tuple[npt.NDArray, npt.NDArray]:
+    """Calculate mean and standard deviation for each frame in a 3D image array.
+
+    Args:
+        array (Dask or NumPy Array): Array to calculate statistics for.
+
+    Returns:
+        tuple[npt.NDArray, npt.NDArray]: Tuple containing two NumPy arrays: means and standard deviations for each frame.
+    """
+    if type(array) == np.ndarray:
+        array = da.from_array(array, chunks=(100, array.shape[1], array.shape[2]))
+
+    frame_means, frame_stds = dask.compute(
+        array.mean(axis=(1, 2), dtype=np.float32),
+        array.std(axis=(1, 2), dtype=np.float32),
+    )
+
+    return frame_means, frame_stds
+
+
+def channel_separation_filters(
+    frame_means: npt.NDArray,
+    frame_stds: npt.NDArray,
     use_means: bool = False,
     flip_channels: bool = False,
 ) -> tuple[list, list]:
-    """Separate channels in a mixed-channel array.
+    """Generate filters for separating channels based on frame means and standard deviations.
 
     Args:
-        array (Dask or NumPy Array): Array to be separated.
-        qa_dir (str or PathLike object, optional): Directory to store QA plots. Defaults to current working directory (".").
-        session_id (str, optional): Session identifier for interim path. Defaults to "null".
+        frame_means (npt.NDArray): Array of mean values for each frame.
+        frame_stds (npt.NDArray): Array of standard deviation values for each frame.
         use_means (bool, optional): Use means instead of standard deviations for filtering. Defaults to False.
         flip_channels (bool, optional): Flip the channels. Defaults to False.
 
     Returns:
         tuple[list, list]: Tuple of two lists, containing the frame indices for each channel.
     """
-    frame_means, frame_stds = dask.compute(
-        array.mean(axis=(1, 2), dtype=np.float32),
-        array.std(axis=(1, 2), dtype=np.float32),
-    )
-
-    outpath = qa_dir + os.sep + session_id + "_qa_frame_means_histogram.png"
-    msg = "Saved histogram for frame means at {}".format(outpath)
-    plots.plot_hist(frame_means, outpath, message=msg)
-
-    outpath = qa_dir + os.sep + session_id + "_qa_frame_means_line.png"
-    msg = "Saved lineplot for frame means at {}".format(outpath)
-    plots.plot_line(frame_means, outpath, message=msg)
-
-    outpath = qa_dir + os.sep + session_id + "_qa_frame_std_histogram.png"
-    msg = "Saved histogram for frame means at {}".format(outpath)
-    plots.plot_hist(frame_stds, outpath, message=msg)
-
-    outpath = qa_dir + os.sep + session_id + "_qa_frame_std_line.png"
-    msg = "Saved lineplot for frame means at {}".format(outpath)
-    plots.plot_line(frame_stds, outpath, message=msg)
-
     threshold = frame_stds.mean()
     gcamp_filter = np.nonzero(frame_stds > threshold)[0].tolist()
     isosb_filter = np.nonzero(frame_stds < threshold)[0].tolist()
