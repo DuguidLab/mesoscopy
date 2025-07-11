@@ -66,7 +66,44 @@ def plot_dual_channel_timeseries(
     )
 
 
-def dff_qa_plots(): ...
+def plot_channel_projection_images(
+    channel_array: npt.NDArray, qa_dir: str = ".", session_id: str = "null", channel: str = "null"
+) -> None:
+    """Plot and save channel mean, standard deviation and maximum intensity projection frames.
+    Args:
+        channel_array (npt.NDArray): Array containing channel statistics.
+        qa_dir (str): Directory to save QA plots.
+        session_id (str, optional): Session identifier for interim path. Defaults to "null".
+    """
+    mean_frame, std_frame, maxip = dask.compute(
+        channel_array.mean(axis=0),
+        channel_array.std(axis=0),
+        channel_array.max(axis=0),
+    )
+
+    outpath = qa_dir + os.sep + session_id + "_qa_{}_mean.png".format(channel)
+    plots.plot_frame(mean_frame, outpath, message="Saved mean frame at {}".format(outpath))
+
+    outpath = qa_dir + os.sep + session_id + "_qa_{}_std.png".format(channel)
+    plots.plot_frame(std_frame, outpath, message="Saved std frame at {}".format(outpath))
+
+    outpath = qa_dir + os.sep + session_id + "_qa_{}_maxip.png".format(channel)
+    plots.plot_frame(maxip, outpath, message="Saved maxip frame at {}".format(outpath))
 
 
-def signal_correction_qa_plots(): ...
+def plot_dual_dff_timeseries(
+    dff_arrays: tuple[npt.NDArray, npt.NDArray], qa_dir: str = ".", session_id: str = "null"
+) -> None:
+    """Plot and save dual channel DFF timeseries.
+
+    Args:
+        dff_arrays (tuple[npt.NDArray, npt.NDArray]): Tuple containing the ∆F for each channel.
+        qa_dir (str): Directory to save QA plots.
+        session_id (str, optional): Session identifier for interim path. Defaults to "null".
+    """
+    outpath = qa_dir + os.sep + session_id + "_qa_dual_dff_timeseries.png"
+    plots.plot_lines(
+        [dff_arrays[0], dff_arrays[1]],
+        outpath,
+        message="Saved dual channel DFF timeseries at {}".format(outpath),
+    )

@@ -228,34 +228,24 @@ def run_preprocessing(
         click.echo("Channel means saved as txt files. Exiting.")
         return
 
-    # Generate the mean gcamp frame and its std
-    click.echo("Generating mean gcamp frame and its maximum intensity projection...")
-    start = time.time()
-    channel_qa(
-        binned_frames,
-        gcamp_filter,
-        qa_dir=qa_dir,
-        session_id=session_id,
-        channel="gcamp",
-    )
-    end = time.time()
-    click.echo("GCaMP average frame, std and maximum intensity projection calculated in {} s".format(end - start))
+    gcamp_channel = binned_frames[gcamp_filter]
+    isosb_channel = binned_frames[isosb_filter]
 
-    # Generate the mean isosbestic frame and its std
-    click.echo("Generating mean isosbestic frame and its maximum intensity projection...")
-    start = time.time()
-    channel_qa(
-        binned_frames,
-        isosb_filter,
-        qa_dir=qa_dir,
-        session_id=session_id,
-        channel="isosb",
-    )
-    end = time.time()
-    click.echo("Isosbestic average frame, std and maximum intensity projection calculated in {} s".format(end - start))
+    with timer.Timer("Generating projection images per channel"):
+        qa.plot_channel_projection_images(
+            gcamp_channel,
+            qa_dir=qa_dir,
+            session_id=session_id,
+            channel="gcamp",
+        )
+        qa.plot_channel_projection_images(
+            isosb_channel,
+            qa_dir=qa_dir,
+            session_id=session_id,
+            channel="isosb",
+        )
 
     # Calculate the dff per channel using a rolling baseline (mean in a 30s window)
-
     window_width = 30 * 25
 
     if window_width > binned_frames.shape[0]:
@@ -264,29 +254,21 @@ def run_preprocessing(
         )
         window_width = binned_frames.shape[0] // 4
 
-    click.echo("Calculating ∂F for the gcamp channel...")
-    start = time.time()
-    gcamp_dff = calc.channel_dff(
-        binned_frames[gcamp_filter],
-        window_width,
-        channel_name="gcamp",
-        interim_dir=interim_dir,
-        session_id=session_id,
-    )
-    end = time.time()
-    click.echo("gcamp ∂F calculated in {} s".format(end - start))
-
-    click.echo("Calculating ∂F for the isosb channel...")
-    start = time.time()
-    isosb_dff = calc.channel_dff(
-        binned_frames[isosb_filter],
-        window_width,
-        channel_name="isosb",
-        interim_dir=interim_dir,
-        session_id=session_id,
-    )
-    end = time.time()
-    click.echo("isosb ∂F calculated in {} s".format(end - start))
+    with timer.Timer("Calculating dF/F per channel"):
+        calc.channel_dff(
+            gcamp_channel,
+            window_width=window_width,
+            channel_name="gcamp",
+            interim_dir=interim_dir,
+            session_id=session_id,
+        )
+        calc.channel_dff(
+            isosb_channel,
+            window_width=window_width,
+            channel_name="isosb",
+            interim_dir=interim_dir,
+            session_id=session_id,
+        )
 
     click.echo("Calculating mean ∂F per frame for gcamp and isosb channels...")
     start = time.time()
@@ -311,10 +293,6 @@ def run_preprocessing(
         gcamp_dff[:max_idx],
         isosb_dff[:max_idx],
     )
-
-    # f_signal.visualize(
-    #     filename=qa_dir + os.sep + session_id + "_calc_f_signal_graph.png"
-    # )
 
     outpath = out_dir + os.sep + session_id + "_preprocessed.h5"
     start = time.time()
