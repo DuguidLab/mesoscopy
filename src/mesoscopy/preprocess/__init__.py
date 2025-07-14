@@ -379,35 +379,3 @@ def update_nwb(nwb_path: str, h5_path: str) -> None:
     io.write_nwb(nwb_path, nwbfile, io=nwbio)
 
     return nwbfile
-
-
-def channel_qa(
-    array: da.Array | np.ndarray,
-    channel_filter: list | da.Array | np.ndarray,
-    qa_dir: str = ".",
-    session_id: str = "null",
-    channel: str = "null",
-) -> None:
-    """Generate QA plots for a channel.
-
-    Args:
-        array (da.Array | np.ndarray): Imaging data array.
-        channel_filter (list | da.Array | np.ndarray): Calculated channel filter.
-        qa_dir (str, optional): Directory to save QA plots. Defaults to ".".
-        session_id (str, optional): Session identifier. Defaults to "null".
-        channel (str, optional): Channel name. Defaults to "null".
-    """
-    mean_frame, std_frame, maxip = dask.compute(
-        array[channel_filter].mean(axis=0),
-        array[channel_filter].std(axis=0),
-        array[channel_filter].max(axis=0),
-    )
-
-    outpath = qa_dir + os.sep + session_id + "_qa_{}_mean.png".format(channel)
-    plots.plot_frame(mean_frame, outpath, message="Saved mean frame at {}".format(outpath))
-
-    outpath = qa_dir + os.sep + session_id + "_qa_{}_std.png".format(channel)
-    plots.plot_frame(std_frame, outpath, message="Saved std frame at {}".format(outpath))
-
-    outpath = qa_dir + os.sep + session_id + "_qa_{}_maxip.png".format(channel)
-    plots.plot_frame(maxip, outpath, message="Saved maxip frame at {}".format(outpath))
