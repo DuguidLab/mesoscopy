@@ -63,11 +63,11 @@ def bin_array(
     return io.store_interim(binned_array, interim_path)
 
 
-def calculate_frame_statistics(array: da.Array | npt.NDArray) -> tuple[npt.NDArray, npt.NDArray]:
+def frame_statistics(array: da.Array | npt.NDArray) -> tuple[npt.NDArray, npt.NDArray]:
     """Calculate mean and standard deviation for each frame in a 3D image array.
 
     Args:
-        array (Dask or NumPy Array): Array to calculate statistics for.
+        array (Dask or NumPy Array): Imaging array to calculate statistics for.
 
     Returns:
         tuple[npt.NDArray, npt.NDArray]: Tuple containing two NumPy arrays: means and standard deviations for each frame.
@@ -115,14 +115,14 @@ def channel_separation_filters(
     return gcamp_filter, isosb_filter
 
 
-def channel_dff(
+def rolling_dff(
     array: da.Array | npt.NDArray,
     window_width: int = 750,
     channel_name: str = "null",
     interim_dir: str = ".",
     session_id: str = "null",
 ) -> zarr.core.Array:
-    """Calculate dF/F for a channel in a mixed-channel array.
+    """Calculate dF/F using a rolling window.
 
     Args:
         array (Dask or NumPy Array): Array to be separated. If array is a multi-channel recording, it needs to be filtered before it's passed to this function.
@@ -174,3 +174,40 @@ def channel_dff(
     interim_path = interim_dir + os.sep + session_id + "_" + channel_name + "_dff"
 
     return io.store_interim(dff, interim_path)
+
+
+def projections(
+    array: da.Array | npt.NDArray,
+) -> dict[str, npt.NDArray]:
+    """Calculate mean, standard deviation and maximum intensity projection frames.
+    Args:
+        channel_array (npt.NDArray): Array containing channel statistics.
+
+    Returns:
+        dict[str, npt.NDArray]: Dictionary containing mean, standard deviation and maximum intensity projection frames.
+    """
+    mean_frame, std_frame, maxip = dask.compute(
+        array.mean(axis=0),
+        array.std(axis=0),
+        array.max(axis=0),
+    )
+
+    return {
+        "mean": mean_frame,
+        "std": std_frame,
+        "maxip": maxip,
+    }
+
+
+def mean_timeseries(
+    array: da.Array | npt.NDArray,
+) -> npt.NDArray:
+    """Calculate the mean timeseries for a 3D image array.
+
+    Args:
+        array (Dask or NumPy Array): 3D image array to calculate the mean timeseries for.
+
+    Returns:
+        npt.NDArray: 1D array containing the mean values for each frame.
+    """
+    return array.mean(axis=(1, 2))

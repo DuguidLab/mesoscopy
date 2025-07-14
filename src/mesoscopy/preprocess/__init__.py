@@ -196,7 +196,7 @@ def run_preprocessing(
     # Channel separation
     # Get the global mean and std values for each frame
     with timer.Timer("Calculating frame means & standard deviations") as t:
-        frame_means, frame_stds = calc.calculate_frame_statistics(binned_frames)
+        frame_means, frame_stds = calc.frame_statistics(binned_frames)
         qa.plot_frame_statistics(
             frame_means,
             frame_stds,
@@ -232,18 +232,8 @@ def run_preprocessing(
     isosb_channel = binned_frames[isosb_filter]
 
     with timer.Timer("Generating projection images per channel"):
-        qa.plot_channel_projection_images(
-            gcamp_channel,
-            qa_dir=qa_dir,
-            session_id=session_id,
-            channel="gcamp",
-        )
-        qa.plot_channel_projection_images(
-            isosb_channel,
-            qa_dir=qa_dir,
-            session_id=session_id,
-            channel="isosb",
-        )
+        gcamp_projections = calc.projections(gcamp_channel)
+        isosb_projections = calc.projections(isosb_channel)
 
     # Calculate the dff per channel using a rolling baseline (mean in a 30s window)
     window_width = 30 * 25
@@ -255,14 +245,14 @@ def run_preprocessing(
         window_width = binned_frames.shape[0] // 4
 
     with timer.Timer("Calculating dF/F per channel"):
-        gcamp_dff = calc.channel_dff(
+        gcamp_dff = calc.rolling_dff(
             gcamp_channel,
             window_width=window_width,
             channel_name="gcamp",
             interim_dir=interim_dir,
             session_id=session_id,
         )
-        isosb_dff = calc.channel_dff(
+        isosb_dff = calc.rolling_dff(
             isosb_channel,
             window_width=window_width,
             channel_name="isosb",
@@ -291,26 +281,36 @@ def run_preprocessing(
             isosb_dff[:max_idx],
         )
 
-        outpath = out_dir + os.sep + session_id + "_preprocessed.h5"
-        da.to_hdf5(outpath, "/data", f_signal, compression="lzf")
-        click.echo("Saved F signal at {}".format(outpath))
-        qa.plot_f_example(
-            f_signal,
-            qa_dir=qa_dir,
-            session_id=session_id,
-        )
-        qa.plot_mean_f_timeseries(
-            f_signal,
-            qa_dir=qa_dir,
-            session_id=session_id,
-        )
-
-    # Save timestamps
-    outpath = out_dir + os.sep + session_id + "_preprocessed.h5"
-    click.echo("Appending timestamps to {}".format(outpath))
+    with timer.Timer("Calculating mean F timeseries"):
+        f_mean_timeseries = f_signal.mean(axis=(1, 2))
 
     timestamps = da.from_array(np.array(ts[gcamp_filter[:max_idx]], dtype="S25"), chunks="auto")
-    da.to_hdf5(outpath, "/timestamps", timestamps)
+
+    outpath = out_dir + os.sep + session_id + "_preprocessed.h5"
+    with timer.Timer(f"Writing data to {outpath}"):
+        da.to_hdf5(
+            outpath,
+            {
+                "/data": f_signal,
+                "/timestamps": timestamps,
+                "/qa/frame_means_timeseries": frame_means,
+                "/qa/frame_stds_timeseries": frame_stds,
+                "/qa/gcamp_mean_timeseries": gcamp_mean[:max_idx],
+                "/qa/isosb_mean_timeseries": isosb_mean[:max_idx],
+                "/qa/gcamp_dff_timeseries": gcamp_signal_mean[:max_idx],
+                "/qa/isosb_dff_timeseries": isosb_signal_mean[:max_idx],
+                "/qa/gcamp_filter": gcamp_filter[:max_idx],
+                "/qa/isosb_filter": isosb_filter[:max_idx],
+                "/qa/gcamp_mean_projection": gcamp_projections.get("mean"),
+                "/qa/gcamp_std_projection": gcamp_projections.get("std"),
+                "/qa/gcamp_maxip_projection": gcamp_projections.get("maxip"),
+                "/qa/isosb_mean_projection": isosb_projections.get("mean"),
+                "/qa/isosb_std_projection": isosb_projections.get("std"),
+                "/qa/isosb_maxip_projection": isosb_projections.get("maxip"),
+                "/qa/f_mean_timeseries": f_mean_timeseries,
+            },
+            compression="lzf",
+        )
 
     preprocessing_end = time.time()
     click.echo("Preprocessing took a total of {} mins.".format((preprocessing_end - preprocessing_start) / 60))
