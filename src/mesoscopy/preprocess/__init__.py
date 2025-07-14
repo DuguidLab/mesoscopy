@@ -135,11 +135,7 @@ def run_preprocessing(
 
     os.makedirs(out_dir, exist_ok=True)
 
-    qa_dir = out_dir + os.sep + "qa"
-    os.makedirs(qa_dir, exist_ok=True)
-
     os.makedirs(interim_dir, exist_ok=True)
-
     click.echo("Loading data...")
 
     # Determine whether we're working with an NWB file
@@ -175,12 +171,6 @@ def run_preprocessing(
         raw_frames = raw_frames[:, crop:-crop, crop:-crop]
         click.echo("Cropping to shape {}".format(raw_frames.shape))
 
-    # Binning
-    click.echo(
-        "{}x{} binning to shape {} by {}".format(bins, bins, raw_frames.shape[1] // bins, raw_frames.shape[2] // bins)
-    )
-    start = time.time()
-
     with timer.Timer(
         f"Binning frames to shape {raw_frames.shape[1] // bins} by {raw_frames.shape[2] // bins} ({bins}x{bins})"
     ):
@@ -195,14 +185,8 @@ def run_preprocessing(
 
     # Channel separation
     # Get the global mean and std values for each frame
-    with timer.Timer("Calculating frame means & standard deviations") as t:
+    with timer.Timer("Calculating frame means & standard deviations"):
         frame_means, frame_stds = calc.frame_statistics(binned_frames)
-        qa.plot_frame_statistics(
-            frame_means,
-            frame_stds,
-            qa_dir,
-            session_id=session_id,
-        )
 
     # Generate the channel separation filters
     with timer.Timer("Generating channel separation filters"):
@@ -218,13 +202,18 @@ def run_preprocessing(
             binned_frames[gcamp_filter].mean(axis=(1, 2), dtype=np.float32),
             binned_frames[isosb_filter].mean(axis=(1, 2), dtype=np.float32),
         )
-        qa.plot_dual_channel_timeseries(
-            (gcamp_mean, isosb_mean),
-            qa_dir=qa_dir,
-            session_id=session_id,
-        )
 
     if channel_means_only:
+        np.savetxt(
+            os.path.join(out_dir, f"{session_id}_gcamp_mean.txt"),
+            gcamp_mean,
+            fmt="%.4f",
+        )
+        np.savetxt(
+            os.path.join(out_dir, f"{session_id}_isosb_mean.txt"),
+            isosb_mean,
+            fmt="%.4f",
+        )
         click.echo("Channel means saved as txt files. Exiting.")
         return
 
@@ -262,11 +251,6 @@ def run_preprocessing(
 
     with timer.Timer("Calculating mean ∂F per frame per channel"):
         gcamp_signal_mean, isosb_signal_mean = da.compute(gcamp_dff.mean(axis=(1, 2)), isosb_dff.mean(axis=(1, 2)))
-        qa.plot_dual_dff_timeseries(
-            (gcamp_signal_mean, isosb_signal_mean),
-            qa_dir=qa_dir,
-            session_id=session_id,
-        )
 
     # Max common index (to avoid array overflow)
     if len(gcamp_mean) != len(isosb_mean):
