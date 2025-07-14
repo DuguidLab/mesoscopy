@@ -107,3 +107,27 @@ def plot_dual_dff_timeseries(
         outpath,
         message="Saved dual channel DFF timeseries at {}".format(outpath),
     )
+
+
+def plot_f_example(f_signal: npt.NDArray, qa_dir: str = ".", session_id: str = "null") -> None:
+    """Plot and save an example frame of the F signal.
+
+    Args:
+        f_signal (npt.NDArray): Array containing the F signal.
+        qa_dir (str): Directory to save QA plots.
+        session_id (str, optional): Session identifier for interim path. Defaults to "null".
+    """
+    outpath = qa_dir + os.sep + session_id + "_qa_f_example.png"
+    plots.plot_frame(f_signal[200], outpath, message="Saved F signal example at {}".format(outpath))
+
+
+def plot_mean_f_timeseries(f_signal: npt.NDArray, qa_dir: str = ".", session_id: str = "null") -> None:
+    """Plot and save the mean F signal timeseries.
+
+    Args:
+        f_signal (npt.NDArray): Array containing the F signal.
+        qa_dir (str): Directory to save QA plots.
+        session_id (str, optional): Session identifier for interim path. Defaults to "null".
+    """
+    outpath = qa_dir + os.sep + session_id + "_qa_mean_f_timeseries.png"
+    plots.plot_line(f_signal.mean(axis=(1, 2)), outpath, message="Saved mean F timeseries at {}".format(outpath))

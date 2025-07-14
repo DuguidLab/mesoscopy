@@ -255,14 +255,14 @@ def run_preprocessing(
         window_width = binned_frames.shape[0] // 4
 
     with timer.Timer("Calculating dF/F per channel"):
-        calc.channel_dff(
+        gcamp_dff = calc.channel_dff(
             gcamp_channel,
             window_width=window_width,
             channel_name="gcamp",
             interim_dir=interim_dir,
             session_id=session_id,
         )
-        calc.channel_dff(
+        isosb_dff = calc.channel_dff(
             isosb_channel,
             window_width=window_width,
             channel_name="isosb",
@@ -270,18 +270,13 @@ def run_preprocessing(
             session_id=session_id,
         )
 
-    click.echo("Calculating mean ∂F per frame for gcamp and isosb channels...")
-    start = time.time()
-    gcamp_signal_mean, isosb_signal_mean = da.compute(gcamp_dff.mean(axis=(1, 2)), isosb_dff.mean(axis=(1, 2)))
-    end = time.time()
-    click.echo("Channel signal means calculated in {} s".format(end - start))
-
-    outpath = qa_dir + os.sep + session_id + "_qa_channel_signal_mean.png"
-    plots.plot_lines(
-        [gcamp_signal_mean, isosb_signal_mean],
-        outpath,
-        message="Saved lineplot for channel signal {}".format(outpath),
-    )
+    with timer.Timer("Calculating mean ∂F per frame per channel"):
+        gcamp_signal_mean, isosb_signal_mean = da.compute(gcamp_dff.mean(axis=(1, 2)), isosb_dff.mean(axis=(1, 2)))
+        qa.plot_dual_dff_timeseries(
+            (gcamp_signal_mean, isosb_signal_mean),
+            qa_dir=qa_dir,
+            session_id=session_id,
+        )
 
     # Max common index (to avoid array overflow)
     if len(gcamp_mean) != len(isosb_mean):
@@ -289,34 +284,26 @@ def run_preprocessing(
     max_idx = min(len(gcamp_mean), len(isosb_mean))
 
     click.echo("Extracting corrected F signal (gcamp - isosb)...")
-    f_signal = da.subtract(
-        gcamp_dff[:max_idx],
-        isosb_dff[:max_idx],
-    )
 
-    outpath = out_dir + os.sep + session_id + "_preprocessed.h5"
-    start = time.time()
-    da.to_hdf5(outpath, "/data", f_signal, compression="lzf")
-    end = time.time()
-    click.echo("F signal calculated in {} s".format(end - start))
-    click.echo("Saved F signal at {}".format(outpath))
+    with timer.Timer("Calculating F signal"):
+        f_signal = da.subtract(
+            gcamp_dff[:max_idx],
+            isosb_dff[:max_idx],
+        )
 
-    outpath = qa_dir + os.sep + session_id + "_qa_f_example.png"
-    plots.plot_frame(
-        f_signal[200],
-        outpath,
-        message="Saved F example at {}".format(outpath),
-    )
-
-    click.echo("Calculating mean F per frame...")
-    f_signal_mean = f_signal.mean(axis=(1, 2)).compute()
-
-    outpath = qa_dir + os.sep + session_id + "_qa_f_signal_mean.png"
-    plots.plot_line(
-        f_signal_mean,
-        outpath,
-        message="Saved lineplot for F signal {}".format(outpath),
-    )
+        outpath = out_dir + os.sep + session_id + "_preprocessed.h5"
+        da.to_hdf5(outpath, "/data", f_signal, compression="lzf")
+        click.echo("Saved F signal at {}".format(outpath))
+        qa.plot_f_example(
+            f_signal,
+            qa_dir=qa_dir,
+            session_id=session_id,
+        )
+        qa.plot_mean_f_timeseries(
+            f_signal,
+            qa_dir=qa_dir,
+            session_id=session_id,
+        )
 
     # Save timestamps
     outpath = out_dir + os.sep + session_id + "_preprocessed.h5"
