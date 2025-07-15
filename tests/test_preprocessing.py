@@ -122,7 +122,7 @@ def test_channel_dff(output_dir, random_idx):
         flip_channels=True,
     )
 
-    dff = calculations.channel_dff(
+    dff = calculations.rolling_dff(
         array=mock_dual_channel[gcamp_filter],
         interim_dir=output_dir,
         session_id="null",
@@ -147,7 +147,7 @@ def test_channel_dff_invalid_window(output_dir, random_idx):
     )
 
     with pytest.raises(ValueError):
-        calculations.channel_dff(
+        calculations.rolling_dff(
             array=mock_dual_channel[gcamp_filter],
             interim_dir=output_dir,
             session_id="null",
@@ -170,7 +170,7 @@ def test_channel_dff_insert(output_dir, random_idx):
         flip_channels=True,
     )
 
-    _ = calculations.channel_dff(
+    _ = calculations.rolling_dff(
         array=mock_dual_channel[gcamp_filter],
         interim_dir=output_dir,
         session_id="null",
