@@ -27,9 +27,7 @@ import dask
 import time
 
 import mesoscopy.io as io
-import mesoscopy.plots as plots
 import mesoscopy.preprocess.calculations as calc
-import mesoscopy.preprocess.qa as qa
 import mesoscopy.timer as timer
 
 import numpy as np
@@ -134,8 +132,8 @@ def run_preprocessing(
     preprocessing_start = time.time()
 
     os.makedirs(out_dir, exist_ok=True)
-
     os.makedirs(interim_dir, exist_ok=True)
+
     click.echo("Loading data...")
 
     # Determine whether we're working with an NWB file

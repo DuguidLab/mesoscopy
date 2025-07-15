@@ -27,9 +27,6 @@ import numpy.typing as npt
 from dask import array as da
 
 import mesoscopy.io as io
-import mesoscopy.plots as plots
-
-import mesoscopy.preprocess.qa as qa
 
 
 def bin_array(
@@ -197,17 +194,3 @@ def projections(
         "std": std_frame,
         "maxip": maxip,
     }
-
-
-def mean_timeseries(
-    array: da.Array | npt.NDArray,
-) -> npt.NDArray:
-    """Calculate the mean timeseries for a 3D image array.
-
-    Args:
-        array (Dask or NumPy Array): 3D image array to calculate the mean timeseries for.
-
-    Returns:
-        npt.NDArray: 1D array containing the mean values for each frame.
-    """
-    return array.mean(axis=(1, 2))
