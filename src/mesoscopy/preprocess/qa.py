@@ -21,7 +21,6 @@
 """Module for quality assurance (QA) functions in the mesoscopy preprocessing pipeline."""
 
 import os
-import mesoscopy.io as io
 import mesoscopy.plots as plots
 
 import numpy.typing as npt
