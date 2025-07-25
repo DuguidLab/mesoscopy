@@ -190,10 +190,6 @@ def register_landmarks(
             "F": warped,
             "timestamps": timestamps,
             "tform": tform,
-            "recording_landmarks": recording_landmarks,
-            "template_landmarks": template_landmarks,
-            "crop_x": crop_x,
-            "crop_y": crop_y,
         },
     )
     click.echo("Saved registered frames at {}".format(outpath))
@@ -224,7 +220,7 @@ def load_preprocessed(path: str, nwb: bool = False) -> tuple[str, np.ndarray, np
     else:
         session_id = path.split("/")[-1].replace(".h5", "")
         f_preproc = h5py.File(path)
-        deltaf_series = f_preproc["/data"]
+        deltaf_series = f_preproc["/F"]
         timestamps = f_preproc["/timestamps"]
 
     return session_id, deltaf_series, timestamps

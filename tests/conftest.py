@@ -167,7 +167,7 @@ def preproc_h5(tmp_path_factory):
     timestamps = [(timedelta(milliseconds=i)).total_seconds() for i in range(frames_num)]
     # Create an HDF5 file
     with h5.File(str(tmpfile), "w") as f:
-        f.create_dataset("/data", data=np.random.rand(frames_num, 40, 40))
+        f.create_dataset("/F", data=np.random.rand(frames_num, 40, 40))
         f.create_dataset("/timestamps", data=timestamps)
     # Return the path to the temporary file
     return str(tmpfile)
@@ -180,7 +180,7 @@ def preproc_nwb(nwbfile, preproc_h5):
     nwb = io.read()
     deltaF_series = ImageSeries(
         name="DeltaFSeries",
-        data=f["/data"][:],
+        data=f["/F"][:],
         timestamps=f["/timestamps"][:],
         unit="df/f",
         description="dF/F widefield cortical imaging series.",
