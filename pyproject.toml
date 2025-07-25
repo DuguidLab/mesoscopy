@@ -2,8 +2,6 @@
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[tool.hatch]
-
 [project]
 name = "mesoscopy"
 description = "Analysis pipeline for rodent widefield calcium imaging data."
@@ -37,7 +35,7 @@ dependencies = [
     "scikit-video",
     "pandas", 
     "pynwb>=2.3.1",
-    "napari[all]>=0.4.19",
+    "napari>=0.4.19",
     "av>=14.4.0",
     "pims>=0.7",
 ]
@@ -64,46 +62,20 @@ exclude = [
 path = "src/mesoscopy/__about__.py"
 
 [tool.hatch.envs.default]
-python = "3.12"
-path = ".hatch"
+path = ".env"  # Use uv environment path
 
-[[tool.hatch.envs.test.matrix]]
-python = ["3.12", "3.13"]
-
-[tool.hatch.envs.test]
-dependencies = [
-  "coverage[toml]",
-  "pytest",
-  "pytest-cov",
-  "pytest-mock",
+[dependency-groups]
+dev = [
+  { include-group = "ci" },
+  { include-group = "docs" },
+  { include-group = "lint" },
+  { include-group = "test" },
+  { include-group = "types" },
 ]
-
-[tool.hatch.envs.test.scripts]
-run-coverage = "pytest --cov-config=pyproject.toml --cov=mesoscopy --cov=tests --cov-report=term --cov-report=lcov:lcov.info  --cov-report=xml:coverage.xml"
-run = "run-coverage --no-cov"
-
-[tool.hatch.envs.style]
-detached = true
-python = "3.12"
-dependencies = [
-  "black",
-  "pylint",
-  "isort"
+ci = [
+  "pre-commit",
 ]
-
-[tool.hatch.envs.style.scripts]
-check = [
-  "black --check --diff .",
-  "isort --check-only --diff .",
-]
-fmt = [
-  "isort .",
-  "black .",
-  "check",
-]
-
-[tool.hatch.envs.docs]
-dependencies = [
+docs = [
   "mkdocs",
   "mkdocs-material",
   "mkdocs-click",
@@ -111,19 +83,127 @@ dependencies = [
   "pymdown-extensions",
   "material-plausible-plugin",
 ]
-
-[tool.hatch.envs.docs.scripts]
-build = "mkdocs build --clean --strict"
-serve = "mkdocs serve --dev-addr localhost:8000"
-deploy = "mkdocs gh-deploy --force"
-
-[tool.hatch.envs.typing]
-dependencies = [
-  "mypy>=1.0.0",
+lint = [
+  "ruff",
+]
+test = [
+  "coverage[toml]",
+  "pytest",
+  "pytest-cov",
+  "pytest-mock",
+]
+types = [
+  "mypy[install-types, faster-cache, reports]",
 ]
 
-[tool.hatch.envs.typing.scripts]
-check = "mypy --install-types --non-interactive src/mesoscopy tests"
+
+[tool.hatch.envs.default.scripts]
+
+# Test scripts
+test-run-coverage = "pytest --cov-config=pyproject.toml --cov=mesoscopy --cov=tests --cov-report=term --cov-report=lcov:lcov.info  --cov-report=xml:coverage.xml"
+test-run = "run-coverage --no-cov"
+
+# Doc scripts
+docs-build = "mkdocs build --clean --strict"
+docs-serve = "mkdocs serve --dev-addr localhost:8000"
+docs-deploy = "mkdocs gh-deploy --force"
+
+# Type checking scripts
+types-verify = "mypy --install-types --non-interactive src/mesoscopy tests"
+types-report = "types-check --html-report mypy-report/"
+
+# Linting scripts
+lint-check = "ruff check src/mesoscopy tests"
+lint-fix = "lint-check --fix"
+lint-run = "lint-fix && ruff format {args:src/mesoscopy/ tests/}"
+
+
+[tool.ruff]
+line-length = 120
+fix = true
+namespace-packages = ["scripts"]
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.ruff.lint]
+preview = true
+
+select = [
+  "ERA",     # Disallow commented out code
+  "YTT",     # Prevent misuse of `sys.version`
+  "ANN",     # Force function annotations
+  "S",       # Security testing (flake8-bandit)
+  "BLE",     # Disallow blind except
+  "B",       # Catch common sources of bugs
+  "A",       # Disallow shadowing builtins
+  "COM818",  # Trailing comma rules
+  "C4",      # Ensure correct comprehensions
+  "CPY",     # Force a copyright notice at the top of files
+  "DTZ",     # Disallow naive datetime
+  "T10",     # Disallow debugger traces
+  "EM",      # Disallow strings inside exception constructors
+  "EXE",     # Validate shebangs
+  "FIX",     # Remind about FIXMEs
+  "FA",      # Ensure proper usage of `from __future__ import annotations`
+  "ISC",     # Ensure good practice for implicit string concatenation
+  "ICN",     # Force using conventional aliases for popular packages
+  "LOG",     # Ensure good practice for logging
+  "G",       # Ensure good practice for log formatting
+  "INP",     # Disallow namespace packages
+  "PIE",     # Miscellaenous linting (flake8-pie)
+  "T20",     # Disallow print statements
+  "PT",      # Ensure good practice for pytest-based tests
+  "Q",       # Enforce double quotes style
+  "RSE",     # Disallow empty parentheses after exceptions
+  "RET",     # Ensure proper return values
+  "SLF",     # Disallow use of private members
+  "SIM",     # Ensure code is simplified
+  "TID253",  # Disallow banned imports at the module level
+  "TD",      # Ensure proper use of TODOs
+  "TC",      # Ensure proper typing imports and forward references
+  "ARG",     # Disallow unused arguments
+  "PTH",     # Ensure `pathlib` functions are used where possible
+  "FLY",     # Favour f-strings to `str.join`
+  "I",       # Ensure properly sorted imports
+  "NPY",     # Disallow use of deprecated NumPy functions and type aliases
+  "N",       # Ensure PEP 8 naming conventions
+  "PERF",    # Disallow performance anti-patterns
+  "E", "W",  # Ensure proper adherence to PEP 8
+  "DOC",     # Ensure proper docstrings information
+  "D",       # Ensure proper docstrings style
+  "F",       # Miscellaenous linting (Pyflakes)
+  "PGH",     # Disallow blanket `noqa` and `type: ignore`, and invalid mock access
+  "PL",      # Pylint checks
+  "UP",      # Ensure use of up-to-date syntax
+  "FURB",    # Ensure use of up-to-date syntax
+  "RUF",     # Miscellaneous linting (Ruff)
+  "TRY",     # Ensure good practice for exception handling
+]
+
+ignore = [
+  "ANN401",                # Allow `Any` function parameter
+  "FIX002",                # Allow unsolved TODOs
+  "G001", "G002", "G004",  # Allow formatted strings inside logging calls
+  "RET505", "RET506",      # Avoid false posiives (especially with `if-elif` where the `if` returns or raises)
+  "TD002", "TD003",        # Don't enforce including an author or issue with TODOs
+  "TC003",                 # Don't force the use of `if TYPE_CHECKING` blocks
+  "D100", "D104",          # Allow undocumented modules and packages
+  "D107",                  # Don't force a documented `__init__` since we document it at the class level
+  # Allow too many branches, arguments, locals, statements, and positional arguments
+  "PLR0912", "PLR0913", "PLR0914", "PLR0915", "PLR0917",
+]
+
+unfixable = [
+  "B905",  # Force programmer to decide which strictness to use with `builtins.zip`
+]
+
+[tool.ruff.lint.isort]
+force-single-line = true
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
 
 [tool.mypy]
 ignore_missing_imports = true
@@ -136,3 +216,32 @@ show_column_numbers = true
 show_error_codes = true
 warn_no_return = false
 warn_unused_ignores = true
+untyped_calls_exclude = "dask.array"
+
+[[tool.mypy.overrides]]
+module = [
+  "h5py.*",
+  "napari.*",
+]
+ignore_missing_imports = true
+
+
+# `coverage` config
+[tool.coverage.run]
+source_pkgs = ["mesoscopy", "tests"]
+branch = true
+parallel = true
+omit = [
+  "src/mesoscopy/__about__.py",
+]
+
+[tool.coverage.paths]
+mesoscopy = ["src/mesoscopy", "*/mesoscopy/src/mesoscopy"]
+tests = ["tests", "*/mesoscopy/tests"]
+
+[tool.coverage.report]
+exclude_lines = [
+  "no cov",
+  "if __name__ == .__main__.:",
+  "if TYPE_CHECKING:",
+]
