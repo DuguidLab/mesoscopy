@@ -348,7 +348,7 @@ def update_nwb(nwb_path: str, h5_path: str) -> None:
     nwbfile, nwbio = io.read_nwb(nwb_path, return_io=True)
     deltaF_series = ImageSeries(
         name="DeltaFSeries",
-        data=f["/data"],
+        data=f["/F"],
         timestamps=f["/timestamps"],
         unit="df/f",
         description="dF/F widefield cortical imaging series.",
