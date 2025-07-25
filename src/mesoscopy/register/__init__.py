@@ -196,15 +196,11 @@ def register_landmarks(
     h5_path = out_dir + os.sep + session_id + "-registered.h5"
     with h5py.File(h5_path, "w") as hf:
         hf.create_dataset("F", data=warped)
-        hf.create_dataset("ts", data=timestamps)
+        hf.create_dataset("timestamps", data=timestamps)
     click.echo("Saved registered frames at {}".format(h5_path))
 
     registration_end = time.time()
-    click.echo(
-        "Registration took a total of {} mins.".format(
-            (registration_end - registration_start) / 60
-        )
-    )
+    click.echo("Registration took a total of {} mins.".format((registration_end - registration_start) / 60))
 
     if nwb:
         click.echo("Updating NWB file...")
@@ -212,9 +208,7 @@ def register_landmarks(
         click.echo("Updated NWB file at {}".format(path))
 
 
-def load_preprocessed(
-    path: str, nwb: bool = False
-) -> tuple[str, np.ndarray, np.ndarray]:
+def load_preprocessed(path: str, nwb: bool = False) -> tuple[str, np.ndarray, np.ndarray]:
     """Load preprocessed data from an HDF5 or NWB file.
 
     Args:
@@ -252,9 +246,7 @@ def update_nwb(nwb_path: str, h5_path: str, tform_params: np.ndarray) -> None:
     f = h5py.File(h5_path, "r")
 
     try:
-        ophys_module = nwbfile.create_processing_module(
-            name="ophys", description="optical physiology processed data"
-        )
+        ophys_module = nwbfile.create_processing_module(name="ophys", description="optical physiology processed data")
     except ValueError:
         click.echo("Processing module already exists...")
         ophys_module = nwbfile.processing["ophys"]
