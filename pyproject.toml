@@ -62,7 +62,7 @@ exclude = [
 path = "src/mesoscopy/__about__.py"
 
 [tool.hatch.envs.default]
-path = ".env"  # Use uv environment path
+path = ".venv"  # Use uv environment path
 
 [dependency-groups]
 dev = [
@@ -98,7 +98,6 @@ types = [
 
 
 [tool.hatch.envs.default.scripts]
-
 # Test scripts
 test-run-coverage = "pytest --cov-config=pyproject.toml --cov=mesoscopy --cov=tests --cov-report=term --cov-report=lcov:lcov.info  --cov-report=xml:coverage.xml"
 test-run = "run-coverage --no-cov"
