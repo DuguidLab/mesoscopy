@@ -270,9 +270,10 @@ def run_preprocessing(
 
     outpath = out_dir + os.sep + session_id + "_preprocessed.h5"
     with timer.Timer(f"Writing data to {outpath}"):
-        da.to_hdf5(
-            outpath,
-            {
+        # da.to_hdf5(
+        io.write_h5(
+            path=outpath,
+            data={
                 "/data": f_signal,
                 "/timestamps": timestamps,
                 "/qa/frame_means_timeseries": frame_means,
