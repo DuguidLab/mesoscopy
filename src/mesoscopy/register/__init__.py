@@ -28,10 +28,10 @@ import time
 import skimage.io as skio
 
 import mesoscopy.io as io
-import mesoscopy.plots as plots
 import mesoscopy.register.landmarks_gui as reg_gui
 import mesoscopy.register.transform as trf
 import mesoscopy.resources as res
+import mesoscopy.timer as timer
 
 from pynwb import TimeSeries
 from pynwb.image import ImageSeries
@@ -133,7 +133,7 @@ def register_landmarks(
     template_points: str,
     crop_x: int = 0,
     crop_y: int = 0,
-) -> None:
+) -> str:
     """Register a recording to a template based on defined landmarks.
 
     Args:
@@ -143,15 +143,13 @@ def register_landmarks(
         template_points (str, optional): Path to template landmark points in CSV or Fiji XML points format.
         crop_x (int, optional): Number of pixels to crop from the x-axis of the recording. Defaults to 0.
         crop_y (int, optional): Number of pixels to crop from the y-axis of the recording. Defaults to 0.
+
+    Returns:
+        str: Path to the registered recording file.
     """
     click.echo("Registering recording {} to template.".format(path))
 
-    registration_start = time.time()
-
     os.makedirs(out_dir, exist_ok=True)
-
-    qa_dir = out_dir + os.sep + "qa"
-    os.makedirs(qa_dir, exist_ok=True)
 
     click.echo("Loading imaging data...")
 
@@ -182,30 +180,30 @@ def register_landmarks(
         template_landmarks,
         crop_x=crop_x,
         crop_y=crop_y,
-        qa_dir=qa_dir,
-        session_id=session_id,
-    )
-
-    plots.plot_frame(
-        warped[100],
-        outpath=qa_dir + os.sep + session_id + "_qa_registration_registered-frame.png",
-        message="Saved frame of registered session.",
     )
 
     # Save warped frames and timestamps
-    h5_path = out_dir + os.sep + session_id + "-registered.h5"
-    with h5py.File(h5_path, "w") as hf:
-        hf.create_dataset("F", data=warped)
-        hf.create_dataset("timestamps", data=timestamps)
-    click.echo("Saved registered frames at {}".format(h5_path))
-
-    registration_end = time.time()
-    click.echo("Registration took a total of {} mins.".format((registration_end - registration_start) / 60))
+    outpath = out_dir + os.sep + session_id + "-registered.h5"
+    outpath = io.write_h5(
+        path=outpath,
+        data={
+            "F": warped,
+            "timestamps": timestamps,
+            "tform": tform,
+            "recording_landmarks": recording_landmarks,
+            "template_landmarks": template_landmarks,
+            "crop_x": crop_x,
+            "crop_y": crop_y,
+        },
+    )
+    click.echo("Saved registered frames at {}".format(outpath))
 
     if nwb:
         click.echo("Updating NWB file...")
-        update_nwb(path, h5_path, tform)
+        update_nwb(path, outpath, tform)
         click.echo("Updated NWB file at {}".format(path))
+
+    return outpath
 
 
 def load_preprocessed(path: str, nwb: bool = False) -> tuple[str, np.ndarray, np.ndarray]:
@@ -253,7 +251,7 @@ def update_nwb(nwb_path: str, h5_path: str, tform_params: np.ndarray) -> None:
 
     registered_series = ImageSeries(
         name="corrected",
-        data=f["/data"],
+        data=f["/F"],
         timestamps=f["/timestamps"],
         unit="df/f",
         description="dF/F widefield cortical imaging series.",
