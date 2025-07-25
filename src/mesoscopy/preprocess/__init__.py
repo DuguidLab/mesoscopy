@@ -274,7 +274,7 @@ def run_preprocessing(
         io.write_h5(
             path=outpath,
             data={
-                "/data": f_signal,
+                "/F": f_signal,
                 "/timestamps": timestamps,
                 "/qa/frame_means_timeseries": frame_means,
                 "/qa/frame_stds_timeseries": frame_stds,
