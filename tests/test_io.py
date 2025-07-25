@@ -16,8 +16,8 @@ def test_read_h5(raw_h5):
     _ = io.read_h5(raw_h5)
 
 
-def test_h5_write():
-    path = "test.h5"
+def test_h5_write(tmp_path):
+    path = tmp_path / "test.h5"
     data = {"dataset1": np.array([1, 2, 3]), "dataset2": np.array([[1, 2], [3, 4]])}
     io.write_h5(path, data)
     assert io.read_h5(path)["dataset1"][0] == 1

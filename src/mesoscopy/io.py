@@ -33,7 +33,7 @@ from pynwb import NWBHDF5IO, NWBFile
 
 
 @typing.overload
-def read_nwb(path: str, mode: str = "a") -> NWBFile: ...
+def read_nwb(path: str, mode: str = "a") -> NWBFile: ...  # pyright: ignore[reportOverlappingOverload]
 
 
 @typing.overload
@@ -86,8 +86,26 @@ def read_h5(path: str) -> h5py.File:
     return h5py.File(path, "r")
 
 
-def write_h5():
-    raise NotImplementedError
+def write_h5(path: str, data: dict, compression: str = "lzf") -> str:
+    """Write a dictionary to an HDF5 file.
+
+    Args:
+        path (str): Path to the HDF5 file.
+        data (dict): Dictionary containing datasets to write in {'dataset_name': data_array} format.
+        compression (str, optional): Compression method for the datasets. Defaults to "lzf".
+
+    Returns:
+        str: Path to the written HDF5 file.
+
+    Example:
+        >>> data = {'dataset1': np.array([1, 2, 3]),
+        ...         'dataset2': np.array([[1, 2], [3, 4]])}
+        >>> write_h5('output.h5', data)
+    """
+    with h5py.File(path, "w") as h5file:
+        for key, value in data.items():
+            h5file.create_dataset(key, data=value, compression=compression)
+    return path
 
 
 def store_interim(
