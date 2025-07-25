@@ -27,8 +27,8 @@ import dask
 import time
 
 import mesoscopy.io as io
-import mesoscopy.plots as plots
 import mesoscopy.preprocess.calculations as calc
+import mesoscopy.timer as timer
 
 import numpy as np
 from dask import array as da
@@ -132,10 +132,6 @@ def run_preprocessing(
     preprocessing_start = time.time()
 
     os.makedirs(out_dir, exist_ok=True)
-
-    qa_dir = out_dir + os.sep + "qa"
-    os.makedirs(qa_dir, exist_ok=True)
-
     os.makedirs(interim_dir, exist_ok=True)
 
     click.echo("Loading data...")
@@ -173,80 +169,60 @@ def run_preprocessing(
         raw_frames = raw_frames[:, crop:-crop, crop:-crop]
         click.echo("Cropping to shape {}".format(raw_frames.shape))
 
-    # Binning
-    click.echo(
-        "{}x{} binning to shape {} by {}".format(bins, bins, raw_frames.shape[1] // bins, raw_frames.shape[2] // bins)
-    )
-    start = time.time()
-    binned_frames = calc.bin_array(raw_frames, bins=bins, interim_dir=interim_dir, session_id=session_id)
-    end = time.time()
-    click.echo("Binned frames saved in {} s".format(end - start))
+    with timer.Timer(
+        f"Binning frames to shape {raw_frames.shape[1] // bins} by {raw_frames.shape[2] // bins} ({bins}x{bins})"
+    ):
+        binned_frames = calc.bin_array(
+            raw_frames,
+            bins=bins,
+            interim_dir=interim_dir,
+            session_id=session_id,
+        )
 
     del raw_frames
 
     # Channel separation
     # Get the global mean and std values for each frame
-    click.echo("Calculating frame means & standard deviations...")
-    start = time.time()
-    gcamp_filter, isosb_filter = calc.separate_channels(
-        binned_frames,
-        session_id=session_id,
-        use_means=use_means,
-        flip_channels=flip_channels,
-        qa_dir=qa_dir,
-    )
-    end = time.time()
-    click.echo("Frame means & standard deviations calculated in {} s".format(end - start))
+    with timer.Timer("Calculating frame means & standard deviations"):
+        frame_means, frame_stds = calc.frame_statistics(binned_frames)
 
-    # Check that the separation works
-    click.echo("Separating channels...")
-    start = time.time()
-    gcamp_mean, isosb_mean = dask.compute(
-        binned_frames[gcamp_filter].mean(axis=(1, 2), dtype=np.float32),
-        binned_frames[isosb_filter].mean(axis=(1, 2), dtype=np.float32),
-    )
-    end = time.time()
-    click.echo("Channel means calculated in {} s".format(end - start))
+    # Generate the channel separation filters
+    with timer.Timer("Generating channel separation filters"):
+        gcamp_filter, isosb_filter = calc.channel_separation_filters(
+            frame_means,
+            frame_stds,
+            use_means=use_means,
+            flip_channels=flip_channels,
+        )
 
-    outpath = qa_dir + os.sep + session_id + "_qa_channel_means.png"
-    plots.plot_lines(
-        [gcamp_mean, isosb_mean],
-        outpath,
-        message="Saved channel means at {}".format(outpath),
-    )
+    with timer.Timer("Calculating channel mean timeseries"):
+        gcamp_mean, isosb_mean = dask.compute(
+            binned_frames[gcamp_filter].mean(axis=(1, 2), dtype=np.float32),
+            binned_frames[isosb_filter].mean(axis=(1, 2), dtype=np.float32),
+        )
 
     if channel_means_only:
+        np.savetxt(
+            os.path.join(out_dir, f"{session_id}_gcamp_mean.txt"),
+            gcamp_mean,
+            fmt="%.4f",
+        )
+        np.savetxt(
+            os.path.join(out_dir, f"{session_id}_isosb_mean.txt"),
+            isosb_mean,
+            fmt="%.4f",
+        )
         click.echo("Channel means saved as txt files. Exiting.")
         return
 
-    # Generate the mean gcamp frame and its std
-    click.echo("Generating mean gcamp frame and its maximum intensity projection...")
-    start = time.time()
-    channel_qa(
-        binned_frames,
-        gcamp_filter,
-        qa_dir=qa_dir,
-        session_id=session_id,
-        channel="gcamp",
-    )
-    end = time.time()
-    click.echo("GCaMP average frame, std and maximum intensity projection calculated in {} s".format(end - start))
+    gcamp_channel = binned_frames[gcamp_filter]
+    isosb_channel = binned_frames[isosb_filter]
 
-    # Generate the mean isosbestic frame and its std
-    click.echo("Generating mean isosbestic frame and its maximum intensity projection...")
-    start = time.time()
-    channel_qa(
-        binned_frames,
-        isosb_filter,
-        qa_dir=qa_dir,
-        session_id=session_id,
-        channel="isosb",
-    )
-    end = time.time()
-    click.echo("Isosbestic average frame, std and maximum intensity projection calculated in {} s".format(end - start))
+    with timer.Timer("Generating projection images per channel"):
+        gcamp_projections = calc.projections(gcamp_channel)
+        isosb_projections = calc.projections(isosb_channel)
 
     # Calculate the dff per channel using a rolling baseline (mean in a 30s window)
-
     window_width = 30 * 25
 
     if window_width > binned_frames.shape[0]:
@@ -255,42 +231,24 @@ def run_preprocessing(
         )
         window_width = binned_frames.shape[0] // 4
 
-    click.echo("Calculating ∂F for the gcamp channel...")
-    start = time.time()
-    gcamp_dff = calc.channel_dff(
-        binned_frames[gcamp_filter],
-        window_width,
-        channel_name="gcamp",
-        interim_dir=interim_dir,
-        session_id=session_id,
-    )
-    end = time.time()
-    click.echo("gcamp ∂F calculated in {} s".format(end - start))
+    with timer.Timer("Calculating dF/F per channel"):
+        gcamp_dff = calc.rolling_dff(
+            gcamp_channel,
+            window_width=window_width,
+            channel_name="gcamp",
+            interim_dir=interim_dir,
+            session_id=session_id,
+        )
+        isosb_dff = calc.rolling_dff(
+            isosb_channel,
+            window_width=window_width,
+            channel_name="isosb",
+            interim_dir=interim_dir,
+            session_id=session_id,
+        )
 
-    click.echo("Calculating ∂F for the isosb channel...")
-    start = time.time()
-    isosb_dff = calc.channel_dff(
-        binned_frames[isosb_filter],
-        window_width,
-        channel_name="isosb",
-        interim_dir=interim_dir,
-        session_id=session_id,
-    )
-    end = time.time()
-    click.echo("isosb ∂F calculated in {} s".format(end - start))
-
-    click.echo("Calculating mean ∂F per frame for gcamp and isosb channels...")
-    start = time.time()
-    gcamp_signal_mean, isosb_signal_mean = da.compute(gcamp_dff.mean(axis=(1, 2)), isosb_dff.mean(axis=(1, 2)))
-    end = time.time()
-    click.echo("Channel signal means calculated in {} s".format(end - start))
-
-    outpath = qa_dir + os.sep + session_id + "_qa_channel_signal_mean.png"
-    plots.plot_lines(
-        [gcamp_signal_mean, isosb_signal_mean],
-        outpath,
-        message="Saved lineplot for channel signal {}".format(outpath),
-    )
+    with timer.Timer("Calculating mean ∂F per frame per channel"):
+        gcamp_signal_mean, isosb_signal_mean = da.compute(gcamp_dff.mean(axis=(1, 2)), isosb_dff.mean(axis=(1, 2)))
 
     # Max common index (to avoid array overflow)
     if len(gcamp_mean) != len(isosb_mean):
@@ -298,45 +256,44 @@ def run_preprocessing(
     max_idx = min(len(gcamp_mean), len(isosb_mean))
 
     click.echo("Extracting corrected F signal (gcamp - isosb)...")
-    f_signal = da.subtract(
-        gcamp_dff[:max_idx],
-        isosb_dff[:max_idx],
-    )
 
-    # f_signal.visualize(
-    #     filename=qa_dir + os.sep + session_id + "_calc_f_signal_graph.png"
-    # )
+    with timer.Timer("Calculating F signal"):
+        f_signal = da.subtract(
+            gcamp_dff[:max_idx],
+            isosb_dff[:max_idx],
+        )
 
-    outpath = out_dir + os.sep + session_id + "_preprocessed.h5"
-    start = time.time()
-    da.to_hdf5(outpath, "/data", f_signal, compression="lzf")
-    end = time.time()
-    click.echo("F signal calculated in {} s".format(end - start))
-    click.echo("Saved F signal at {}".format(outpath))
-
-    outpath = qa_dir + os.sep + session_id + "_qa_f_example.png"
-    plots.plot_frame(
-        f_signal[200],
-        outpath,
-        message="Saved F example at {}".format(outpath),
-    )
-
-    click.echo("Calculating mean F per frame...")
-    f_signal_mean = f_signal.mean(axis=(1, 2)).compute()
-
-    outpath = qa_dir + os.sep + session_id + "_qa_f_signal_mean.png"
-    plots.plot_line(
-        f_signal_mean,
-        outpath,
-        message="Saved lineplot for F signal {}".format(outpath),
-    )
-
-    # Save timestamps
-    outpath = out_dir + os.sep + session_id + "_preprocessed.h5"
-    click.echo("Appending timestamps to {}".format(outpath))
+    with timer.Timer("Calculating mean F timeseries"):
+        f_mean_timeseries = f_signal.mean(axis=(1, 2))
 
     timestamps = da.from_array(np.array(ts[gcamp_filter[:max_idx]], dtype="S25"), chunks="auto")
-    da.to_hdf5(outpath, "/timestamps", timestamps)
+
+    outpath = out_dir + os.sep + session_id + "_preprocessed.h5"
+    with timer.Timer(f"Writing data to {outpath}"):
+        # da.to_hdf5(
+        io.write_h5(
+            path=outpath,
+            data={
+                "/F": f_signal,
+                "/timestamps": timestamps,
+                "/qa/frame_means_timeseries": frame_means,
+                "/qa/frame_stds_timeseries": frame_stds,
+                "/qa/gcamp_mean_timeseries": gcamp_mean[:max_idx],
+                "/qa/isosb_mean_timeseries": isosb_mean[:max_idx],
+                "/qa/gcamp_dff_timeseries": gcamp_signal_mean[:max_idx],
+                "/qa/isosb_dff_timeseries": isosb_signal_mean[:max_idx],
+                "/qa/gcamp_filter": gcamp_filter[:max_idx],
+                "/qa/isosb_filter": isosb_filter[:max_idx],
+                "/qa/gcamp_mean_projection": gcamp_projections.get("mean"),
+                "/qa/gcamp_std_projection": gcamp_projections.get("std"),
+                "/qa/gcamp_maxip_projection": gcamp_projections.get("maxip"),
+                "/qa/isosb_mean_projection": isosb_projections.get("mean"),
+                "/qa/isosb_std_projection": isosb_projections.get("std"),
+                "/qa/isosb_maxip_projection": isosb_projections.get("maxip"),
+                "/qa/f_mean_timeseries": f_mean_timeseries,
+            },
+            compression="lzf",
+        )
 
     preprocessing_end = time.time()
     click.echo("Preprocessing took a total of {} mins.".format((preprocessing_end - preprocessing_start) / 60))
@@ -391,7 +348,7 @@ def update_nwb(nwb_path: str, h5_path: str) -> None:
     nwbfile, nwbio = io.read_nwb(nwb_path, return_io=True)
     deltaF_series = ImageSeries(
         name="DeltaFSeries",
-        data=f["/data"],
+        data=f["/F"],
         timestamps=f["/timestamps"],
         unit="df/f",
         description="dF/F widefield cortical imaging series.",
@@ -405,35 +362,3 @@ def update_nwb(nwb_path: str, h5_path: str) -> None:
     io.write_nwb(nwb_path, nwbfile, io=nwbio)
 
     return nwbfile
-
-
-def channel_qa(
-    array: da.Array | np.ndarray,
-    channel_filter: list | da.Array | np.ndarray,
-    qa_dir: str = ".",
-    session_id: str = "null",
-    channel: str = "null",
-) -> None:
-    """Generate QA plots for a channel.
-
-    Args:
-        array (da.Array | np.ndarray): Imaging data array.
-        channel_filter (list | da.Array | np.ndarray): Calculated channel filter.
-        qa_dir (str, optional): Directory to save QA plots. Defaults to ".".
-        session_id (str, optional): Session identifier. Defaults to "null".
-        channel (str, optional): Channel name. Defaults to "null".
-    """
-    mean_frame, std_frame, maxip = dask.compute(
-        array[channel_filter].mean(axis=0),
-        array[channel_filter].std(axis=0),
-        array[channel_filter].max(axis=0),
-    )
-
-    outpath = qa_dir + os.sep + session_id + "_qa_{}_mean.png".format(channel)
-    plots.plot_frame(mean_frame, outpath, message="Saved mean frame at {}".format(outpath))
-
-    outpath = qa_dir + os.sep + session_id + "_qa_{}_std.png".format(channel)
-    plots.plot_frame(std_frame, outpath, message="Saved std frame at {}".format(outpath))
-
-    outpath = qa_dir + os.sep + session_id + "_qa_{}_maxip.png".format(channel)
-    plots.plot_frame(maxip, outpath, message="Saved maxip frame at {}".format(outpath))

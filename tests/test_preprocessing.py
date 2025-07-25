@@ -56,10 +56,11 @@ def test_separate_channels(output_dir, random_idx):
     # Merge the two channels in random order
     mock_dual_channel = np.insert(mock_gcamp, random_idx - np.arange(len(random_idx)), mock_isosb, axis=0)
 
-    gcamp_filter, isosb_filter = calculations.separate_channels(
-        array=da.from_array(mock_dual_channel, chunks=(100, 40, 40)),
-        qa_dir=output_dir,
-        session_id="null",
+    gcamp_filter, isosb_filter = calculations.channel_separation_filters(
+        frame_means=mock_dual_channel.mean(axis=(1, 2)),
+        frame_stds=mock_dual_channel.std(axis=(1, 2)),
+        use_means=False,
+        flip_channels=False,
     )
 
     assert mock_dual_channel[gcamp_filter].shape[0] == 300
@@ -75,11 +76,11 @@ def test_separate_channels_use_means(output_dir, random_idx):
     # Merge the two channels in random order
     mock_dual_channel = np.insert(mock_gcamp, random_idx - np.arange(len(random_idx)), mock_isosb, axis=0)
 
-    gcamp_filter, isosb_filter = calculations.separate_channels(
-        array=da.from_array(mock_dual_channel, chunks=(100, 40, 40)),
-        qa_dir=output_dir,
-        session_id="null",
+    gcamp_filter, isosb_filter = calculations.channel_separation_filters(
+        frame_means=mock_dual_channel.mean(axis=(1, 2)),
+        frame_stds=mock_dual_channel.std(axis=(1, 2)),
         use_means=True,
+        flip_channels=False,
     )
 
     assert mock_dual_channel[gcamp_filter].shape[0] == 300
@@ -95,10 +96,10 @@ def test_separate_channels_flip_channels(output_dir, random_idx):
     # Merge the two channels in random order
     mock_dual_channel = np.insert(mock_gcamp, random_idx - np.arange(len(random_idx)), mock_isosb, axis=0)
 
-    gcamp_filter, isosb_filter = calculations.separate_channels(
-        array=da.from_array(mock_dual_channel, chunks=(100, 40, 40)),
-        qa_dir=output_dir,
-        session_id="null",
+    gcamp_filter, isosb_filter = calculations.channel_separation_filters(
+        frame_means=mock_dual_channel.mean(axis=(1, 2)),
+        frame_stds=mock_dual_channel.std(axis=(1, 2)),
+        use_means=False,
         flip_channels=True,
     )
 
@@ -115,14 +116,14 @@ def test_channel_dff(output_dir, random_idx):
     # Merge the two channels in random order
     mock_dual_channel = np.insert(mock_gcamp, random_idx - np.arange(len(random_idx)), mock_isosb, axis=0)
 
-    gcamp_filter, isosb_filter = calculations.separate_channels(
-        array=da.from_array(mock_dual_channel, chunks=(100, 20, 20)),
-        qa_dir=output_dir,
-        session_id="null",
-        flip_channels=True,
+    gcamp_filter, _ = calculations.channel_separation_filters(
+        frame_means=mock_dual_channel.mean(axis=(1, 2)),
+        frame_stds=mock_dual_channel.std(axis=(1, 2)),
+        use_means=False,
+        flip_channels=False,
     )
 
-    dff = calculations.channel_dff(
+    dff = calculations.rolling_dff(
         array=mock_dual_channel[gcamp_filter],
         interim_dir=output_dir,
         session_id="null",
@@ -139,15 +140,15 @@ def test_channel_dff_invalid_window(output_dir, random_idx):
     # Merge the two channels in random order
     mock_dual_channel = np.insert(mock_gcamp, random_idx - np.arange(len(random_idx)), mock_isosb, axis=0)
 
-    gcamp_filter, isosb_filter = calculations.separate_channels(
-        array=da.from_array(mock_dual_channel, chunks=(100, 20, 20)),
-        qa_dir=output_dir,
-        session_id="null",
-        flip_channels=True,
+    gcamp_filter, isosb_filter = calculations.channel_separation_filters(
+        frame_means=mock_dual_channel.mean(axis=(1, 2)),
+        frame_stds=mock_dual_channel.std(axis=(1, 2)),
+        use_means=False,
+        flip_channels=False,
     )
 
     with pytest.raises(ValueError):
-        calculations.channel_dff(
+        calculations.rolling_dff(
             array=mock_dual_channel[gcamp_filter],
             interim_dir=output_dir,
             session_id="null",
@@ -163,14 +164,14 @@ def test_channel_dff_insert(output_dir, random_idx):
     # Merge the two channels in random order
     mock_dual_channel = np.insert(mock_gcamp, random_idx - np.arange(len(random_idx)), mock_isosb, axis=0)
 
-    gcamp_filter, isosb_filter = calculations.separate_channels(
-        array=da.from_array(mock_dual_channel, chunks=(100, 20, 20)),
-        qa_dir=output_dir,
-        session_id="null",
-        flip_channels=True,
+    gcamp_filter, _ = calculations.channel_separation_filters(
+        frame_means=mock_dual_channel.mean(axis=(1, 2)),
+        frame_stds=mock_dual_channel.std(axis=(1, 2)),
+        use_means=False,
+        flip_channels=False,
     )
 
-    _ = calculations.channel_dff(
+    _ = calculations.rolling_dff(
         array=mock_dual_channel[gcamp_filter],
         interim_dir=output_dir,
         session_id="null",
