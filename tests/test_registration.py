@@ -37,7 +37,7 @@ def test_update_nwb(nwbfile, preproc_h5):
 
 
 def test_register_landmarks_cli_default_points_h5(preproc_h5, output_dir):
-    mock_recording_landmarks = str(resources.files(mesoscopy.resources).joinpath("ccf_template_landmarks_140x142.csv"))
+    mock_recording_landmarks = str(resources.files(res).joinpath("ccf_template_landmarks_140x142.csv"))
     runner = CliRunner()
     result = runner.invoke(
         mesoscopy.cli,

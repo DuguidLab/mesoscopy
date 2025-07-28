@@ -129,7 +129,7 @@ def label_cmd(maxip_path, out_dir, template_points, session_id) -> dict:
 )
 @click.option("--crop-x", default=0, help="Crop recording along the x-axis.")
 @click.option("--crop-y", default=0, help="Crop recording along the y-axis.")
-def register_cmd(
+def landmarks_cmd(
     path: str,
     out_dir: str,
     recording_points: str,
