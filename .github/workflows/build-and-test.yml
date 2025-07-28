@@ -21,7 +21,7 @@ jobs:
       uses: astral-sh/setup-uv@v6
 
     - name: Tests & coverage
-      run: uvx --python ${{ matrix.python-version }} hatch run test-run-coverage
+      run: uv run --python ${{ matrix.python-version }} hatch run test-run-coverage
 
   build:
     name: "Build"
