@@ -32,6 +32,7 @@ import mesoscopy.register.landmarks_gui as reg_gui
 import mesoscopy.register.transform as trf
 import mesoscopy.resources as res
 import mesoscopy.timer as timer
+import mesoscopy.preprocess as preproc
 
 from pynwb import TimeSeries
 from pynwb.image import ImageSeries
@@ -46,7 +47,7 @@ def register_cmd() -> None:
 
 @register_cmd.command("label")
 @click.argument(
-    "maxip_path",
+    "path",
     type=click.Path(exists=True),
 )
 @click.option(
@@ -67,11 +68,11 @@ def register_cmd() -> None:
     type=str,
     help="Session ID for the recording.",
 )
-def label_cmd(maxip_path, out_dir, template_points, session_id) -> dict:
+def label_cmd(path, out_dir, template_points, session_id) -> dict:
     """Mark landmarks on a recording for registration to a template using the landmarks GUI.
 
     Args:
-        maxip_path (str): Path to maximum intensity projection image.
+        path (str): Path to preprocessed HDF5 file or NWB file.
         out_dir (str): Output directory for registered recording.
         template_points (str): Path to template landmark points in CSV or Fiji XML points format.
         session_id (str): Session ID for the recording.
@@ -81,7 +82,19 @@ def label_cmd(maxip_path, out_dir, template_points, session_id) -> dict:
               Dictionary keys are landmark names, while x-y coordinates are stored as an (y, x)
     """
     click.echo("Loading imaging data...")
-    maxip = skio.imread(maxip_path)
+    nwb = bool(path.endswith(".nwb"))
+
+    # Load maxip from preprocessed file.
+    # if it does not exist, generate maxip from raw data.
+    if nwb:
+        # Generate maxip from raw data
+        ...
+    elif path.endswith("_preprocessed.h5"):
+        # load maxip from preprocessed file
+        ...
+    else:
+        # generate maxip from raw data
+        ...
 
     click.echo("Loading template landmarks...")
     template_landmarks = res.get_default_landmarks()
@@ -90,9 +103,6 @@ def label_cmd(maxip_path, out_dir, template_points, session_id) -> dict:
 
     click.echo("Launching landmark identification GUI...")
     recording_landmarks = reg_gui.mark_landmarks(maxip, template_landmarks)
-
-    if not session_id:
-        session_id = os.path.basename(maxip_path).split(".")[0].split("_qa")[0]
 
     click.echo("Saving recording landmarks...")
     outpath = out_dir + os.sep + session_id + "_landmarks.csv"
