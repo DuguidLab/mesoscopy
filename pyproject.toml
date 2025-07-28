@@ -71,6 +71,7 @@ dev = [
   { include-group = "lint" },
   { include-group = "test" },
   { include-group = "types" },
+  "hatch"
 ]
 ci = [
   "pre-commit",
