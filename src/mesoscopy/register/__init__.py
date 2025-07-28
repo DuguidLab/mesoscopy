@@ -44,7 +44,7 @@ def register_cmd() -> None:
     pass
 
 
-@register_cmd.command("mark-landmarks")
+@register_cmd.command("label")
 @click.argument(
     "maxip_path",
     type=click.Path(exists=True),
@@ -67,7 +67,7 @@ def register_cmd() -> None:
     type=str,
     help="Session ID for the recording.",
 )
-def mark_landmarks(maxip_path, out_dir, template_points, session_id) -> dict:
+def label_cmd(maxip_path, out_dir, template_points, session_id) -> dict:
     """Mark landmarks on a recording for registration to a template using the landmarks GUI.
 
     Args:
@@ -75,8 +75,11 @@ def mark_landmarks(maxip_path, out_dir, template_points, session_id) -> dict:
         out_dir (str): Output directory for registered recording.
         template_points (str): Path to template landmark points in CSV or Fiji XML points format.
         session_id (str): Session ID for the recording.
-    """
 
+    Returns:
+        dict: Dictionary with the landmarks and their x-y coordinates.
+              Dictionary keys are landmark names, while x-y coordinates are stored as an (y, x)
+    """
     click.echo("Loading imaging data...")
     maxip = skio.imread(maxip_path)
 
@@ -126,7 +129,7 @@ def mark_landmarks(maxip_path, out_dir, template_points, session_id) -> dict:
 )
 @click.option("--crop-x", default=0, help="Crop recording along the x-axis.")
 @click.option("--crop-y", default=0, help="Crop recording along the y-axis.")
-def register_landmarks(
+def register_cmd(
     path: str,
     out_dir: str,
     recording_points: str,
@@ -146,6 +149,9 @@ def register_landmarks(
 
     Returns:
         str: Path to the registered recording file.
+
+    Raises:
+        ValueError: If the path to recording landmarks cannot be inferred.
     """
     click.echo("Registering recording {} to template.".format(path))
 
@@ -169,9 +175,8 @@ def register_landmarks(
         elif os.path.exists(path.replace(".h5", "_landmarks.csv")):
             recording_points = path.replace(".h5", "_landmarks.csv")
         else:
-            raise ValueError(
-                "Path to recording landmarks could not be inferred. Please supply a recording landmarks file."
-            )
+            msg = "Path to recording landmarks could not be inferred. Please supply a recording landmarks file."
+            raise ValueError(msg)
     recording_landmarks = io.read_points(recording_points)
 
     warped, tform = trf.landmarks_affine(
@@ -192,12 +197,12 @@ def register_landmarks(
             "tform": tform,
         },
     )
-    click.echo("Saved registered frames at {}".format(outpath))
+    click.echo(f"Saved registered frames at {outpath}")
 
     if nwb:
         click.echo("Updating NWB file...")
         update_nwb(path, outpath, tform)
-        click.echo("Updated NWB file at {}".format(path))
+        click.echo(f"Updated NWB file at {path}")
 
     return outpath
 
