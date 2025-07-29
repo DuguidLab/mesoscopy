@@ -31,6 +31,7 @@ from pynwb.image import ImageSeries
 from pynwb.ophys import CorrectedImageStack
 
 import mesoscopy.preprocess as preproc
+import mesoscopy.preprocess.compute as preproc_compute
 import mesoscopy.register.landmarks_gui as reg_gui
 import mesoscopy.register.transform as trf
 import mesoscopy.resources as res
@@ -84,15 +85,14 @@ def label_cmd(path, out_dir, template_points, session_id) -> dict:
 
     # Load maxip from preprocessed file.
     # if it does not exist, generate maxip from raw data.
-    if nwb:
-        # Generate maxip from raw data
-        ...
-    elif path.endswith("_preprocessed.h5"):
-        # load maxip from preprocessed file
-        ...
+    if path.endswith("_preprocessed.h5"):
+        maxip, _ = load_maxips(path)
     else:
         # generate maxip from raw data
-        ...
+        click.echo("⚠️ No maximum intensity projection found. Generating from raw data, this might take some time...")
+        with timer.Timer("Generating maximum intensity projection"):
+            _, raw_data, _ = preproc.load_raw(path, nwb=nwb)
+            maxip = preproc_compute.projections(raw_data)["maxip"]
 
     click.echo("Loading template landmarks...")
     template_landmarks = res.get_default_landmarks()
@@ -170,7 +170,7 @@ def landmarks_cmd(
     # Determine whether we're working with an NWB file
     nwb = True if path.endswith(".nwb") else False
 
-    session_id, deltaf_series, timestamps = load_preprocessed(path, nwb)
+    session_id, deltaf_series, timestamps = load_deltaf(path, nwb)
 
     click.echo("Loading landmarks...")
     template_landmarks = res.get_default_landmarks()
@@ -215,8 +215,8 @@ def landmarks_cmd(
     return outpath
 
 
-def load_preprocessed(path: str, nwb: bool = False) -> tuple[str, np.ndarray, np.ndarray]:
-    """Load preprocessed data from an HDF5 or NWB file.
+def load_deltaf(path: str, nwb: bool = False) -> tuple[str, np.ndarray, np.ndarray]:
+    """Load preprocessed deltaf from an HDF5 or NWB file.
 
     Args:
         path (str): Path to the preprocessed file.
@@ -237,6 +237,22 @@ def load_preprocessed(path: str, nwb: bool = False) -> tuple[str, np.ndarray, np
         timestamps = f_preproc["/timestamps"]
 
     return session_id, deltaf_series, timestamps
+
+
+def load_maxips(path: str) -> tuple[np.ndarray, np.ndarray]:
+    """Load maximum intensity projections from a preprocessed HDF5 file.
+
+    Args:
+        path (str): Path to the preprocessed HDF5 file.
+
+    Returns:
+        tuple[np.ndarray, np.ndarray]: Maximum intensity projection for gcamp and isosb channels.
+    """
+    f_preproc = h5py.File(path, "r")
+    gcamp_maxip_projection = np.array(f_preproc["/gcamp_maxip_projection"])
+    isosb_maxip_projection = np.array(f_preproc["/isosb_maxip_projection"])
+
+    return gcamp_maxip_projection, isosb_maxip_projection
 
 
 def update_nwb(nwb_path: str, h5_path: str, tform_params: np.ndarray) -> None:
