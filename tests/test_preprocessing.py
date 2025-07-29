@@ -8,7 +8,7 @@ from dask import array as da
 
 import mesoscopy
 from mesoscopy import preprocess
-from mesoscopy.preprocess import calculations
+from mesoscopy.preprocess import compute
 
 
 def test_load_raw_h5(raw_h5):
@@ -37,7 +37,7 @@ def test_nwb_link(nwbfile, preproc_h5):
 
 
 def test_binning(output_dir):
-    array = calculations.bin_array(
+    array = compute.bin_array(
         array=da.random.random((300, 40, 40)),
         bins=2,
         interim_dir=output_dir,
@@ -54,7 +54,7 @@ def test_separate_channels(output_dir, random_idx):
     # Merge the two channels in random order
     mock_dual_channel = np.insert(mock_gcamp, random_idx - np.arange(len(random_idx)), mock_isosb, axis=0)
 
-    gcamp_filter, isosb_filter = calculations.channel_separation_filters(
+    gcamp_filter, isosb_filter = compute.channel_separation_filters(
         frame_means=mock_dual_channel.mean(axis=(1, 2)),
         frame_stds=mock_dual_channel.std(axis=(1, 2)),
         use_means=False,
@@ -74,7 +74,7 @@ def test_separate_channels_use_means(output_dir, random_idx):
     # Merge the two channels in random order
     mock_dual_channel = np.insert(mock_gcamp, random_idx - np.arange(len(random_idx)), mock_isosb, axis=0)
 
-    gcamp_filter, isosb_filter = calculations.channel_separation_filters(
+    gcamp_filter, isosb_filter = compute.channel_separation_filters(
         frame_means=mock_dual_channel.mean(axis=(1, 2)),
         frame_stds=mock_dual_channel.std(axis=(1, 2)),
         use_means=True,
@@ -94,7 +94,7 @@ def test_separate_channels_flip_channels(output_dir, random_idx):
     # Merge the two channels in random order
     mock_dual_channel = np.insert(mock_gcamp, random_idx - np.arange(len(random_idx)), mock_isosb, axis=0)
 
-    gcamp_filter, isosb_filter = calculations.channel_separation_filters(
+    gcamp_filter, isosb_filter = compute.channel_separation_filters(
         frame_means=mock_dual_channel.mean(axis=(1, 2)),
         frame_stds=mock_dual_channel.std(axis=(1, 2)),
         use_means=False,
@@ -114,14 +114,14 @@ def test_channel_dff(output_dir, random_idx):
     # Merge the two channels in random order
     mock_dual_channel = np.insert(mock_gcamp, random_idx - np.arange(len(random_idx)), mock_isosb, axis=0)
 
-    gcamp_filter, _ = calculations.channel_separation_filters(
+    gcamp_filter, _ = compute.channel_separation_filters(
         frame_means=mock_dual_channel.mean(axis=(1, 2)),
         frame_stds=mock_dual_channel.std(axis=(1, 2)),
         use_means=False,
         flip_channels=False,
     )
 
-    dff = calculations.rolling_dff(
+    dff = compute.rolling_dff(
         array=mock_dual_channel[gcamp_filter],
         interim_dir=output_dir,
         session_id="null",
@@ -138,7 +138,7 @@ def test_channel_dff_invalid_window(output_dir, random_idx):
     # Merge the two channels in random order
     mock_dual_channel = np.insert(mock_gcamp, random_idx - np.arange(len(random_idx)), mock_isosb, axis=0)
 
-    gcamp_filter, isosb_filter = calculations.channel_separation_filters(
+    gcamp_filter, isosb_filter = compute.channel_separation_filters(
         frame_means=mock_dual_channel.mean(axis=(1, 2)),
         frame_stds=mock_dual_channel.std(axis=(1, 2)),
         use_means=False,
@@ -146,7 +146,7 @@ def test_channel_dff_invalid_window(output_dir, random_idx):
     )
 
     with pytest.raises(ValueError):
-        calculations.rolling_dff(
+        compute.rolling_dff(
             array=mock_dual_channel[gcamp_filter],
             interim_dir=output_dir,
             session_id="null",
@@ -162,14 +162,14 @@ def test_channel_dff_insert(output_dir, random_idx):
     # Merge the two channels in random order
     mock_dual_channel = np.insert(mock_gcamp, random_idx - np.arange(len(random_idx)), mock_isosb, axis=0)
 
-    gcamp_filter, _ = calculations.channel_separation_filters(
+    gcamp_filter, _ = compute.channel_separation_filters(
         frame_means=mock_dual_channel.mean(axis=(1, 2)),
         frame_stds=mock_dual_channel.std(axis=(1, 2)),
         use_means=False,
         flip_channels=False,
     )
 
-    _ = calculations.rolling_dff(
+    _ = compute.rolling_dff(
         array=mock_dual_channel[gcamp_filter],
         interim_dir=output_dir,
         session_id="null",

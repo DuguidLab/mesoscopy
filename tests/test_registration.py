@@ -13,14 +13,14 @@ def test_landmarks_affine():
 
 
 def test_load_preprocessed_h5(preproc_h5):
-    session_id, deltaf, ts = reg.load_preprocessed(preproc_h5)
+    session_id, deltaf, ts = reg.load_deltaf(preproc_h5)
     assert session_id == "preproc"
     assert deltaf.shape == (300, 40, 40)
     assert ts.shape == (300,)
 
 
 def test_load_preprocessed_nwb(preproc_nwb):
-    session_id, deltaf, ts = reg.load_preprocessed(preproc_nwb, nwb=True)
+    session_id, deltaf, ts = reg.load_deltaf(preproc_nwb, nwb=True)
     assert session_id == "session_1234"
     assert deltaf.shape == (300, 40, 40)
     assert ts.shape == (300,)
