@@ -1,13 +1,11 @@
-import pytest
-from click.testing import CliRunner
+from importlib import resources
 
 import numpy as np
+from click.testing import CliRunner
 
 import mesoscopy
 import mesoscopy.register as reg
-import mesoscopy.register.transform as trf
 import mesoscopy.resources as res
-import importlib.resources as resources
 
 
 def test_landmarks_affine():

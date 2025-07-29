@@ -20,13 +20,14 @@
 #  SOFTWARE.
 
 import os
+
 import dask
-import zarr
 import numpy as np
 import numpy.typing as npt
+import zarr
 from dask import array as da
 
-import mesoscopy.io as io
+from mesoscopy import io
 
 
 def bin_array(
@@ -177,6 +178,7 @@ def projections(
     array: da.Array | npt.NDArray,
 ) -> dict[str, npt.NDArray]:
     """Calculate mean, standard deviation and maximum intensity projection frames.
+
     Args:
         channel_array (npt.NDArray): Array containing channel statistics.
 

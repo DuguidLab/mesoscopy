@@ -19,30 +19,28 @@
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
 import os
+import pathlib
+import time
+
 import click
 import h5py
 import numpy as np
-
-import time
-
 import skimage.io as skio
-
-import mesoscopy.io as io
-import mesoscopy.register.landmarks_gui as reg_gui
-import mesoscopy.register.transform as trf
-import mesoscopy.resources as res
-import mesoscopy.timer as timer
-import mesoscopy.preprocess as preproc
-
 from pynwb import TimeSeries
 from pynwb.image import ImageSeries
 from pynwb.ophys import CorrectedImageStack
+
+import mesoscopy.preprocess as preproc
+import mesoscopy.register.landmarks_gui as reg_gui
+import mesoscopy.register.transform as trf
+import mesoscopy.resources as res
+from mesoscopy import io
+from mesoscopy import timer as timer
 
 
 @click.group("register")
 def register_cmd() -> None:
     """Register recordings to a template."""
-    pass
 
 
 @register_cmd.command("label")
@@ -163,7 +161,7 @@ def landmarks_cmd(
     Raises:
         ValueError: If the path to recording landmarks cannot be inferred.
     """
-    click.echo("Registering recording {} to template.".format(path))
+    click.echo(f"Registering recording {path} to template.")
 
     os.makedirs(out_dir, exist_ok=True)
 
@@ -180,9 +178,9 @@ def landmarks_cmd(
         template_landmarks = io.read_points(template_points)
 
     if not recording_points:
-        if nwb and os.path.exists(path.replace(".nwb", "_landmarks.csv")):
+        if nwb and pathlib.Path(path.replace(".nwb", "_landmarks.csv")).exists():
             recording_points = path.replace(".nwb", "_landmarks.csv")
-        elif os.path.exists(path.replace(".h5", "_landmarks.csv")):
+        elif pathlib.Path(path.replace(".h5", "_landmarks.csv")).exists():
             recording_points = path.replace(".h5", "_landmarks.csv")
         else:
             msg = "Path to recording landmarks could not be inferred. Please supply a recording landmarks file."

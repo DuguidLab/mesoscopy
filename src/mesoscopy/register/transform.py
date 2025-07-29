@@ -18,10 +18,10 @@
 #  IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
-import click
 import time
-import numpy as np
 
+import click
+import numpy as np
 from skimage import transform as trf
 
 
@@ -53,7 +53,7 @@ def landmarks_affine(
     start = time.time()
     tform = trf.estimate_transform("affine", template, recording)
     end = time.time()
-    click.echo("Transform estimated in {} s".format(end - start))
+    click.echo(f"Transform estimated in {end - start} s")
 
     _warped = []
     with click.progressbar(range(deltaf_series.shape[0]), label="Registering recording to template...") as frame_ids:

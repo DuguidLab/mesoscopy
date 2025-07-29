@@ -19,21 +19,19 @@
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
 import os
-import typing
 import shutil
+import time
+import typing
+
 import click
 import dask
-
-import time
-
-import mesoscopy.io as io
-import mesoscopy.preprocess.calculations as calc
-import mesoscopy.timer as timer
-
 import numpy as np
 from dask import array as da
-
 from pynwb.image import ImageSeries
+
+import mesoscopy.preprocess.calculations as calc
+from mesoscopy import io
+from mesoscopy import timer
 
 
 @click.command(name="preprocess")
@@ -106,8 +104,8 @@ def run_preprocessing(
     use_means: bool = False,
     flip_channels: bool = False,
     interim_dir: str = "interim/",
-    skip_start: typing.Optional[int] = None,
-    skip_end: typing.Optional[int] = None,
+    skip_start: int | None = None,
+    skip_end: int | None = None,
 ) -> None:
     """Preprocessing to extract deltaF from a single session dual-channel mixed recording.
 
@@ -127,7 +125,7 @@ def run_preprocessing(
         skip_start (int, optional): Number of frames to skip at the start of the recording. Defaults to None.
         skip_end (int, optional): Number of frames to skip at the end of the recording. Defaults to None.
     """
-    click.echo("Preprocessing file {}.".format(path))
+    click.echo(f"Preprocessing file {path}.")
 
     preprocessing_start = time.time()
 
@@ -167,7 +165,7 @@ def run_preprocessing(
 
     if crop > 0:
         raw_frames = raw_frames[:, crop:-crop, crop:-crop]
-        click.echo("Cropping to shape {}".format(raw_frames.shape))
+        click.echo(f"Cropping to shape {raw_frames.shape}")
 
     with timer.Timer(
         f"Binning frames to shape {raw_frames.shape[1] // bins} by {raw_frames.shape[2] // bins} ({bins}x{bins})"
@@ -296,12 +294,12 @@ def run_preprocessing(
         )
 
     preprocessing_end = time.time()
-    click.echo("Preprocessing took a total of {} mins.".format((preprocessing_end - preprocessing_start) / 60))
+    click.echo(f"Preprocessing took a total of {(preprocessing_end - preprocessing_start) / 60} mins.")
 
     if nwb:
         click.echo("Updating NWB file...")
         update_nwb(path, outpath)
-        click.echo("Updated NWB file at {}".format(path))
+        click.echo(f"Updated NWB file at {path}")
 
     click.echo("Cleaning up...")
     shutil.rmtree(interim_dir)

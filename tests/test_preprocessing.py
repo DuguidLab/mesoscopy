@@ -1,16 +1,14 @@
 import pathlib
 
-import pytest
-from click.testing import CliRunner
-
 import numpy as np
-from dask import array as da
+import pytest
 import zarr
+from click.testing import CliRunner
+from dask import array as da
 
 import mesoscopy
-
-import mesoscopy.preprocess as preprocess
-import mesoscopy.preprocess.calculations as calculations
+from mesoscopy import preprocess
+from mesoscopy.preprocess import calculations
 
 
 def test_load_raw_h5(raw_h5):

@@ -18,17 +18,13 @@
 #  IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
-import napari
+from collections import OrderedDict
+
 import magicgui.widgets as mgw
-
-import mesoscopy.io as io
-
+import napari
 import numpy as np
 import numpy.typing as npt
-
-from collections import OrderedDict
 from dask import array as da
-
 
 COLOR_CYCLE = [
     "#a6cee3",

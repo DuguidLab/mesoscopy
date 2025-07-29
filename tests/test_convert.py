@@ -1,15 +1,13 @@
-import pytest
-from click.testing import CliRunner
-
 import os
+import pathlib
+
+from click.testing import CliRunner
+from pynwb import NWBHDF5IO
 
 import mesoscopy
-import mesoscopy.convert as conv
 import mesoscopy.convert.hdf5 as conv_h5
-import mesoscopy.convert.video as conv_vid
 import mesoscopy.convert.metadata as mtd
-
-from pynwb import NWBHDF5IO
+import mesoscopy.convert.video as conv_vid
 
 
 def test_metadata_yaml(meta_yaml):
@@ -32,16 +30,16 @@ def test_convert_h5_linkonly(raw_h5, output_dir):
     expected_outpath = output_dir + os.sep + raw_h5.split(os.sep)[-1].replace(".h5", ".nwb")
     nwb_outpath = conv_h5.to_nwb(raw_h5, out_dir=output_dir, link_only=True)
     assert expected_outpath == nwb_outpath
-    assert os.path.isfile(nwb_outpath)
-    assert os.path.getsize(raw_h5) > os.path.getsize(nwb_outpath)
+    assert pathlib.Path(nwb_outpath).is_file()
+    assert pathlib.Path(raw_h5).stat().st_size > pathlib.Path(nwb_outpath).stat().st_size
 
 
 def test_convert_h5_eagercopy(raw_h5, output_dir):
     expected_outpath = output_dir + os.sep + raw_h5.split(os.sep)[-1].replace(".h5", ".nwb")
     nwb_outpath = conv_h5.to_nwb(raw_h5, out_dir=output_dir)
     assert expected_outpath == nwb_outpath
-    assert os.path.isfile(nwb_outpath)
-    assert os.path.getsize(raw_h5) <= os.path.getsize(nwb_outpath)
+    assert pathlib.Path(nwb_outpath).is_file()
+    assert pathlib.Path(raw_h5).stat().st_size <= pathlib.Path(nwb_outpath).stat().st_size
 
 
 def test_convert_h5_metadata_yaml(raw_h5, output_dir, meta_yaml):
@@ -98,14 +96,14 @@ def test_h5_cmd_parity(raw_h5, output_dir):
 
 def test_avi_h5_converter(raw_avi, output_dir):
     h5_outpath = conv_vid.to_hdf5(raw_avi, out_dir=output_dir)
-    assert os.path.isfile(h5_outpath)
+    assert pathlib.Path(h5_outpath).is_file()
 
 
 def test_avi_h5_converter_with_timestamps(raw_avi, raw_timestamps, output_dir):
     h5_outpath = conv_vid.to_hdf5(raw_avi, output_dir, ts_path=raw_timestamps)
-    assert os.path.isfile(h5_outpath)
+    assert pathlib.Path(h5_outpath).is_file()
 
 
 def test_avi_nwb_converter(raw_avi, output_dir):
     h5_outpath = conv_vid.to_nwb(raw_avi, out_dir=output_dir)
-    assert os.path.isfile(h5_outpath)
+    assert pathlib.Path(h5_outpath).is_file()

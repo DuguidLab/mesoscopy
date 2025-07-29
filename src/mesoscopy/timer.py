@@ -20,6 +20,7 @@
 #  SOFTWARE.
 
 import time
+
 import click
 
 
@@ -46,5 +47,3 @@ class Timer:
 
 class TimerError(Exception):
     """Custom exception for timer errors."""
-
-    pass

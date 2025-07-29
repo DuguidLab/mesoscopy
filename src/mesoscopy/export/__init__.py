@@ -20,8 +20,9 @@
 #  SOFTWARE.
 """Export functions for mesoscopy-generated files."""
 
-import click
 import typing
+
+import click
 
 import mesoscopy.export.nwb as exp_nwb
 
@@ -29,7 +30,6 @@ import mesoscopy.export.nwb as exp_nwb
 @click.group("export")
 def export_cmd() -> None:
     """Export mesoscopy-generated files."""
-    pass
 
 
 @export_cmd.command("nwb")

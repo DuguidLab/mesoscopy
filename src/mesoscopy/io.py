@@ -20,16 +20,15 @@
 #  SOFTWARE.
 import csv
 import typing
-import xmltodict
 from collections import OrderedDict
 
 import h5py
-import zarr
-
-import numpy as np
 import numpy.typing as npt
+import xmltodict
+import zarr
 from dask import array as da
-from pynwb import NWBHDF5IO, NWBFile
+from pynwb import NWBHDF5IO
+from pynwb import NWBFile
 
 
 @typing.overload
@@ -37,10 +36,10 @@ def read_nwb(path: str, mode: str = "a") -> NWBFile: ...  # pyright: ignore[repo
 
 
 @typing.overload
-def read_nwb(path: str, mode: str = "a", return_io: bool = True) -> typing.Tuple[NWBFile, NWBHDF5IO]: ...
+def read_nwb(path: str, mode: str = "a", return_io: bool = True) -> tuple[NWBFile, NWBHDF5IO]: ...
 
 
-def read_nwb(path: str, mode: str = "a", return_io: bool = False) -> NWBFile | typing.Tuple[NWBFile, NWBHDF5IO]:
+def read_nwb(path: str, mode: str = "a", return_io: bool = False) -> NWBFile | tuple[NWBFile, NWBHDF5IO]:
     """Read an NWB file.
 
     Args:
@@ -166,7 +165,7 @@ def _read_fiji_points(path: str) -> dict[str, tuple[float, float]]:
     Returns:
         dict[str, tuple[float, float]]: Dictionary with the landmark names as keys and their x-y coordinates
     """
-    with open(path, "r") as fp:
+    with open(path) as fp:
         points = xmltodict.parse(fp.read())
         points = OrderedDict(
             {
@@ -187,7 +186,7 @@ def _read_csv_points(path: str) -> dict[str, tuple[float, float]]:
     Returns:
         dict[str, tuple[float, float]]: Dictionary with the landmark names as keys and their x-y coordinates
     """
-    with open(path, "r") as fp:
+    with open(path) as fp:
         csv_reader = csv.DictReader(fp)
         points = OrderedDict({row["landmark"]: (float(row["y"]), float(row["x"])) for row in csv_reader})
 

@@ -113,9 +113,9 @@ types-verify = "mypy --install-types --non-interactive src/mesoscopy tests"
 types-report = "types-check --html-report mypy-report/"
 
 # Linting scripts
-lint-check = "ruff check src/mesoscopy tests"
+lint-check = "ruff check src/mesoscop"
 lint-fix = "lint-check --fix"
-lint-run = "lint-fix && ruff format {args:src/mesoscopy/ tests/}"
+lint-run = "lint-fix && ruff format {args:src/mesoscopy/}"
 
 
 [tool.ruff]

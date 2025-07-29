@@ -24,7 +24,7 @@
 import click
 
 import mesoscopy.inspect.data_viewers as dvs
-import mesoscopy.io as io
+from mesoscopy import io
 
 
 @click.command("inspect")
@@ -111,7 +111,7 @@ def inspect(input_path: str, info_level: str = "meta_only") -> None:
     click.echo("")
 
     if info_level == "meta_only":
-        return
+        return None
     if info_level == "acquisition":
         if not nwbfile.acquisition.get("DualChannelImagingSeries"):
             return click.secho("⚠️  No acquisition data found!", fg="red", bold=True)
