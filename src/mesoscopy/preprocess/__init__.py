@@ -29,7 +29,7 @@ import numpy as np
 from dask import array as da
 from pynwb.image import ImageSeries
 
-import mesoscopy.preprocess.calculations as calc
+import mesoscopy.preprocess.compute as calc
 from mesoscopy import io
 from mesoscopy import timer
 
