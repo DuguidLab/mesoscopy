@@ -83,10 +83,17 @@ def label_cmd(path, out_dir, template_points, session_id) -> dict:
     click.echo("Loading imaging data...")
     nwb = bool(path.endswith(".nwb"))
 
+    if not session_id:
+        session_id = path.split("/")[-1].replace(".nwb", "") if nwb else path.split("/")[-1].replace(".h5", "")
+        session_id = session_id.replace("_preprocessed", "")
+
+    maxip = None
+    isosb_maxip = None
+
     # Load maxip from preprocessed file.
     # if it does not exist, generate maxip from raw data.
     if path.endswith("_preprocessed.h5"):
-        maxip, _ = load_maxips(path)
+        maxip, isosb_maxip = load_maxips(path)
     else:
         # generate maxip from raw data
         click.echo("⚠️ No maximum intensity projection found. Generating from raw data, this might take some time...")
@@ -100,7 +107,7 @@ def label_cmd(path, out_dir, template_points, session_id) -> dict:
         template_landmarks = io.read_points(template_points)
 
     click.echo("Launching landmark identification GUI...")
-    recording_landmarks = reg_gui.mark_landmarks(maxip, template_landmarks)
+    recording_landmarks = reg_gui.mark_landmarks(maxip, isosb_maxip, template_landmarks)
 
     click.echo("Saving recording landmarks...")
     outpath = out_dir + os.sep + session_id + "_landmarks.csv"
@@ -249,8 +256,8 @@ def load_maxips(path: str) -> tuple[np.ndarray, np.ndarray]:
         tuple[np.ndarray, np.ndarray]: Maximum intensity projection for gcamp and isosb channels.
     """
     f_preproc = h5py.File(path, "r")
-    gcamp_maxip_projection = np.array(f_preproc["/gcamp_maxip_projection"])
-    isosb_maxip_projection = np.array(f_preproc["/isosb_maxip_projection"])
+    gcamp_maxip_projection = np.array(f_preproc["/qa/gcamp_maxip_projection"])
+    isosb_maxip_projection = np.array(f_preproc["/qa/isosb_maxip_projection"])
 
     return gcamp_maxip_projection, isosb_maxip_projection
 
