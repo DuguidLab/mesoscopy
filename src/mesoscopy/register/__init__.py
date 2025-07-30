@@ -20,12 +20,10 @@
 #  SOFTWARE.
 import os
 import pathlib
-import time
 
 import click
 import h5py
 import numpy as np
-import skimage.io as skio
 from pynwb import TimeSeries
 from pynwb.image import ImageSeries
 from pynwb.ophys import CorrectedImageStack
