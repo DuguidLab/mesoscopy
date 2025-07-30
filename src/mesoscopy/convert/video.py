@@ -21,15 +21,15 @@
 
 """Video conversion utilities."""
 
-import os
-import h5py as h5
-import typing
-import pims
-import pandas as pd
-from tqdm import tqdm
-import numpy as np
-
 import datetime
+import os
+import typing
+
+import h5py as h5
+import numpy as np
+import pandas as pd
+import pims
+from tqdm import tqdm
 
 import mesoscopy.convert.hdf5 as conv_h5
 

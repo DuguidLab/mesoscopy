@@ -17,7 +17,7 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 - Major API refactoring, to break up large `__init__` files and create a more consistent interface.
 - Non-command entries to `__init__` files are now marked as private.
 - `preprocess` command no longer requires output directory to be specified; this is now an optional flag which defaults to the user's current directory.
-- `register` command now contains a `mark-landmarks` subcommand, which launches the landmark annotation GUI. The `landmarks` subcommand now accepts registration points in CSV format (exported from the landmark registration GUI) in addition to FIJI XML points.
+- `register` command now contains a `label` subcommand, which launches the landmark annotation GUI. The `landmarks` subcommand now accepts registration points in CSV format (exported from the landmark registration GUI) in addition to FIJI XML points.
 - Removed inline QA plots, save QA metrics to output HDF5 files for later viewing.
 
 ### Fixed

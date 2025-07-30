@@ -22,17 +22,16 @@
 """HDF5 conversion utilities."""
 
 import os
-import click
-import typing
-
-import mesoscopy.convert.metadata as mtd
-import mesoscopy.io as io
-
 from datetime import datetime
 
+import click
 from pynwb import NWBFile
 from pynwb.file import Subject
-from pynwb.ophys import OpticalChannel, OnePhotonSeries
+from pynwb.ophys import OnePhotonSeries
+from pynwb.ophys import OpticalChannel
+
+import mesoscopy.convert.metadata as mtd
+from mesoscopy import io
 
 
 def to_nwb(
@@ -41,17 +40,17 @@ def to_nwb(
     link_only: bool = False,
     frames_group: str = "frames",
     timestamps_group: str = "timestamps",
-    meta_path: typing.Optional[str] = None,
-    subject_id: typing.Optional[str] = None,
-    sex: typing.Optional[str] = None,
-    genotype: typing.Optional[str] = None,
-    species: typing.Optional[str] = None,
-    strain: typing.Optional[str] = None,
-    dob: typing.Optional[str] = None,
-    session_description: typing.Optional[str] = None,
-    experimenter: typing.Optional[str] = None,
-    lab: typing.Optional[str] = None,
-    institution: typing.Optional[str] = None,
+    meta_path: str | None = None,
+    subject_id: str | None = None,
+    sex: str | None = None,
+    genotype: str | None = None,
+    species: str | None = None,
+    strain: str | None = None,
+    dob: str | None = None,
+    session_description: str | None = None,
+    experimenter: str | None = None,
+    lab: str | None = None,
+    institution: str | None = None,
     **kwargs,
 ) -> str:
     """Convert a mesoscale recording session from HDF5 to NWB. Optionally add session metadata.

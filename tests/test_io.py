@@ -1,15 +1,16 @@
-import pytest
-import numpy as np
-import importlib.resources as resources
-import dask.array as da
-
-from datetime import datetime, timedelta
-from dateutil.tz import tzlocal
-from pynwb import NWBFile, NWBHDF5IO
+from datetime import datetime
+from importlib import resources
 from uuid import uuid4
 
-import mesoscopy.io as io
+import dask.array as da
+import numpy as np
+import pytest
+from dateutil.tz import tzlocal
+from pynwb import NWBHDF5IO
+from pynwb import NWBFile
+
 import mesoscopy.resources
+from mesoscopy import io
 
 
 def test_read_h5(raw_h5):

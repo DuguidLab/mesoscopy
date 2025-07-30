@@ -21,9 +21,10 @@
 """Module for quality assurance (QA) functions in the mesoscopy preprocessing pipeline."""
 
 import os
-import mesoscopy.plots as plots
 
 import numpy.typing as npt
+
+from mesoscopy import plots
 
 
 def plot_frame_statistics(
@@ -41,19 +42,19 @@ def plot_frame_statistics(
         dict[str, str]: Dictionary containing paths to the saved QA plots.
     """
     outpath = qa_dir + os.sep + session_id + "_qa_frame_means_histogram.png"
-    msg = "Saved histogram for frame means at {}".format(outpath)
+    msg = f"Saved histogram for frame means at {outpath}"
     plots.plot_hist(frame_means, outpath, message=msg)
 
     outpath = qa_dir + os.sep + session_id + "_qa_frame_means_line.png"
-    msg = "Saved lineplot for frame means at {}".format(outpath)
+    msg = f"Saved lineplot for frame means at {outpath}"
     plots.plot_line(frame_means, outpath, message=msg)
 
     outpath = qa_dir + os.sep + session_id + "_qa_frame_std_histogram.png"
-    msg = "Saved histogram for frame means at {}".format(outpath)
+    msg = f"Saved histogram for frame means at {outpath}"
     plots.plot_hist(frame_stds, outpath, message=msg)
 
     outpath = qa_dir + os.sep + session_id + "_qa_frame_std_line.png"
-    msg = "Saved lineplot for frame means at {}".format(outpath)
+    msg = f"Saved lineplot for frame means at {outpath}"
     plots.plot_line(frame_stds, outpath, message=msg)
 
     return {
@@ -84,7 +85,7 @@ def plot_dual_channel_timeseries(
     plots.plot_lines(
         [channel_arrays[0], channel_arrays[1]],
         outpath,
-        message="Saved channel means at {}".format(outpath),
+        message=f"Saved channel means at {outpath}",
     )
 
     return {
@@ -96,6 +97,7 @@ def plot_channel_projection_images(
     channel_array: npt.NDArray, qa_dir: str = ".", session_id: str = "null", channel: str = "null"
 ) -> dict[str, str]:
     """Plot and save channel mean, standard deviation and maximum intensity projection frames.
+
     Args:
         channel_array (npt.NDArray): Array containing channel statistics.
         qa_dir (str): Directory to save QA plots.
@@ -111,14 +113,14 @@ def plot_channel_projection_images(
         channel_array.max(axis=0),
     )
 
-    outpath = qa_dir + os.sep + session_id + "_qa_{}_mean.png".format(channel)
-    plots.plot_frame(mean_frame, outpath, message="Saved mean frame at {}".format(outpath))
+    outpath = qa_dir + os.sep + session_id + f"_qa_{channel}_mean.png"
+    plots.plot_frame(mean_frame, outpath, message=f"Saved mean frame at {outpath}")
 
-    outpath = qa_dir + os.sep + session_id + "_qa_{}_std.png".format(channel)
-    plots.plot_frame(std_frame, outpath, message="Saved std frame at {}".format(outpath))
+    outpath = qa_dir + os.sep + session_id + f"_qa_{channel}_std.png"
+    plots.plot_frame(std_frame, outpath, message=f"Saved std frame at {outpath}")
 
-    outpath = qa_dir + os.sep + session_id + "_qa_{}_maxip.png".format(channel)
-    plots.plot_frame(maxip, outpath, message="Saved maxip frame at {}".format(outpath))
+    outpath = qa_dir + os.sep + session_id + f"_qa_{channel}_maxip.png"
+    plots.plot_frame(maxip, outpath, message=f"Saved maxip frame at {outpath}")
 
     return {
         f"{channel}_mean_projection": outpath,
@@ -144,7 +146,7 @@ def plot_dual_dff_timeseries(
     plots.plot_lines(
         [dff_arrays[0], dff_arrays[1]],
         outpath,
-        message="Saved dual channel DFF timeseries at {}".format(outpath),
+        message=f"Saved dual channel DFF timeseries at {outpath}",
     )
 
     return {
@@ -164,7 +166,7 @@ def plot_f_example(f_signal: npt.NDArray, qa_dir: str = ".", session_id: str = "
         dict[str, str]: Dictionary containing paths to the saved QA plots.
     """
     outpath = qa_dir + os.sep + session_id + "_qa_f_example.png"
-    plots.plot_frame(f_signal[200], outpath, message="Saved F signal example at {}".format(outpath))
+    plots.plot_frame(f_signal[200], outpath, message=f"Saved F signal example at {outpath}")
 
     return {
         "f_example": outpath,
@@ -183,7 +185,7 @@ def plot_mean_f_timeseries(f_signal: npt.NDArray, qa_dir: str = ".", session_id:
         dict[str, str]: Dictionary containing paths to the saved QA plots.
     """
     outpath = qa_dir + os.sep + session_id + "_qa_mean_f_timeseries.png"
-    plots.plot_line(f_signal.mean(axis=(1, 2)), outpath, message="Saved mean F timeseries at {}".format(outpath))
+    plots.plot_line(f_signal.mean(axis=(1, 2)), outpath, message=f"Saved mean F timeseries at {outpath}")
 
     return {
         "mean_f_timeseries": outpath,

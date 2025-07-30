@@ -18,17 +18,13 @@
 #  IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
-import napari
+from collections import OrderedDict
+
 import magicgui.widgets as mgw
-
-import mesoscopy.io as io
-
+import napari
 import numpy as np
 import numpy.typing as npt
-
-from collections import OrderedDict
 from dask import array as da
-
 
 COLOR_CYCLE = [
     "#a6cee3",
@@ -44,7 +40,7 @@ COLOR_CYCLE = [
 
 
 def mark_landmarks(
-    maxip_image: npt.NDArray | da.Array, template_landmarks: dict = {}
+    maxip_image: npt.NDArray | da.Array, alt_image: npt.NDArray | da.Array | None, template_landmarks: dict = {}
 ) -> dict:
     """Launch the napari viewer to identify anatomical landmarks on a maximum intensity projection image.
 
@@ -61,15 +57,32 @@ def mark_landmarks(
 
     Args:
         maxip_image (npt.NDArray): Maximum intensity projection image. Could be either channel.
+        alt_image (npt.NDArray): Alternative image to be displayed alongside the maximum intensity projection image. Usually a second channel.
         template_landmarks (dict, optional): Dictionary with the landmarks and their x-y coordinates. Dictionary keys are landmark names, while x-y coordinates are stored as an (y, x) tuple. Defaults to {}.
 
     Returns:
         dict: Dictionary with the landmarks and their x-y coordinates. Dictionary keys are landmark names, while x-y coordinates are stored as an (y, x) tuple.
+
+    Raises:
+        ValueError: If the maximum intensity projection and alternative image do not have the same dimensions.
     """
-    maxip_height, maxip_width, _ = maxip_image.shape
+    if len(maxip_image.shape) == 3:
+        maxip_height, maxip_width, _ = maxip_image.shape
+    else:
+        maxip_height, maxip_width = maxip_image.shape
+
     viewer = napari.view_image(maxip_image)
 
-    print(template_landmarks)
+    if alt_image is not None:
+        if len(alt_image.shape) == 3:
+            alt_height, alt_width, _ = alt_image.shape
+        else:
+            alt_height, alt_width = alt_image.shape
+        if (maxip_height, maxip_width) != (alt_height, alt_width):
+            msg = "Maximum intensity projection and alternative image must have the same dimensions."
+            raise ValueError(msg)
+
+        viewer.add_image(alt_image, name="alt_maxip")
 
     default_landmark_locations = template_landmarks or {
         "bregma": (maxip_height / 2, maxip_width / 2),
@@ -82,8 +95,6 @@ def mark_landmarks(
         "rpRSP": (maxip_height / 1.25, maxip_width / 1.75),
         "aIPB": (maxip_height / 1.4, maxip_width / 2),
     }
-
-    print(default_landmark_locations)
 
     landmarks = list(default_landmark_locations.keys())
 
@@ -109,7 +120,7 @@ def mark_landmarks(
 
     napari.run()
 
-    return OrderedDict(zip(landmarks, points_layer.data))
+    return OrderedDict(zip(landmarks, points_layer.data, strict=True))
 
 
 def _create_label_menu(points_layer, labels):
@@ -126,21 +137,25 @@ def _create_label_menu(points_layer, labels):
     """
     # Create the label selection menu
     label_menu = mgw.ComboBox(label="feature_label", choices=labels)
-    info_text = mgw.Label(
-        value="When you're done annotating,\nclose the viewer window."
-    )
-    label_widget = mgw.Container(widgets=[label_menu, info_text])
+    info_text = mgw.Label(value="When you're done annotating,\nclose the viewer window.")
+    close_button = mgw.Button(label="Save and Close")
+    label_widget = mgw.Container(widgets=[label_menu, info_text, close_button])
 
-    def update_label_menu(event):
-        """Update the label menu when the point selection changes"""
+    def close_viewer(event) -> None:
+        napari.current_viewer().close()
+
+    close_button.changed.connect(close_viewer)
+
+    def update_label_menu(event) -> None:
+        """Update the label menu when the point selection changes."""
         new_label = str(points_layer.current_properties["label"][0])
         if new_label != label_menu.value:
             label_menu.value = new_label
 
     points_layer.events.current_properties.connect(update_label_menu)
 
-    def label_changed(new_label):
-        """Update the Points layer when the label menu selection changes"""
+    def label_changed(new_label) -> None:
+        """Update the Points layer when the label menu selection changes."""
         current_properties = points_layer.current_properties
         current_properties["label"] = np.asarray([new_label])
         points_layer.current_properties = current_properties

@@ -1,7 +1,9 @@
+import os
+import pathlib
+
 import pytest
 from click.testing import CliRunner
 
-import os
 import mesoscopy
 import mesoscopy.export.nwb as nwb_export
 
@@ -14,8 +16,8 @@ def test_nwb_sharing_export(preproc_nwb, output_dir):
     assert exported_path != preproc_nwb
 
     # Clean up the created file
-    if os.path.exists(exported_path):
-        os.remove(exported_path)
+    if pathlib.Path(exported_path).exists():
+        pathlib.Path(exported_path).unlink()
 
 
 def test_nwb_sharing_export_no_outpath(preproc_nwb):
@@ -25,8 +27,8 @@ def test_nwb_sharing_export_no_outpath(preproc_nwb):
     assert exported_path != preproc_nwb
 
     # Clean up the created file
-    if os.path.exists(exported_path):
-        os.remove(exported_path)
+    if pathlib.Path(exported_path).exists():
+        pathlib.Path(exported_path).unlink()
 
 
 def test_nwb_sharing_export_invalid_path():
@@ -35,7 +37,7 @@ def test_nwb_sharing_export_invalid_path():
         nwb_export.export_standalone("invalid_path.nwb")
 
     # Ensure no file is created
-    assert not os.path.exists("invalid_path_export.nwb")
+    assert not pathlib.Path("invalid_path_export.nwb").exists()
 
 
 def test_nwb_sharing_cmd_parity(preproc_nwb, output_dir):
@@ -51,8 +53,8 @@ def test_nwb_sharing_cmd_parity(preproc_nwb, output_dir):
     assert "NWB file exported to" in result.output
 
     exported_path = os.path.join(output_dir, "test_export.nwb")
-    assert os.path.isfile(exported_path)
+    assert pathlib.Path(exported_path).is_file()
 
     # Clean up the created file
-    if os.path.exists(exported_path):
-        os.remove(exported_path)
+    if pathlib.Path(exported_path).exists():
+        pathlib.Path(exported_path).unlink()

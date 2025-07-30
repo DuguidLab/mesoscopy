@@ -21,8 +21,9 @@
 
 """File conversion CLI."""
 
-import click
 import typing
+
+import click
 
 import mesoscopy.convert.hdf5 as conv_h5
 import mesoscopy.convert.video as conv_vid

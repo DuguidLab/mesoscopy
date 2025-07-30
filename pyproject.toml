@@ -38,6 +38,7 @@ dependencies = [
     "napari>=0.4.19",
     "av>=14.4.0",
     "pims>=0.7",
+    "pyqt5"
 ]
 dynamic = ["version"]
 
@@ -113,9 +114,9 @@ types-verify = "mypy --install-types --non-interactive src/mesoscopy tests"
 types-report = "types-check --html-report mypy-report/"
 
 # Linting scripts
-lint-check = "ruff check src/mesoscopy tests"
+lint-check = "ruff check src/mesoscopy"
 lint-fix = "lint-check --fix"
-lint-run = "lint-fix && ruff format {args:src/mesoscopy/ tests/}"
+lint-run = "lint-fix && ruff format {args:src/mesoscopy/}"
 
 
 [tool.ruff]

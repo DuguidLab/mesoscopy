@@ -20,9 +20,6 @@
 #  SOFTWARE.
 """Module for quality assurance (QA) functions in the mesoscopy registration pipeline."""
 
-import os
-import mesoscopy.plots as plots
-
 
 def plot_unregistered_landmarks(): ...
 

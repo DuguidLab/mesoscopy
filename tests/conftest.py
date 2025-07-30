@@ -1,20 +1,21 @@
-import importlib.resources
-import pytest
-
-import yaml
-import json
-
-import numpy as np
-import h5py as h5
-
 import importlib
-import tests.resources
+import importlib.resources
+import json
+from datetime import datetime
+from datetime import timedelta
 
-from datetime import datetime, timedelta
+import h5py as h5
+import numpy as np
+import pytest
+import yaml
 from dateutil.tz import tzlocal
-from uuid import uuid4
-from pynwb import NWBFile, NWBHDF5IO
-from pynwb.ophys import OpticalChannel, OnePhotonSeries, ImageSeries
+from pynwb import NWBHDF5IO
+from pynwb import NWBFile
+from pynwb.ophys import ImageSeries
+from pynwb.ophys import OnePhotonSeries
+from pynwb.ophys import OpticalChannel
+
+import tests.resources
 
 
 @pytest.fixture(scope="session")
@@ -23,7 +24,7 @@ def random_idx():
     return np.sort(np.random.choice(600, 300, replace=False))
 
 
-@pytest.fixture()
+@pytest.fixture
 def nwbfile(tmp_path_factory, random_idx):
     """Create an NWBFile object for testing."""
     # Create a temporary file
@@ -97,7 +98,7 @@ def nwbfile(tmp_path_factory, random_idx):
     return str(tmpfile)
 
 
-@pytest.fixture()
+@pytest.fixture
 def nwbfile_noacquisition(tmp_path_factory):
     """Create an NWBFile object for testing."""
     # Create a temporary file
@@ -196,13 +197,13 @@ def preproc_nwb(nwbfile, preproc_h5):
     return nwbfile
 
 
-@pytest.fixture()
+@pytest.fixture
 def output_dir(tmp_path_factory):
     """Create a temporary directory for output."""
     return str(tmp_path_factory.mktemp("output"))
 
 
-@pytest.fixture()
+@pytest.fixture
 def meta_yaml(tmp_path_factory, partial=False):
     tmpfile = tmp_path_factory.mktemp("data") / "test_meta.yml"
 
@@ -229,7 +230,7 @@ def meta_yaml(tmp_path_factory, partial=False):
     return str(tmpfile)
 
 
-@pytest.fixture()
+@pytest.fixture
 def meta_json(tmp_path_factory, partial=False):
     tmpfile = tmp_path_factory.mktemp("data") / "test_meta.json"
 

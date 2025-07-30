@@ -22,8 +22,8 @@
 """Animal metadata readers."""
 
 import json
-import yaml
 
+import yaml
 
 DEFAULT_METADATA = {
     "subject_id": "unknown",
@@ -51,14 +51,14 @@ def read_yaml(path: str) -> dict:
     Returns:
         dict: Subject metadata.
     """
-    with open(path, "r") as fp:
+    with open(path) as fp:
         metadata = yaml.safe_load(fp)
 
         for key in metadata.keys():
             if key not in list(DEFAULT_METADATA.keys()):
                 raise ValueError(f"Invalid file contents - unrecognised key <{key}>.")
 
-        for field in DEFAULT_METADATA.keys():
+        for field in DEFAULT_METADATA:
             if field not in metadata.keys():
                 metadata[field] = DEFAULT_METADATA.get(field)
 
@@ -77,14 +77,14 @@ def read_json(path: str) -> dict:
     Returns:
         dict: Subject metadata.
     """
-    with open(path, "r") as fp:
+    with open(path) as fp:
         metadata = json.load(fp)
 
         for key in metadata.keys():
             if key not in list(DEFAULT_METADATA.keys()):
                 raise ValueError(f"Invalid file contents - unrecognised key <{key}>.")
 
-        for field in DEFAULT_METADATA.keys():
+        for field in DEFAULT_METADATA:
             if field not in metadata.keys():
                 metadata[field] = DEFAULT_METADATA.get(field)
 
