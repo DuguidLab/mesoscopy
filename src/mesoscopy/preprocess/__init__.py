@@ -155,9 +155,6 @@ def run_preprocessing(
     if skip_start or skip_end:
         d = d[skip_start:skip_end]
         ts = ts[skip_start:skip_end]
-    # else:
-    #     d = d[:]
-    #     ts = ts[:]
 
     raw_frames = da.from_array(d, chunks="auto")
     if chunks > 0:
@@ -320,8 +317,8 @@ def load_raw(raw_path: str, nwb: bool = False) -> tuple[str, da.Array | np.ndarr
 
         session_id = nwbfile.identifier
 
-        imaging_data = nwbfile.acquisition["DualChannelImagingSeries"].data
-        timestamps = nwbfile.acquisition["DualChannelImagingSeries"].timestamps
+        imaging_data = nwbfile.acquisition["DualChannelImagingSeries"].data[:]
+        timestamps = nwbfile.acquisition["DualChannelImagingSeries"].timestamps[:]
     else:
         session_id = raw_path.split("/")[-1].replace(".h5", "")
 
