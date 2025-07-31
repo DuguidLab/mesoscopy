@@ -38,7 +38,8 @@ dependencies = [
     "napari>=0.4.19",
     "av>=14.4.0",
     "pims>=0.7",
-    "pyqt5"
+    "pyqt5",
+    "plotly",
 ]
 dynamic = ["version"]
 
