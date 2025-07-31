@@ -40,6 +40,7 @@ dependencies = [
     "pims>=0.7",
     "pyqt5",
     "plotly",
+    "Jinja2"
 ]
 dynamic = ["version"]
 
