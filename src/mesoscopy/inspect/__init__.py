@@ -53,12 +53,12 @@ from mesoscopy import io
     "info_level",
     flag_value="registered",
 )
-def inspect_cmd(input_path: str, info_level: str):
+def inspect_cmd(input_path: str, info_level: str) -> None:
     """Inspect a calcium recording session and associated preprocessing output. Files must be in NWB format."""
     inspect(input_path=input_path, info_level=info_level)
 
 
-def inspect(input_path: str, info_level: str = "meta_only") -> None:
+def inspect(input_path: str, info_level: str = "meta_only") -> None:  # noqa: PLR0911
     """Inspect a mesoscale recording NWB file, alongside any associated preprocessing data, using the inspection GUI.
 
     Args:
@@ -75,7 +75,9 @@ def inspect(input_path: str, info_level: str = "meta_only") -> None:
     click.echo(f"Session date: \t\t {nwbfile.session_start_time.date()}")
     click.echo(f"Session description: \t {nwbfile.session_description}")
     click.echo(
-        f"Experimenter: \t\t {nwbfile.experimenter[0] if nwbfile.experimenter else 'Unknown'} ({nwbfile.lab}, {nwbfile.institution})"
+        f"Experimenter: \t\t {nwbfile.experimenter[0] if nwbfile.experimenter else 'Unknown'} ({nwbfile.lab}, {
+            nwbfile.institution
+        })"
     )
     click.echo("")
     click.echo(f"Subject ID: \t\t {nwbfile.subject.subject_id if nwbfile.subject else 'Unknown'}")
@@ -97,13 +99,25 @@ def inspect(input_path: str, info_level: str = "meta_only") -> None:
     if nwbfile.processing and nwbfile.processing.get("ophys"):
         click.echo(click.style("Mesoscopy processing progress:", bold=True))
         click.echo(
-            f"\t{f'{click.style("✅ Preprocessed", fg="green")}' if nwbfile.processing.get('ophys').get('DeltaFSeries') else f'{click.style("❌ Not preprocessed", fg="red")}'}"
+            f"\t{
+                f'{click.style("✅ Preprocessed", fg="green")}'
+                if nwbfile.processing.get('ophys').get('DeltaFSeries')
+                else f'{click.style("❌ Not preprocessed", fg="red")}'
+            }"
         )
         click.echo(
-            f"\t{f'{click.style("✅ Registered", fg="green")}' if 'CCFRegisteredSeries' in nwbfile.processing.get('ophys').data_interfaces.keys() else f'{click.style("❌ Not registered", fg="red")}'}"
+            f"\t{
+                f'{click.style("✅ Registered", fg="green")}'
+                if 'CCFRegisteredSeries' in nwbfile.processing.get('ophys').data_interfaces
+                else f'{click.style("❌ Not registered", fg="red")}'
+            }"
         )
         click.echo(
-            f"\t{f'{click.style(f"✅ Analysed ({', '.join(list(nwbfile.analysis.keys()))})", fg="green")}' if nwbfile.analysis else f'{click.style("❌ No analysis found", fg="red")}'}"
+            f"\t{
+                f'{click.style(f"✅ Analysed ({', '.join(list(nwbfile.analysis.keys()))})", fg="green")}'
+                if nwbfile.analysis
+                else f'{click.style("❌ No analysis found", fg="red")}'
+            }"
         )
     else:
         click.echo(click.style("No mesoscopy processing found.", bold=True))
@@ -127,3 +141,4 @@ def inspect(input_path: str, info_level: str = "meta_only") -> None:
             return click.secho("⚠️  No CCFRegisteredSeries found!", fg="red", bold=True)
         click.echo("Launching CCF registered ∆F viewer...")
         return dvs.ccfregistered_viewer(nwbfile)
+    return None
