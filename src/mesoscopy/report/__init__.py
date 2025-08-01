@@ -21,24 +21,33 @@
 import os
 import click
 
+from jinja2 import Environment, PackageLoader, select_autoescape
 
-PREPROCESSING_REPORT_TEMPLATE = "templates/preprocessing.html"
-REGISTRATION_REPORT_TEMPLATE = "templates/registration.html"
+
+PREPROCESSING_REPORT_TEMPLATE = "preprocessing.html"
+REGISTRATION_REPORT_TEMPLATE = "registration.html"
+
+env = Environment(loader=PackageLoader("mesoscopy.report", "templates"), autoescape=select_autoescape())
 
 
 @click.command(name="report")
 @click.argument("path")
 def report_cmd(path: str) -> str:
     """Generate a report for a mesoscopy processing step."""
-    if path.endswith("_preprocessed.h5"):
-        return generate_preprocessing_report(path)
-    elif path.endswith("_registered.h5"):
-        return generate_registration_report(path)
-    else:
-        raise ValueError
+    return generate_preprocessing_report(path)
+    # if path.endswith("_preprocessed.h5"):
+    #     return generate_preprocessing_report(path)
+    # elif path.endswith("_registered.h5"):
+    #     return generate_registration_report(path)
+    # else:
+    #     raise ValueError
 
 
 def generate_preprocessing_report(path: str) -> str:
+    template = env.get_template(PREPROCESSING_REPORT_TEMPLATE)
+    print(template.render())
+    with open("test.html", "w") as f:
+        f.write(template.render())
     return ""
 
 

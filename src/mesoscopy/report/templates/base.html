@@ -1,7 +1,21 @@
 <html>
-    <head>
-        <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.1/css/bootstrap.min.css">
-        <style>body{ margin:0 100; background:whitesmoke; }</style>
-    </head>
+
+<head>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.1/css/bootstrap.min.css">
+    <style>
+        body {
+            margin: 0 100;
+            background: whitesmoke;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container-fluid">
+        {% block content %}{% endblock %}
+    </div>
+
+    {% block scripts %}{% endblock %}
+</body>
 
 </html>
