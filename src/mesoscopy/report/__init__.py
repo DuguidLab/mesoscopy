@@ -23,15 +23,13 @@ import click
 
 
 @click.command(name="report")
+@click.argument("path")
 def report_cmd():
     """Generate a report for a mesoscopy processing step."""
     pass
 
 
-def generate(): ...
+def generate_preprocessing_report(): ...
 
 
-def preprocessing(): ...
-
-
-def registration(): ...
+def generate_registration_report(): ...
