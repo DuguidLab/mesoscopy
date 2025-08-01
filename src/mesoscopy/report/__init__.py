@@ -18,11 +18,12 @@
 #  IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
-import os
+from pathlib import Path
+
 import click
-
-from jinja2 import Environment, PackageLoader, select_autoescape
-
+from jinja2 import Environment
+from jinja2 import PackageLoader
+from jinja2 import select_autoescape
 
 PREPROCESSING_REPORT_TEMPLATE = "preprocessing.html"
 REGISTRATION_REPORT_TEMPLATE = "registration.html"
@@ -32,7 +33,14 @@ env = Environment(loader=PackageLoader("mesoscopy.report", "templates"), autoesc
 
 @click.command(name="report")
 @click.argument("path")
-def report_cmd(path: str) -> str:
+@click.option(
+    "-o",
+    "--out_dir",
+    type=click.Path(dir_okay=True),
+    default=".",
+    help="Output directory for preprocessed recording.",
+)
+def report_cmd(path: str, out_dir: str) -> str:
     """Generate a report for a mesoscopy processing step."""
     return generate_preprocessing_report(path)
     # if path.endswith("_preprocessed.h5"):
@@ -43,13 +51,13 @@ def report_cmd(path: str) -> str:
     #     raise ValueError
 
 
-def generate_preprocessing_report(path: str) -> str:
+def generate_preprocessing_report(path: str, out_dir: str = ".") -> str:
     template = env.get_template(PREPROCESSING_REPORT_TEMPLATE)
-    print(template.render())
-    with open("test.html", "w") as f:
-        f.write(template.render())
+    out_path = out_dir / Path("test.html")
+    out_path.write_text(template.render(), encoding="utf-8")
     return ""
 
 
 def generate_registration_report(path: str) -> str:
+    template = env.get_template(REGISTRATION_REPORT_TEMPLATE)
     return ""
