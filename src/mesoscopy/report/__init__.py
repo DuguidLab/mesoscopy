@@ -22,14 +22,25 @@ import os
 import click
 
 
+PREPROCESSING_REPORT_TEMPLATE = "templates/preprocessing.html"
+REGISTRATION_REPORT_TEMPLATE = "templates/registration.html"
+
+
 @click.command(name="report")
 @click.argument("path")
-def report_cmd():
+def report_cmd(path: str) -> str:
     """Generate a report for a mesoscopy processing step."""
-    pass
+    if path.endswith("_preprocessed.h5"):
+        return generate_preprocessing_report(path)
+    elif path.endswith("_registered.h5"):
+        return generate_registration_report(path)
+    else:
+        raise ValueError
 
 
-def generate_preprocessing_report(): ...
+def generate_preprocessing_report(path: str) -> str:
+    return ""
 
 
-def generate_registration_report(): ...
+def generate_registration_report(path: str) -> str:
+    return ""
