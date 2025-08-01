@@ -201,7 +201,7 @@ def landmarks_cmd(
     )
 
     # Save warped frames and timestamps
-    outpath = out_dir + os.sep + session_id + "-registered.h5"
+    outpath = out_dir + os.sep + session_id + "_registered.h5"
     outpath = io.write_h5(
         path=outpath,
         data={
