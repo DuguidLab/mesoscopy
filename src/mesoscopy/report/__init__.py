@@ -25,8 +25,6 @@ from jinja2 import Environment
 from jinja2 import PackageLoader
 from jinja2 import select_autoescape
 
-import plotly.express as px
-
 PREPROCESSING_REPORT_TEMPLATE = "preprocessing.html"
 REGISTRATION_REPORT_TEMPLATE = "registration.html"
 
@@ -56,14 +54,27 @@ def report_cmd(path: str, out_dir: str) -> str:
 def generate_preprocessing_report(path: str, out_dir: str = ".") -> str:
     template = env.get_template(PREPROCESSING_REPORT_TEMPLATE)
 
-    data_canada = px.data.gapminder().query("country == 'Canada'")
-    fig = px.bar(data_canada, x='year', y='pop') 
+    template_identifiers = {
+        "session_id": ...,
+        "fig_integrity_timestamps": ...,
+        "fig_separation_pre_timeseries_mean": ...,
+        "fig_separation_pre_hist_mean": ...,
+        "fig_separation_pre_hist_std": ...,
+        "fig_separation_post_timeseries": ...,
+        "fig_separation_post_gcamp_maxip": ...,
+        "fig_separation_post_gcamp_stdp": ...,
+        "fig_separation_post_isosb_maxip": ...,
+        "fig_separation_post_isosb_stdp": ...,
+        "fig_separation_post_filter_idx": ...,
+        "fig_separation_post_filter_pie": ...,
+        "fig_channel_dff": ...,
+        "fig_corrected_dff": ...,
+        "fig_corrected_example": ...,
+    }
 
     out_path = out_dir / Path("test.html")
-    out_path.write_text(template.render({
-        "fig": fig.to_html(full_html=False)
-    }), encoding="utf-8")
-    return ""
+    out_path.write_text(template.render(template_identifiers), encoding="utf-8")
+    return out_path
 
 
 def generate_registration_report(path: str) -> str:
