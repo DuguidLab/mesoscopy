@@ -20,4 +20,86 @@
 #  SOFTWARE.
 """Module for quality assurance (QA) functions in the mesoscopy preprocessing pipeline."""
 
+import plotly.graph_objects as go
 import plotly.express as px
+import numpy.typing as npt
+
+
+def plot_timestamps(timestamps: list | npt.NDArray, as_html: bool = False) -> str | go.Figure:
+    if as_html:
+        return px.scatter(timestamps).to_html(full_html=False)
+    return px.scatter(timestamps)
+
+
+def plot_raw_timeseries(raw_timeseries: npt.NDArray, as_html: bool = False) -> str | go.Figure:
+    if as_html:
+        return px.scatter(raw_timeseries).to_html(full_html=False)
+    return px.scatter(raw_timeseries)
+
+
+def plot_raw_histogram(data: npt.NDArray, as_html: bool = False) -> str | go.Figure:
+    if as_html:
+        return px.histogram(data).to_html(full_html=False)
+    return px.histogram(data)
+
+
+def plot_channels_timeseries(
+    gcamp_channel: npt.NDArray, isosb_channel: npt.NDArray, as_html: bool = False
+) -> str | go.Figure:
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter(y=gcamp_channel, mode="lines", name="GCaMP channel"))
+    fig.add_trace(go.Scatter(y=isosb_channel, mode="lines", name="Isosb channel"))
+    if as_html:
+        return fig.to_html(full_html=False)
+    return fig
+
+
+def plot_channel_projection(data: npt.NDArray, as_html: bool = False) -> str | go.Figure:
+    if as_html:
+        return px.imshow(data).to_html(full_html=False)
+    return px.imshow(data)
+
+
+def plot_frame_ids(gcamp_ids: npt.NDArray, isosb_ids: npt.NDArray, as_html: bool = False) -> str | go.Figure:
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter(y=gcamp_ids, mode="lines", name="GCaMP channel IDs"))
+    fig.add_trace(go.Scatter(y=isosb_ids, mode="lines", name="Isosb channel IDs"))
+    if as_html:
+        return fig.to_html(full_html=False)
+    return fig
+
+
+def plot_filter_pie(gcamp_ids: npt.NDArray, isosb_ids: npt.NDArray, as_html: bool = False) -> str | go.Figure:
+    labels = ["GCaMP frame IDs", "Isosb frame IDs"]
+    values = [len(gcamp_ids), len(isosb_ids)]
+    fig = go.Figure(go.Pie(labels=labels, values=values))
+    if as_html:
+        return fig.to_html(full_html=False)
+    return fig
+
+
+def plot_channels_dff(gcamp_channel: npt.NDArray, isosb_channel: npt.NDArray, as_html: bool = False) -> str | go.Figure:
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter(y=gcamp_channel, mode="lines", name="GCaMP channel ∆F/F"))
+    fig.add_trace(go.Scatter(y=isosb_channel, mode="lines", name="Isosb channel ∆F/F"))
+    if as_html:
+        return fig.to_html(full_html=False)
+    return fig
+
+
+def plot_corrected_dff(data: npt.NDArray, as_html: bool = False) -> str | go.Figure:
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter(y=data, mode="lines", name="Corrected ∆F/F"))
+    if as_html:
+        return fig.to_html(full_html=False)
+    return fig
+
+
+def plot_frame(data: npt.NDArray, as_html: bool = False) -> str | go.Figure:
+    if as_html:
+        return px.imshow(data).to_html(full_html=False)
+    return px.imshow(data)

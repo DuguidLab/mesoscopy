@@ -35,9 +35,8 @@
 
 {% block content %}
 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
-    <h1>
-        Preprocessing Report - {{ session_id }}
-    </h1>
+    <h1>Preprocessing Report</h1>
+    <h3>{{ session_id }}</h3>
 </div>
 
 
@@ -62,7 +61,7 @@
 
     <h4>Pre-separation statistics</h4>
     <div class="row mb-3">
-        <h6>Mean frame fluorescence timeseries</h6>
+        <h6>Mean raw signal timeseries</h6>
         {{ fig_separation_pre_timeseries_mean | safe}}
     </div>
     <div class="row mb-3">
@@ -78,8 +77,10 @@
 
     <h4>Post-separation QA</h4>
     <div class="row mb-3">
-        <h6>Channel fluorescence timeseries</h6>
-        {{ fig_separation_post_timeseries | safe }}
+        <div class="col-md-12 mb-3">
+            <h6>Channel raw signal timeseries</h6>
+            {{ fig_separation_post_timeseries | safe }}
+        </div>
     </div>
     <div class="row mb-3">
         <div class="col-md-6 mb-3">

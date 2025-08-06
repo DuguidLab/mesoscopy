@@ -21,9 +21,13 @@
 from pathlib import Path
 
 import click
+import numpy as np
 from jinja2 import Environment
 from jinja2 import PackageLoader
 from jinja2 import select_autoescape
+
+import mesoscopy.io as io
+import mesoscopy.preprocess.qa as preqa
 
 PREPROCESSING_REPORT_TEMPLATE = "preprocessing.html"
 REGISTRATION_REPORT_TEMPLATE = "registration.html"
@@ -52,29 +56,65 @@ def report_cmd(path: str, out_dir: str) -> str:
 
 
 def generate_preprocessing_report(path: str, out_dir: str = ".") -> str:
+    preproc = io.read_h5(path)
+    session_id = path.split("/")[-1].split("_preprocessed")[0]
+
     template = env.get_template(PREPROCESSING_REPORT_TEMPLATE)
 
     template_identifiers = {
-        "session_id": ...,
-        "fig_integrity_timestamps": ...,
-        "fig_separation_pre_timeseries_mean": ...,
-        "fig_separation_pre_hist_mean": ...,
-        "fig_separation_pre_hist_std": ...,
-        "fig_separation_post_timeseries": ...,
-        "fig_separation_post_gcamp_maxip": ...,
-        "fig_separation_post_gcamp_stdp": ...,
-        "fig_separation_post_isosb_maxip": ...,
-        "fig_separation_post_isosb_stdp": ...,
-        "fig_separation_post_filter_idx": ...,
-        "fig_separation_post_filter_pie": ...,
-        "fig_channel_dff": ...,
-        "fig_corrected_dff": ...,
-        "fig_corrected_example": ...,
+        "session_id": session_id,
+        "fig_integrity_timestamps": preqa.plot_timestamps(
+            [np.datetime64(ts) for ts in preproc.get("timestamps")],
+            as_html=True,
+        ),
+        "fig_separation_pre_timeseries_mean": preqa.plot_raw_timeseries(
+            preproc.get("qa").get("frame_means_timeseries"), as_html=True
+        ),
+        "fig_separation_pre_hist_mean": preqa.plot_raw_histogram(
+            preproc.get("qa").get("frame_means_timeseries"), as_html=True
+        ),
+        "fig_separation_pre_hist_std": preqa.plot_raw_histogram(
+            preproc.get("qa").get("frame_stds_timeseries"), as_html=True
+        ),
+        "fig_separation_post_timeseries": preqa.plot_channels_timeseries(
+            gcamp_channel=preproc.get("qa").get("gcamp_mean_timeseries"),
+            isosb_channel=preproc.get("qa").get("isosb_mean_timeseries"),
+            as_html=True,
+        ),
+        "fig_separation_post_gcamp_maxip": preqa.plot_channel_projection(
+            preproc.get("qa").get("gcamp_maxip_projection"), as_html=True
+        ),
+        "fig_separation_post_gcamp_stdp": preqa.plot_channel_projection(
+            preproc.get("qa").get("gcamp_std_projection"), as_html=True
+        ),
+        "fig_separation_post_isosb_maxip": preqa.plot_channel_projection(
+            preproc.get("qa").get("isosb_maxip_projection"), as_html=True
+        ),
+        "fig_separation_post_isosb_stdp": preqa.plot_channel_projection(
+            preproc.get("qa").get("isosb_std_projection"), as_html=True
+        ),
+        "fig_separation_post_filter_idx": preqa.plot_frame_ids(
+            gcamp_ids=preproc.get("qa").get("gcamp_filter"),
+            isosb_ids=preproc.get("qa").get("isosb_filter"),
+            as_html=True,
+        ),
+        "fig_separation_post_filter_pie": preqa.plot_filter_pie(
+            gcamp_ids=preproc.get("qa").get("gcamp_filter"),
+            isosb_ids=preproc.get("qa").get("isosb_filter"),
+            as_html=True,
+        ),
+        "fig_channel_dff": preqa.plot_channels_dff(
+            gcamp_channel=preproc.get("qa").get("gcamp_dff_timeseries"),
+            isosb_channel=preproc.get("qa").get("isosb_dff_timeseries"),
+            as_html=True,
+        ),
+        "fig_corrected_dff": preqa.plot_corrected_dff(preproc.get("qa").get("f_mean_timeseries"), as_html=True),
+        "fig_corrected_example": preqa.plot_frame(preproc.get("F")[100], as_html=True),
     }
 
     out_path = out_dir / Path("test.html")
     out_path.write_text(template.render(template_identifiers), encoding="utf-8")
-    return out_path
+    return str(out_path)
 
 
 def generate_registration_report(path: str) -> str:
