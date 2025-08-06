@@ -27,8 +27,8 @@ import numpy.typing as npt
 
 def plot_timestamps(timestamps: list | npt.NDArray, as_html: bool = False) -> str | go.Figure:
     if as_html:
-        return px.scatter(timestamps).to_html(full_html=False)
-    return px.scatter(timestamps)
+        return px.line(timestamps).to_html(full_html=False)
+    return px.line(timestamps)
 
 
 def plot_raw_timeseries(raw_timeseries: npt.NDArray, as_html: bool = False) -> str | go.Figure:

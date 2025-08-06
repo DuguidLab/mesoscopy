@@ -63,6 +63,16 @@ def generate_preprocessing_report(path: str, out_dir: str = ".") -> str:
 
     template_identifiers = {
         "session_id": session_id,
+        "animal_id": session_id.split("_")[0].replace("sub-", ""),
+        "session_date": session_id.split("_date-")[-1].replace("_", ":"),
+        "experiment_id": session_id.split("_exp-")[-1].split("_")[0],
+        "duration": str(
+            (np.datetime64(preproc.get("timestamps")[-1]) - np.datetime64(preproc.get("timestamps")[0])).astype(
+                "timedelta64[m]"
+            )
+        ),
+        "frame_num": len(preproc.get("F")),
+        "filesize": preproc.id.get_filesize() / (1024 * 1024),
         "fig_integrity_timestamps": preqa.plot_timestamps(
             [np.datetime64(ts) for ts in preproc.get("timestamps")],
             as_html=True,
