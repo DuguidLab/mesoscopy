@@ -122,7 +122,7 @@ def generate_preprocessing_report(path: str, out_dir: str = ".") -> str:
         "fig_corrected_example": preqa.plot_frame(preproc.get("F")[100], as_html=True),
     }
 
-    out_path = out_dir / Path("test.html")
+    out_path = out_dir / Path(path.split("/")[-1].replace(".h5", "_report.html"))
     out_path.write_text(template.render(template_identifiers), encoding="utf-8")
     return str(out_path)
 
