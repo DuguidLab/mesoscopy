@@ -73,9 +73,6 @@
 
     <div class="col-md-12 mb-3 mt-2">
         <h6>Timestamp series</h6>
-        <p>
-            The graph below shows the processed ∆F/F frame timestamps plotted against frame index.
-        </p>
         {{ fig_integrity_timestamps | safe }}
     </div>
 </div>
@@ -112,14 +109,14 @@
             {{ fig_separation_post_gcamp_maxip | safe }}
         </div>
         <div class="col-md-6 mb-3 mt-2">
-            <h6>GCaMP (470nm) channel standard deviation projection</h6>
-            {{ fig_separation_post_gcamp_stdp | safe }}
+            <h6>Isosbestic (405nm) channel maximum intensity projection</h6>
+            {{ fig_separation_post_isosb_maxip | safe }}
         </div>
     </div>
     <div class="row mb-3">
         <div class="col-md-6 mb-3 mt-2">
-            <h6>Isosbestic (405nm) channel maximum intensity projection</h6>
-            {{ fig_separation_post_isosb_maxip | safe }}
+            <h6>GCaMP (470nm) channel standard deviation projection</h6>
+            {{ fig_separation_post_gcamp_stdp | safe }}
         </div>
         <div class="col-md-6 mb-3 mt-2">
             <h6>Isosbestic (405nm) channel standard deviation projection</h6>
