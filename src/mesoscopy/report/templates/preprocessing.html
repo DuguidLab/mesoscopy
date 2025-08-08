@@ -44,24 +44,24 @@
     <h2 id="metadata">Session metadata</h2>
 
     <div class="row mb-1">
-        <div class="col-md-3 mb-1">
+        <div class="col-md-4 mb-1">
             <strong>Animal ID:</strong> {{ animal_id or "Unknown" }}
         </div>
-        <div class="col-md-3 mb-1">
+        <div class="col-md-4 mb-1">
             <strong>Session date:</strong> {{ session_date or "Unknown" }}
         </div>
-        <div class="col-md-3 mb-1">
+        <div class="col-md-4 mb-1">
             <strong>Experiment ID:</strong> {{ experiment_id or "Unknown" }}
         </div>
     </div>
     <div class="row mb-1">
-        <div class="col-md-3 mb-1">
+        <div class="col-md-4 mb-1">
             <strong>Recording duration:</strong> {{ duration or "Unknown" }}
         </div>
-        <div class="col-md-3 mb-1">
+        <div class="col-md-4 mb-1">
             <strong>∆F/F frames:</strong> {{ frame_num or "Unknown" }}
         </div>
-        <div class="col-md-3 mb-1">
+        <div class="col-md-4 mb-1">
             <strong>File size:</strong> {{ '%0.2f'| format(filesize|float) or "Unknown" }} MB
         </div>
     </div>
