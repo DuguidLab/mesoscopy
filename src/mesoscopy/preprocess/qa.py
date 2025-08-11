@@ -20,33 +20,66 @@
 #  SOFTWARE.
 """Module for quality assurance (QA) functions in the mesoscopy preprocessing pipeline."""
 
-import plotly.graph_objects as go
-import plotly.express as px
 import numpy.typing as npt
+import plotly.express as px
+import plotly.graph_objects as go
 
 
 def plot_timestamps(timestamps: list | npt.NDArray, as_html: bool = False) -> str | go.Figure:
+    fig = go.Figure(
+        layout=go.Layout(
+            xaxis={"title": {"text": "Frame index"}},
+            yaxis={"title": {"text": "Timestamp"}},
+            margin={"l": 20, "r": 20, "t": 20, "b": 20},
+        )
+    )
+
+    fig.add_trace(go.Scatter(y=timestamps, mode="lines", name="Timestamp"))
     if as_html:
-        return px.line(timestamps).to_html(full_html=False)
-    return px.line(timestamps)
+        return fig.to_html(full_html=False)
+    return fig
 
 
 def plot_raw_timeseries(raw_timeseries: npt.NDArray, as_html: bool = False) -> str | go.Figure:
+    fig = go.Figure(
+        layout=go.Layout(
+            xaxis={"title": {"text": "Frame index"}},
+            yaxis={"title": {"text": "Signal"}},
+            margin={"l": 20, "r": 20, "t": 20, "b": 20},
+        )
+    )
+
+    fig.add_trace(go.Scatter(y=raw_timeseries, mode="markers", name="Signal"))
     if as_html:
-        return px.scatter(raw_timeseries).to_html(full_html=False)
-    return px.scatter(raw_timeseries)
+        return fig.to_html(full_html=False)
+    return fig
 
 
 def plot_raw_histogram(data: npt.NDArray, as_html: bool = False) -> str | go.Figure:
+    fig = go.Figure(
+        layout=go.Layout(
+            xaxis={"title": {"text": "Signal"}},
+            yaxis={"title": {"text": "Count"}},
+            margin={"l": 20, "r": 20, "t": 20, "b": 20},
+        )
+    )
+
+    fig.add_trace(go.Histogram(x=data))
     if as_html:
-        return px.histogram(data).to_html(full_html=False)
-    return px.histogram(data)
+        return fig.to_html(full_html=False)
+    return fig
 
 
 def plot_channels_timeseries(
     gcamp_channel: npt.NDArray, isosb_channel: npt.NDArray, as_html: bool = False
 ) -> str | go.Figure:
-    fig = go.Figure()
+    fig = go.Figure(
+        layout=go.Layout(
+            xaxis={"title": {"text": "Frame index"}},
+            yaxis={"title": {"text": "Signal"}},
+            margin={"l": 20, "r": 20, "t": 20, "b": 20},
+        )
+    )
 
     fig.add_trace(go.Scatter(y=gcamp_channel, mode="lines", name="GCaMP channel"))
     fig.add_trace(go.Scatter(y=isosb_channel, mode="lines", name="Isosb channel"))
@@ -62,7 +95,13 @@ def plot_channel_projection(data: npt.NDArray, as_html: bool = False) -> str | g
 
 
 def plot_frame_ids(gcamp_ids: npt.NDArray, isosb_ids: npt.NDArray, as_html: bool = False) -> str | go.Figure:
-    fig = go.Figure()
+    fig = go.Figure(
+        layout=go.Layout(
+            xaxis={"title": {"text": "Processed frame index"}},
+            yaxis={"title": {"text": "Original frame index"}},
+            margin={"l": 20, "r": 20, "t": 20, "b": 20},
+        )
+    )
 
     fig.add_trace(go.Scatter(y=gcamp_ids, mode="lines", name="GCaMP channel IDs"))
     fig.add_trace(go.Scatter(y=isosb_ids, mode="lines", name="Isosb channel IDs"))
@@ -74,14 +113,25 @@ def plot_frame_ids(gcamp_ids: npt.NDArray, isosb_ids: npt.NDArray, as_html: bool
 def plot_filter_pie(gcamp_ids: npt.NDArray, isosb_ids: npt.NDArray, as_html: bool = False) -> str | go.Figure:
     labels = ["GCaMP frame IDs", "Isosb frame IDs"]
     values = [len(gcamp_ids), len(isosb_ids)]
-    fig = go.Figure(go.Pie(labels=labels, values=values))
+    fig = go.Figure(
+        go.Pie(labels=labels, values=values),
+        layout=go.Layout(
+            margin={"l": 20, "r": 20, "t": 20, "b": 20},
+        ),
+    )
     if as_html:
         return fig.to_html(full_html=False)
     return fig
 
 
 def plot_channels_dff(gcamp_channel: npt.NDArray, isosb_channel: npt.NDArray, as_html: bool = False) -> str | go.Figure:
-    fig = go.Figure()
+    fig = go.Figure(
+        layout=go.Layout(
+            xaxis={"title": {"text": "Frame index"}},
+            yaxis={"title": {"text": "∆F/F"}},
+            margin={"l": 20, "r": 20, "t": 20, "b": 20},
+        )
+    )
 
     fig.add_trace(go.Scatter(y=gcamp_channel, mode="lines", name="GCaMP channel ∆F/F"))
     fig.add_trace(go.Scatter(y=isosb_channel, mode="lines", name="Isosb channel ∆F/F"))
@@ -91,7 +141,13 @@ def plot_channels_dff(gcamp_channel: npt.NDArray, isosb_channel: npt.NDArray, as
 
 
 def plot_corrected_dff(data: npt.NDArray, as_html: bool = False) -> str | go.Figure:
-    fig = go.Figure()
+    fig = go.Figure(
+        layout=go.Layout(
+            xaxis={"title": {"text": "Frame index"}},
+            yaxis={"title": {"text": "∆F/F"}},
+            margin={"l": 20, "r": 20, "t": 20, "b": 20},
+        )
+    )
 
     fig.add_trace(go.Scatter(y=data, mode="lines", name="Corrected ∆F/F"))
     if as_html:
