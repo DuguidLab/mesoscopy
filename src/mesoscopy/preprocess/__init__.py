@@ -261,6 +261,9 @@ def run_preprocessing(
     with timer.Timer("Calculating mean F timeseries"):
         f_mean_timeseries = f_signal.mean(axis=(1, 2))
 
+    with timer.Timer("Generating maximum intensity projection for F signal"):
+        f_maxip = calc.projections(f_signal).get("maxip")
+
     timestamps = da.from_array(np.array(ts[gcamp_filter[:max_idx]], dtype="S25"), chunks="auto")
 
     outpath = out_dir + os.sep + session_id + "_preprocessed.h5"
@@ -286,6 +289,7 @@ def run_preprocessing(
                 "/qa/isosb_std_projection": isosb_projections.get("std"),
                 "/qa/isosb_maxip_projection": isosb_projections.get("maxip"),
                 "/qa/f_mean_timeseries": f_mean_timeseries,
+                "/qa/f_maxip": f_maxip,
             },
             compression="lzf",
         )
