@@ -46,13 +46,12 @@ env = Environment(loader=PackageLoader("mesoscopy.report", "templates"), autoesc
 )
 def report_cmd(path: str, out_dir: str) -> str:
     """Generate a report for a mesoscopy processing step."""
-    return generate_preprocessing_report(path)
-    # if path.endswith("_preprocessed.h5"):
-    #     return generate_preprocessing_report(path)
-    # elif path.endswith("_registered.h5"):
-    #     return generate_registration_report(path)
-    # else:
-    #     raise ValueError
+    if path.endswith("_preprocessed.h5"):
+        return generate_preprocessing_report(path, out_dir=out_dir)
+    elif path.endswith("_registered.h5"):
+        return generate_registration_report(path, out_dir=out_dir)
+    else:
+        raise ValueError
 
 
 def generate_preprocessing_report(path: str, out_dir: str = ".") -> str:
@@ -127,6 +126,6 @@ def generate_preprocessing_report(path: str, out_dir: str = ".") -> str:
     return str(out_path)
 
 
-def generate_registration_report(path: str) -> str:
+def generate_registration_report(path: str, out_dir=".") -> str:
     template = env.get_template(REGISTRATION_REPORT_TEMPLATE)
     return ""
