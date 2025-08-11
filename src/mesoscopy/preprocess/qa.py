@@ -125,11 +125,11 @@ def plot_channels_timeseries(
     return fig
 
 
-def plot_channel_projection(data: npt.NDArray, as_html: bool = False) -> str | go.Figure:
+def plot_projection(data: npt.NDArray, as_html: bool = False) -> str | go.Figure:
     """Plots a channel projection using Plotly.
 
     Args:
-        data (npt.NDArray): The channel projection data to plot, as a NumPy array.
+        data (npt.NDArray): The projection data to plot as a NumPy array.
         as_html (bool, optional): If True, returns the plot as an HTML string. If False, returns a Plotly Figure object.
 
     Returns:
