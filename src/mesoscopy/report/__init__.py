@@ -113,19 +113,19 @@ def generate_preprocessing_report(path: str, out_dir: str = ".") -> str:
             isosb_channel=preproc.get("qa").get("isosb_mean_timeseries"),  # type: ignore[attr-defined]
             as_html=True,
         ),
-        "fig_separation_post_gcamp_maxip": preqa.plot_channel_projection(
+        "fig_separation_post_gcamp_maxip": preqa.plot_projection(
             preproc.get("qa").get("gcamp_maxip_projection"),  # type: ignore[attr-defined]
             as_html=True,
         ),
-        "fig_separation_post_gcamp_stdp": preqa.plot_channel_projection(
+        "fig_separation_post_gcamp_stdp": preqa.plot_projection(
             preproc.get("qa").get("gcamp_std_projection"),  # type: ignore[attr-defined]
             as_html=True,
         ),
-        "fig_separation_post_isosb_maxip": preqa.plot_channel_projection(
+        "fig_separation_post_isosb_maxip": preqa.plot_projection(
             preproc.get("qa").get("isosb_maxip_projection"),  # type: ignore[attr-defined]
             as_html=True,
         ),
-        "fig_separation_post_isosb_stdp": preqa.plot_channel_projection(
+        "fig_separation_post_isosb_stdp": preqa.plot_projection(
             preproc.get("qa").get("isosb_std_projection"),  # type: ignore[attr-defined]
             as_html=True,
         ),
@@ -152,6 +152,7 @@ def generate_preprocessing_report(path: str, out_dir: str = ".") -> str:
             preproc.get("F")[100],  # type: ignore[attr-defined]
             as_html=True,
         ),
+        "fig_corrected_maxip": preqa.plot_projection(preproc.get("qa").get("f_maxip"), as_html=True),  # type: ignore[attr-defined]
     }
 
     out_path = out_dir / Path(path.split("/")[-1].replace(".h5", "_report.html"))
