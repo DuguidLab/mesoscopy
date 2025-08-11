@@ -26,6 +26,15 @@ import plotly.graph_objects as go
 
 
 def plot_timestamps(timestamps: list | npt.NDArray, as_html: bool = False) -> str | go.Figure:
+    """Plots a sequence of timestamps as a line plot using Plotly.
+
+    Args:
+        timestamps (list | npt.NDArray): Sequence of timestamp values to plot.
+        as_html (bool, optional): If True, returns the plot as an HTML string. If False, returns a Plotly Figure object.
+
+    Returns:
+        str | go.Figure: The plot as an HTML string if `as_html` is True, otherwise a Plotly Figure object.
+    """
     fig = go.Figure(
         layout=go.Layout(
             xaxis={"title": {"text": "Frame index"}},
@@ -41,6 +50,15 @@ def plot_timestamps(timestamps: list | npt.NDArray, as_html: bool = False) -> st
 
 
 def plot_raw_timeseries(raw_timeseries: npt.NDArray, as_html: bool = False) -> str | go.Figure:
+    """Plots a raw timeseries signal using Plotly.
+
+    Args:
+        raw_timeseries (npt.NDArray): The raw timeseries data to plot, as a NumPy array.
+        as_html (bool, optional): If True, returns the plot as an HTML string. If False, returns a Plotly Figure object.
+
+    Returns:
+        str | go.Figure: The plot as an HTML string if `as_html` is True, otherwise a Plotly Figure object.
+    """
     fig = go.Figure(
         layout=go.Layout(
             xaxis={"title": {"text": "Frame index"}},
@@ -56,6 +74,15 @@ def plot_raw_timeseries(raw_timeseries: npt.NDArray, as_html: bool = False) -> s
 
 
 def plot_raw_histogram(data: npt.NDArray, as_html: bool = False) -> str | go.Figure:
+    """Plots a histogram of raw data using Plotly.
+
+    Args:
+        data (npt.NDArray): The raw data to plot as a histogram, as a NumPy array.
+        as_html (bool, optional): If True, returns the plot as an HTML string. If False, returns a Plotly Figure object.
+
+    Returns:
+        str | go.Figure: The plot as an HTML string if `as_html` is True, otherwise a Plotly Figure object.
+    """
     fig = go.Figure(
         layout=go.Layout(
             xaxis={"title": {"text": "Signal"}},
@@ -73,6 +100,16 @@ def plot_raw_histogram(data: npt.NDArray, as_html: bool = False) -> str | go.Fig
 def plot_channels_timeseries(
     gcamp_channel: npt.NDArray, isosb_channel: npt.NDArray, as_html: bool = False
 ) -> str | go.Figure:
+    """Plots the timeseries of GCaMP and Isosb channels.
+
+    Args:
+        gcamp_channel (npt.NDArray): The GCaMP channel timeseries data
+        isosb_channel (npt.NDArray): The Isosb channel timeseries data
+        as_html (bool, optional): If True, returns the plot as an HTML string.
+
+    Returns:
+        str | go.Figure: The plot as an HTML string if `as_html` is True, otherwise a Plotly Figure object.
+    """
     fig = go.Figure(
         layout=go.Layout(
             xaxis={"title": {"text": "Frame index"}},
@@ -89,12 +126,31 @@ def plot_channels_timeseries(
 
 
 def plot_channel_projection(data: npt.NDArray, as_html: bool = False) -> str | go.Figure:
+    """Plots a channel projection using Plotly.
+
+    Args:
+        data (npt.NDArray): The channel projection data to plot, as a NumPy array.
+        as_html (bool, optional): If True, returns the plot as an HTML string. If False, returns a Plotly Figure object.
+
+    Returns:
+        str | go.Figure: The plot as an HTML string if `as_html` is True, otherwise a Plotly Figure object.
+    """
     if as_html:
         return px.imshow(data).to_html(full_html=False)
     return px.imshow(data)
 
 
 def plot_frame_ids(gcamp_ids: npt.NDArray, isosb_ids: npt.NDArray, as_html: bool = False) -> str | go.Figure:
+    """Plots the frame IDs of GCaMP and Isosb channels.
+
+    Args:
+        gcamp_ids (npt.NDArray): The GCaMP channel frame IDs.
+        isosb_ids (npt.NDArray): The Isosb channel frame IDs.
+        as_html (bool, optional): If True, returns the plot as an HTML string. If False, returns a Plotly Figure object.
+
+    Returns:
+        str | go.Figure: The plot as an HTML string if `as_html` is True, otherwise a Plotly Figure object.
+    """
     fig = go.Figure(
         layout=go.Layout(
             xaxis={"title": {"text": "Processed frame index"}},
@@ -111,6 +167,16 @@ def plot_frame_ids(gcamp_ids: npt.NDArray, isosb_ids: npt.NDArray, as_html: bool
 
 
 def plot_filter_pie(gcamp_ids: npt.NDArray, isosb_ids: npt.NDArray, as_html: bool = False) -> str | go.Figure:
+    """Plots a pie chart of the frame IDs for GCaMP and Isosb channels.
+
+    Args:
+        gcamp_ids (npt.NDArray): The GCaMP channel frame IDs.
+        isosb_ids (npt.NDArray): The Isosb channel frame IDs.
+        as_html (bool, optional): If True, returns the plot as an HTML string. If False, returns a Plotly Figure object.
+
+    Returns:
+        str | go.Figure: The plot as an HTML string if `as_html` is True, otherwise a Plotly Figure object.
+    """
     labels = ["GCaMP frame IDs", "Isosb frame IDs"]
     values = [len(gcamp_ids), len(isosb_ids)]
     fig = go.Figure(
@@ -125,6 +191,16 @@ def plot_filter_pie(gcamp_ids: npt.NDArray, isosb_ids: npt.NDArray, as_html: boo
 
 
 def plot_channels_dff(gcamp_channel: npt.NDArray, isosb_channel: npt.NDArray, as_html: bool = False) -> str | go.Figure:
+    """Plots the ∆F/F time series of GCaMP and Isosb channels.
+
+    Args:
+        gcamp_channel (npt.NDArray): The GCaMP channel ∆F/F time series data.
+        isosb_channel (npt.NDArray): The Isosb channel ∆F/F time series data.
+        as_html (bool, optional): If True, returns the plot as an HTML string. If False, returns a Plotly Figure object.
+
+    Returns:
+        str | go.Figure: The plot as an HTML string if `as_html` is True, otherwise a Plotly Figure object.
+    """
     fig = go.Figure(
         layout=go.Layout(
             xaxis={"title": {"text": "Frame index"}},
@@ -141,6 +217,15 @@ def plot_channels_dff(gcamp_channel: npt.NDArray, isosb_channel: npt.NDArray, as
 
 
 def plot_corrected_dff(data: npt.NDArray, as_html: bool = False) -> str | go.Figure:
+    """Plots the corrected ∆F/F time series.
+
+    Args:
+        data (npt.NDArray): The corrected ∆F/F time series data.
+        as_html (bool, optional): If True, returns the plot as an HTML string. If False, returns a Plotly Figure object.
+
+    Returns:
+        str | go.Figure: The plot as an HTML string if `as_html` is True, otherwise a Plotly Figure object.
+    """
     fig = go.Figure(
         layout=go.Layout(
             xaxis={"title": {"text": "Frame index"}},
@@ -156,6 +241,15 @@ def plot_corrected_dff(data: npt.NDArray, as_html: bool = False) -> str | go.Fig
 
 
 def plot_frame(data: npt.NDArray, as_html: bool = False) -> str | go.Figure:
+    """Plots a single frame of data using Plotly.
+
+    Args:
+        data (npt.NDArray): The frame data to plot, as a NumPy array.
+        as_html (bool, optional): If True, returns the plot as an HTML string. If False, returns a Plotly Figure object.
+
+    Returns:
+        str | go.Figure: The plot as an HTML string if `as_html` is True, otherwise a Plotly Figure object.
+    """
     if as_html:
         return px.imshow(data).to_html(full_html=False)
     return px.imshow(data)

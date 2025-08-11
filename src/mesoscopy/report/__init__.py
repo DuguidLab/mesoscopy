@@ -45,7 +45,18 @@ env = Environment(loader=PackageLoader("mesoscopy.report", "templates"), autoesc
     help="Output directory for preprocessed recording.",
 )
 def report_cmd(path: str, out_dir: str) -> str:
-    """Generate a report for a mesoscopy processing step."""
+    """Generate a report for a mesoscopy processing step.
+
+    Args:
+        path (str): Path to the input file, which should be either a preprocessed or registered recording.
+        out_dir (str): Directory where the report will be saved. Defaults to the current directory
+
+    Returns:
+        str: Path to the generated report.
+
+    Raises:
+        ValueError: If the input file does not match expected patterns for preprocessing or registration.
+    """
     if path.endswith("_preprocessed.h5"):
         return generate_preprocessing_report(path, out_dir=out_dir)
     elif path.endswith("_registered.h5"):
@@ -55,6 +66,15 @@ def report_cmd(path: str, out_dir: str) -> str:
 
 
 def generate_preprocessing_report(path: str, out_dir: str = ".") -> str:
+    """Generate a preprocessing report for a mesoscopy recording.
+
+    Args:
+        path (str): Path to the preprocessed recording file.
+        out_dir (str): Directory where the report will be saved. Defaults to the current directory.
+
+    Returns:
+        str: Path to the generated report.
+    """
     preproc = io.read_h5(path)
     session_id = path.split("/")[-1].split("_preprocessed")[0]
 
@@ -66,59 +86,72 @@ def generate_preprocessing_report(path: str, out_dir: str = ".") -> str:
         "session_date": session_id.split("_date-")[-1].replace("_", ":"),
         "experiment_id": session_id.split("_exp-")[-1].split("_")[0],
         "duration": str(
-            (np.datetime64(preproc.get("timestamps")[-1]) - np.datetime64(preproc.get("timestamps")[0])).astype(
+            (np.datetime64(preproc.get("timestamps")[-1]) - np.datetime64(preproc.get("timestamps")[0])).astype(  # type: ignore[attr-defined]
                 "timedelta64[m]"
             )
         ),
-        "frame_num": len(preproc.get("F")),
+        "frame_num": len(preproc.get("F")),  # type: ignore[attr-defined]
         "filesize": preproc.id.get_filesize() / (1024 * 1024),
         "fig_integrity_timestamps": preqa.plot_timestamps(
-            [np.datetime64(ts) for ts in preproc.get("timestamps")],
+            [np.datetime64(ts) for ts in preproc.get("timestamps")],  # type: ignore[attr-defined]
             as_html=True,
         ),
         "fig_separation_pre_timeseries_mean": preqa.plot_raw_timeseries(
-            preproc.get("qa").get("frame_means_timeseries"), as_html=True
+            preproc.get("qa").get("frame_means_timeseries"),  # type: ignore[attr-defined]
+            as_html=True,
         ),
         "fig_separation_pre_hist_mean": preqa.plot_raw_histogram(
-            preproc.get("qa").get("frame_means_timeseries"), as_html=True
+            preproc.get("qa").get("frame_means_timeseries"),  # type: ignore[attr-defined]
+            as_html=True,
         ),
         "fig_separation_pre_hist_std": preqa.plot_raw_histogram(
-            preproc.get("qa").get("frame_stds_timeseries"), as_html=True
+            preproc.get("qa").get("frame_stds_timeseries"),  # type: ignore[attr-defined]
+            as_html=True,
         ),
         "fig_separation_post_timeseries": preqa.plot_channels_timeseries(
-            gcamp_channel=preproc.get("qa").get("gcamp_mean_timeseries"),
-            isosb_channel=preproc.get("qa").get("isosb_mean_timeseries"),
+            gcamp_channel=preproc.get("qa").get("gcamp_mean_timeseries"),  # type: ignore[attr-defined]
+            isosb_channel=preproc.get("qa").get("isosb_mean_timeseries"),  # type: ignore[attr-defined]
             as_html=True,
         ),
         "fig_separation_post_gcamp_maxip": preqa.plot_channel_projection(
-            preproc.get("qa").get("gcamp_maxip_projection"), as_html=True
+            preproc.get("qa").get("gcamp_maxip_projection"),  # type: ignore[attr-defined]
+            as_html=True,
         ),
         "fig_separation_post_gcamp_stdp": preqa.plot_channel_projection(
-            preproc.get("qa").get("gcamp_std_projection"), as_html=True
+            preproc.get("qa").get("gcamp_std_projection"),  # type: ignore[attr-defined]
+            as_html=True,
         ),
         "fig_separation_post_isosb_maxip": preqa.plot_channel_projection(
-            preproc.get("qa").get("isosb_maxip_projection"), as_html=True
+            preproc.get("qa").get("isosb_maxip_projection"),  # type: ignore[attr-defined]
+            as_html=True,
         ),
         "fig_separation_post_isosb_stdp": preqa.plot_channel_projection(
-            preproc.get("qa").get("isosb_std_projection"), as_html=True
+            preproc.get("qa").get("isosb_std_projection"),  # type: ignore[attr-defined]
+            as_html=True,
         ),
         "fig_separation_post_filter_idx": preqa.plot_frame_ids(
-            gcamp_ids=preproc.get("qa").get("gcamp_filter"),
-            isosb_ids=preproc.get("qa").get("isosb_filter"),
+            gcamp_ids=preproc.get("qa").get("gcamp_filter"),  # type: ignore[attr-defined]
+            isosb_ids=preproc.get("qa").get("isosb_filter"),  # type: ignore[attr-defined]
             as_html=True,
         ),
         "fig_separation_post_filter_pie": preqa.plot_filter_pie(
-            gcamp_ids=preproc.get("qa").get("gcamp_filter"),
-            isosb_ids=preproc.get("qa").get("isosb_filter"),
+            gcamp_ids=preproc.get("qa").get("gcamp_filter"),  # type: ignore[attr-defined]
+            isosb_ids=preproc.get("qa").get("isosb_filter"),  # type: ignore[attr-defined]
             as_html=True,
         ),
         "fig_channel_dff": preqa.plot_channels_dff(
-            gcamp_channel=preproc.get("qa").get("gcamp_dff_timeseries"),
-            isosb_channel=preproc.get("qa").get("isosb_dff_timeseries"),
+            gcamp_channel=preproc.get("qa").get("gcamp_dff_timeseries"),  # type: ignore[attr-defined]
+            isosb_channel=preproc.get("qa").get("isosb_dff_timeseries"),  # type: ignore[attr-defined]
             as_html=True,
         ),
-        "fig_corrected_dff": preqa.plot_corrected_dff(preproc.get("qa").get("f_mean_timeseries"), as_html=True),
-        "fig_corrected_example": preqa.plot_frame(preproc.get("F")[100], as_html=True),
+        "fig_corrected_dff": preqa.plot_corrected_dff(
+            preproc.get("qa").get("f_mean_timeseries"),  # type: ignore[attr-defined]
+            as_html=True,
+        ),
+        "fig_corrected_example": preqa.plot_frame(
+            preproc.get("F")[100],  # type: ignore[attr-defined]
+            as_html=True,
+        ),
     }
 
     out_path = out_dir / Path(path.split("/")[-1].replace(".h5", "_report.html"))
@@ -127,5 +160,14 @@ def generate_preprocessing_report(path: str, out_dir: str = ".") -> str:
 
 
 def generate_registration_report(path: str, out_dir=".") -> str:
+    """Generate a registration report for a mesoscopy recording.
+
+    Args:
+        path (str): Path to the registered recording file.
+        out_dir (str): Directory where the report will be saved. Defaults to the current directory.
+
+    Returns:
+        str: Path to the generated report.
+    """
     template = env.get_template(REGISTRATION_REPORT_TEMPLATE)
     return ""
