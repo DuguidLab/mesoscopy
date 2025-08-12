@@ -70,7 +70,7 @@ def label_cmd(path, out_dir, template_points, session_id) -> dict:
 
     Args:
         path (str): Path to preprocessed HDF5 file or NWB file.
-        out_dir (str): Output directory for registered recording.
+        out_dir (str): Output directory for registration landmarks file.
         template_points (str): Path to template landmark points in CSV or Fiji XML points format.
         session_id (str): Session ID for the recording.
 
