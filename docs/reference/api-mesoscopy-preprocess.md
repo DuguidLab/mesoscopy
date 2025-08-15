@@ -9,6 +9,6 @@
 
 ## Calculations API
 
-::: mesoscopy.preprocess.calculations
+::: mesoscopy.preprocess.compute
     options:
       heading_level: 3
