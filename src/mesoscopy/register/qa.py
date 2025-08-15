@@ -20,9 +20,7 @@
 #  SOFTWARE.
 """Module for quality assurance (QA) functions in the mesoscopy registration pipeline."""
 
-import numpy as np
 import numpy.typing as npt
-from skimage import transform as trf
 import plotly.express as px
 import plotly.graph_objects as go
 
