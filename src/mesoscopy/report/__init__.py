@@ -18,18 +18,18 @@
 #  IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
+import json
 from pathlib import Path
 
 import click
-import json
 import numpy as np
 from jinja2 import Environment
 from jinja2 import PackageLoader
 from jinja2 import select_autoescape
 
-import mesoscopy.io as io
 import mesoscopy.preprocess.qa as preqa
 import mesoscopy.register.qa as regqa
+from mesoscopy import io
 
 PREPROCESSING_REPORT_TEMPLATE = "preprocessing.html"
 REGISTRATION_REPORT_TEMPLATE = "registration.html"
