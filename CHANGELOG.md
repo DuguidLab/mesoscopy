@@ -2,7 +2,12 @@
 
 Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<patch>`).
 
+
 ## [Unreleased]
+
+
+
+## [0.7.0] - 2025-08-15
 
 ### Added
 
@@ -36,3 +41,8 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 Line-in-the-sand release, with all the imaging processing code I used for my thesis.
 
 Not necessarily fit for public consumption, but here it is anyway.
+
+---
+
+[unreleased]: https://github.com/DuguidLab/mesoscopy/compare/v0.7.0...HEAD
+[0.1.0]: https://github.com/DuguidLab/mesoscopy/compare/v0.1.0...v0.7.0
