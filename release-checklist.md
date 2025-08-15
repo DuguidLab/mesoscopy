@@ -17,4 +17,5 @@
 * Commit the version change.
 * Tag the version with git using `git tag <version number>` (e.g. `git tag v0.1.0`).
 * Push everything with `git push && git push --tags`.
+* Create a pull request for the release branch and merge into main.
 * Github Actions should handle making a release and pushing to PyPI. If so happy days! If not, go fix it.
