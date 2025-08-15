@@ -1,36 +1,40 @@
 {% extends "base.html" %}
 
 {% block toc%}
-<li class="nav-item"> <a class="nav-link d-flex align-items-center gap-2" href="#metadata"> <svg class="bi"
-            aria-hidden="true">
+<li class="nav-item"> <a class="nav-link d-flex align-items-center gap-2" href="#metadata">
+        <svg class="bi" aria-hidden="true">
             <use xlink:href="#file-earmark-text"></use>
         </svg>
         Metadata
     </a> </li>
-<li class="nav-item"> <a class="nav-link d-flex align-items-center gap-2" href="#integriy"> <svg class="bi"
-            aria-hidden="true">
+<li class="nav-item"> <a class="nav-link d-flex align-items-center gap-2" href="#integriy">
+        <svg class="bi" aria-hidden="true">
             <use xlink:href="#gear-wide-connected"></use>
         </svg>
         Integrity
-    </a> </li>
-<li class="nav-item"> <a class="nav-link d-flex align-items-center gap-2" href="#separation"> <svg class="bi"
-            aria-hidden="true">
+    </a>
+</li>
+<li class="nav-item"> <a class="nav-link d-flex align-items-center gap-2" href="#separation">
+        <svg class="bi" aria-hidden="true">
             <use xlink:href="#graph-up"></use>
         </svg>
         Channel separation
-    </a> </li>
-<li class="nav-item"> <a class="nav-link d-flex align-items-center gap-2" href="#channel-dff"> <svg class="bi"
-            aria-hidden="true">
+    </a>
+</li>
+<li class="nav-item"> <a class="nav-link d-flex align-items-center gap-2" href="#channel-dff">
+        <svg class="bi" aria-hidden="true">
             <use xlink:href="#graph-up"></use>
         </svg>
         Channel ∆F/F
-    </a> </li>
-<li class="nav-item"> <a class="nav-link d-flex align-items-center gap-2" href="#corrected-dff"> <svg class="bi"
-            aria-hidden="true">
+    </a>
+</li>
+<li class="nav-item"> <a class="nav-link d-flex align-items-center gap-2" href="#corrected-dff">
+        <svg class="bi" aria-hidden="true">
             <use xlink:href="#graph-up"></use>
         </svg>
         Corrected ∆F/F
-    </a> </li>
+    </a>
+</li>
 {% endblock %}
 
 {% block content %}
@@ -65,7 +69,6 @@
             <strong>File size:</strong> {{ '%0.2f'| format(filesize|float) or "Unknown" }} MB
         </div>
     </div>
-
 </div>
 
 <div class="row mb-3">

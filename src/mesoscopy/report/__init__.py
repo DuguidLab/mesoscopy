@@ -21,6 +21,7 @@
 from pathlib import Path
 
 import click
+import json
 import numpy as np
 from jinja2 import Environment
 from jinja2 import PackageLoader
@@ -28,6 +29,7 @@ from jinja2 import select_autoescape
 
 import mesoscopy.io as io
 import mesoscopy.preprocess.qa as preqa
+import mesoscopy.register.qa as regqa
 
 PREPROCESSING_REPORT_TEMPLATE = "preprocessing.html"
 REGISTRATION_REPORT_TEMPLATE = "registration.html"
@@ -170,5 +172,38 @@ def generate_registration_report(path: str, out_dir=".") -> str:
     Returns:
         str: Path to the generated report.
     """
+    registered = io.read_h5(path)
+    session_id = path.split("/")[-1].split("_preprocessed_registered")[0]
+
     template = env.get_template(REGISTRATION_REPORT_TEMPLATE)
-    return ""
+
+    template_identifiers = {
+        "session_id": session_id,
+        "animal_id": session_id.split("_")[0].replace("sub-", ""),
+        "session_date": session_id.split("_date-")[-1].replace("_", ":"),
+        "experiment_id": session_id.split("_exp-")[-1].split("_")[0],
+        "duration": str(
+            (np.datetime64(registered.get("timestamps")[-1]) - np.datetime64(registered.get("timestamps")[0])).astype(  # type: ignore[attr-defined]
+                "timedelta64[m]"
+            )
+        ),
+        "frame_num": len(registered.get("F")),  # type: ignore[attr-defined]
+        "filesize": registered.id.get_filesize() / (1024 * 1024),
+        "fig_landmarks_unregistered": regqa.plot_landmarks(
+            source_landmarks=registered.get("/qa/template_landmarks"),
+            target_landmarks=registered.get("/qa/recording_landmarks"),
+            as_html=True,
+        ),
+        "fig_landmarks_registered": regqa.plot_landmarks(
+            source_landmarks=registered.get("/qa/template_landmarks"),
+            target_landmarks=registered.get("/qa/registered_landmarks"),
+            as_html=True,
+        ),
+        "fig_frame_example": regqa.plot_frame(
+            registered.get("F")[1], landmarks=registered.get("/qa/template_landmarks"), as_html=True
+        ),
+    }
+
+    out_path = out_dir / Path(path.split("/")[-1].replace(".h5", "_report.html"))
+    out_path.write_text(template.render(template_identifiers), encoding="utf-8")
+    return str(out_path)
