@@ -20,11 +20,67 @@
 #  SOFTWARE.
 """Module for quality assurance (QA) functions in the mesoscopy registration pipeline."""
 
+import numpy as np
+import numpy.typing as npt
+from skimage import transform as trf
+import plotly.express as px
+import plotly.graph_objects as go
 
-def plot_unregistered_landmarks(): ...
+
+def plot_landmarks(
+    source_landmarks: npt.NDArray,
+    target_landmarks: npt.NDArray,
+    as_html: bool = False,
+) -> str | go.Figure:
+    fig = go.Figure(
+        layout=go.Layout(
+            margin={"l": 20, "r": 20, "t": 20, "b": 20},
+            yaxis={
+                "autorange": "reversed",
+            },
+        )
+    )
+
+    fig.add_trace(
+        go.Scatter(x=source_landmarks[:, 1], y=source_landmarks[:, 0], mode="markers", name="Source landmarks")
+    )
+    fig.add_trace(
+        go.Scatter(x=target_landmarks[:, 1], y=target_landmarks[:, 0], mode="markers", name="Target landmarks")
+    )
+
+    if as_html:
+        return fig.to_html(full_html=False)
+    return fig
 
 
-def plot_registered_landmarks(): ...
+def plot_frame(data: npt.NDArray, landmarks=npt.NDArray | None, as_html: bool = False) -> str | go.Figure:
+    """Plots a single frame of data using Plotly.
 
+    Args:
+        data (npt.NDArray): The frame data to plot, as a NumPy array.
+        as_html (bool, optional): If True, returns the plot as an HTML string. If False, returns a Plotly Figure object.
 
-def plot_registered_frame_example(): ...
+    Returns:
+        str | go.Figure: The plot as an HTML string if `as_html` is True, otherwise a Plotly Figure object.
+    """
+    fig = px.imshow(data)
+    fig.update_layout(
+        {
+            "margin": {"l": 20, "r": 20, "t": 20, "b": 20},
+        }
+    )
+
+    if landmarks:
+        fig.add_trace(
+            go.Scatter(
+                x=landmarks[:, 1],
+                y=landmarks[:, 0],
+                mode="markers",
+                name="Template landmarks",
+                marker={"color": "Green"},
+            )
+        )
+
+    if as_html:
+        return fig.to_html(full_html=False)
+    return fig

@@ -18,6 +18,7 @@
 #  IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
+import json
 import os
 import pathlib
 
@@ -205,9 +206,12 @@ def landmarks_cmd(
     outpath = io.write_h5(
         path=outpath,
         data={
-            "F": warped,
-            "timestamps": timestamps,
-            "tform": tform,
+            "/F": warped,
+            "/timestamps": timestamps,
+            "/tform": tform.params,
+            "/qa/recording_landmarks": np.array(list(recording_landmarks.values())),
+            "/qa/template_landmarks": np.array(list(template_landmarks.values())),
+            "/qa/registered_landmarks": tform.inverse(np.array(list(recording_landmarks.values()))),
         },
     )
     click.echo(f"Saved registered frames at {outpath}")
