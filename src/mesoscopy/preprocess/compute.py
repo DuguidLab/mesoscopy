@@ -35,7 +35,7 @@ def bin_array(
     bins: int,
     interim_dir: str = ".",
     session_id: str = "null",
-) -> zarr.core.Array:
+) -> zarr.Array:
     """Bin a 3D image array across its x and y axes.
 
     The function bins the width and height of a 3D image array by a factor of `bins`. It does not bin the z-axis (time).
@@ -43,14 +43,15 @@ def bin_array(
     Args:
         array (Dask or NumPy Array): Array to be binned.
         bins (int): Number of bins in x and y directions (i.e. width and height).
-        interim_dir (str or PathLike object, optional): Directory to store interim binned array data. Defaults to current working directory (".").
+        interim_dir (str or PathLike object, optional): Directory to store interim binned array data.
+            Defaults to current working directory (".").
         session_id (str, optional): Session identifier for interim path. Defaults to "null".
 
     Returns:
         zarr.core.Array: Binned array as a persistent Zarr array object.
     """
-    binned_array = array.reshape(
-        array.shape[0],
+    binned_array = array.reshape(  # pyright: ignore[reportAttributeAccessIssue]
+        array.shape[0],  # pyright: ignore[reportArgumentType]
         1,
         int(array.shape[1] / bins),
         int(array.shape[1] // (array.shape[1] / bins)),
@@ -70,10 +71,10 @@ def frame_statistics(array: da.Array | npt.NDArray) -> tuple[npt.NDArray, npt.ND
     Returns:
         tuple[npt.NDArray, npt.NDArray]: Tuple containing two NumPy arrays: means and standard deviations for each frame.
     """
-    if type(array) == np.ndarray:
-        array = da.from_array(array, chunks=(100, array.shape[1], array.shape[2]))
+    if type(array) is np.ndarray:
+        array = da.from_array(array, chunks=(100, array.shape[1], array.shape[2]))  # pyright: ignore[reportArgumentType]
 
-    frame_means, frame_stds = dask.compute(
+    frame_means, frame_stds = dask.compute(  # pyright: ignore[reportPrivateImportUsage]
         array.mean(axis=(1, 2), dtype=np.float32),
         array.std(axis=(1, 2), dtype=np.float32),
     )
@@ -119,11 +120,12 @@ def rolling_dff(
     channel_name: str = "null",
     interim_dir: str = ".",
     session_id: str = "null",
-) -> zarr.core.Array:
+) -> zarr.Array:
     """Calculate dF/F using a rolling window.
 
     Args:
-        array (Dask or NumPy Array): Array to be separated. If array is a multi-channel recording, it needs to be filtered before it's passed to this function.
+        array (Dask or NumPy Array): Array to be separated. If array is a multi-channel recording,
+            it needs to be filtered before it's passed to this function.
         window_width (int, optional): Window width for dF/F calculation. Defaults to 750.
         channel_name (str, optional): Channel name for interim path. Defaults to "null".
         interim_dir (str, optional): Directory to store interim dF/F data. Defaults to current working directory (".").
@@ -131,16 +133,20 @@ def rolling_dff(
 
     Returns:
         zarr.core.Array: dF/F array as a persistent Zarr array object.
+
+    Raises:
+        ValueError: If the window width is greater than the number of frames in the array.
     """
-    if type(array) == np.ndarray:
-        array = da.from_array(array, chunks=(100, array.shape[1], array.shape[2]))
+    if type(array) is np.ndarray:
+        array = da.from_array(array, chunks=(100, array.shape[1], array.shape[2]))  # pyright: ignore[reportArgumentType]
 
     if window_width > len(array):
-        raise ValueError("Window width must be less than the number of frames.")
+        msg = "Window width must be less than the number of frames."
+        raise ValueError(msg)
 
     # If window width is an odd number, add 1 to make it even to avoid broadcast errors
     if window_width % 2 != 0:
-        window_width = window_width + 1
+        window_width += 1
 
     cumsum_vec = da.cumsum(array, dtype=np.uint32, axis=0)
 
@@ -180,12 +186,12 @@ def projections(
     """Calculate mean, standard deviation and maximum intensity projection frames.
 
     Args:
-        channel_array (npt.NDArray): Array containing channel statistics.
+        array (npt.NDArray): Frame array to calculate projections for.
 
     Returns:
         dict[str, npt.NDArray]: Dictionary containing mean, standard deviation and maximum intensity projection frames.
     """
-    mean_frame, std_frame, maxip = dask.compute(
+    mean_frame, std_frame, maxip = dask.compute(  # pyright: ignore[reportPrivateImportUsage]
         array.mean(axis=0),
         array.std(axis=0),
         array.max(axis=0),

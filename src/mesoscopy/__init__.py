@@ -34,6 +34,7 @@ from mesoscopy import inspect
 from mesoscopy import postprocess
 from mesoscopy import preprocess
 from mesoscopy import process
+from mesoscopy import report
 from mesoscopy.__about__ import __version__
 
 
@@ -75,3 +76,4 @@ cli.add_command(reg.register_cmd)
 cli.add_command(convert.convert_cmd)
 cli.add_command(inspect.inspect_cmd)
 cli.add_command(export.export_cmd)
+cli.add_command(report.report_cmd)

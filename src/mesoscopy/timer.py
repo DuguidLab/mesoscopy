@@ -37,7 +37,6 @@ class Timer:
 
     def __exit__(self, exc_type, exc_value, traceback):
         elapsed_time = time.time() - self.start_time
-        self.message = f"{self.message} completed in {elapsed_time:.2f} seconds."
         if elapsed_time > 60:
             minutes, seconds = divmod(elapsed_time, 60)
             click.echo(f"{self.message} took {int(minutes)} minutes and {seconds:.2f} seconds.")

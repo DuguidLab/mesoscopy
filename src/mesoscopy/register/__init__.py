@@ -18,6 +18,7 @@
 #  IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
+import json
 import os
 import pathlib
 
@@ -70,7 +71,7 @@ def label_cmd(path, out_dir, template_points, session_id) -> dict:
 
     Args:
         path (str): Path to preprocessed HDF5 file or NWB file.
-        out_dir (str): Output directory for registered recording.
+        out_dir (str): Output directory for registration landmarks file.
         template_points (str): Path to template landmark points in CSV or Fiji XML points format.
         session_id (str): Session ID for the recording.
 
@@ -201,13 +202,16 @@ def landmarks_cmd(
     )
 
     # Save warped frames and timestamps
-    outpath = out_dir + os.sep + session_id + "-registered.h5"
+    outpath = out_dir + os.sep + session_id + "_registered.h5"
     outpath = io.write_h5(
         path=outpath,
         data={
-            "F": warped,
-            "timestamps": timestamps,
-            "tform": tform,
+            "/F": warped,
+            "/timestamps": timestamps,
+            "/tform": tform.params,
+            "/qa/recording_landmarks": np.array(list(recording_landmarks.values())),
+            "/qa/template_landmarks": np.array(list(template_landmarks.values())),
+            "/qa/registered_landmarks": tform.inverse(np.array(list(recording_landmarks.values()))),
         },
     )
     click.echo(f"Saved registered frames at {outpath}")

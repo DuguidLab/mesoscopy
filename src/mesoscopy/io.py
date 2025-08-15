@@ -85,25 +85,27 @@ def read_h5(path: str) -> h5py.File:
     return h5py.File(path, "r")
 
 
-def write_h5(path: str, data: dict, compression: str = "lzf") -> str:
+def write_h5(path: str, data: dict, compression: str = "lzf", attributes: dict = {}) -> str:
     """Write a dictionary to an HDF5 file.
 
     Args:
         path (str): Path to the HDF5 file.
         data (dict): Dictionary containing datasets to write in {'dataset_name': data_array} format.
         compression (str, optional): Compression method for the datasets. Defaults to "lzf".
+        attributes (dict, optional): Attributes to write to the HDF5 file. Defaults to {}.
 
     Returns:
         str: Path to the written HDF5 file.
 
     Example:
-        >>> data = {'dataset1': np.array([1, 2, 3]),
-        ...         'dataset2': np.array([[1, 2], [3, 4]])}
-        >>> write_h5('output.h5', data)
+        >>> data = {"dataset1": np.array([1, 2, 3]), "dataset2": np.array([[1, 2], [3, 4]])}
+        >>> write_h5("output.h5", data)
     """
     with h5py.File(path, "w") as h5file:
         for key, value in data.items():
             h5file.create_dataset(key, data=value, compression=compression)
+        if attributes:
+            h5file.attrs.update(attributes)
     return path
 
 

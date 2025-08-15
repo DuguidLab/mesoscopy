@@ -20,173 +20,236 @@
 #  SOFTWARE.
 """Module for quality assurance (QA) functions in the mesoscopy preprocessing pipeline."""
 
-import os
-
 import numpy.typing as npt
+import plotly.express as px
+import plotly.graph_objects as go
 
-from mesoscopy import plots
 
-
-def plot_frame_statistics(
-    frame_means: npt.NDArray, frame_stds: npt.NDArray, qa_dir: str = ".", session_id: str = "null"
-) -> dict[str, str]:
-    """Plot and save quality assurance (QA) statistics for frame means and standard deviations.
+def plot_timestamps(timestamps: list | npt.NDArray, as_html: bool = False) -> str | go.Figure:
+    """Plots a sequence of timestamps as a line plot using Plotly.
 
     Args:
-        qa_dir (str): Directory to save QA plots.
-        frame_means (npt.NDArray): Array of mean values for each frame.
-        frame_stds (npt.NDArray): Array of standard deviation values for each frame.
-        session_id (str, optional): Session identifier for interim path. Defaults to "null".
+        timestamps (list | npt.NDArray): Sequence of timestamp values to plot.
+        as_html (bool, optional): If True, returns the plot as an HTML string. If False, returns a Plotly Figure object.
 
     Returns:
-        dict[str, str]: Dictionary containing paths to the saved QA plots.
+        str | go.Figure: The plot as an HTML string if `as_html` is True, otherwise a Plotly Figure object.
     """
-    outpath = qa_dir + os.sep + session_id + "_qa_frame_means_histogram.png"
-    msg = f"Saved histogram for frame means at {outpath}"
-    plots.plot_hist(frame_means, outpath, message=msg)
-
-    outpath = qa_dir + os.sep + session_id + "_qa_frame_means_line.png"
-    msg = f"Saved lineplot for frame means at {outpath}"
-    plots.plot_line(frame_means, outpath, message=msg)
-
-    outpath = qa_dir + os.sep + session_id + "_qa_frame_std_histogram.png"
-    msg = f"Saved histogram for frame means at {outpath}"
-    plots.plot_hist(frame_stds, outpath, message=msg)
-
-    outpath = qa_dir + os.sep + session_id + "_qa_frame_std_line.png"
-    msg = f"Saved lineplot for frame means at {outpath}"
-    plots.plot_line(frame_stds, outpath, message=msg)
-
-    return {
-        "frame_means_histogram": outpath,
-        "frame_means_line": outpath,
-        "frame_stds_histogram": outpath,
-        "frame_stds_line": outpath,
-    }
-
-
-def plot_dual_channel_timeseries(
-    channel_arrays: tuple[npt.NDArray, npt.NDArray], qa_dir: str = ".", session_id: str = "null"
-) -> dict[str, str]:
-    """Plot and save dual channel timeseries for quality assurance (QA).
-
-    Args:
-        channel_arrays (tuple[npt.NDArray, npt.NDArray]): Tuple containing the two channel arrays.
-        qa_dir (str): Directory to save QA plots.
-        session_id (str, optional): Session identifier for interim path. Defaults to "null".
-
-    Returns:
-        dict[str, str]: Dictionary containing paths to the saved QA plots.
-    """
-    if len(channel_arrays) != 2:
-        raise ValueError("Expected a tuple of two channel arrays.")
-
-    outpath = qa_dir + os.sep + session_id + "_qa_channel_means.png"
-    plots.plot_lines(
-        [channel_arrays[0], channel_arrays[1]],
-        outpath,
-        message=f"Saved channel means at {outpath}",
+    fig = go.Figure(
+        layout=go.Layout(
+            xaxis={"title": {"text": "Frame index"}},
+            yaxis={"title": {"text": "Timestamp"}},
+            margin={"l": 20, "r": 20, "t": 20, "b": 20},
+        )
     )
 
-    return {
-        "channel_means": outpath,
-    }
+    fig.add_trace(go.Scatter(y=timestamps, mode="lines", name="Timestamp"))
+    if as_html:
+        return fig.to_html(full_html=False)
+    return fig
 
 
-def plot_channel_projection_images(
-    channel_array: npt.NDArray, qa_dir: str = ".", session_id: str = "null", channel: str = "null"
-) -> dict[str, str]:
-    """Plot and save channel mean, standard deviation and maximum intensity projection frames.
+def plot_raw_timeseries(raw_timeseries: npt.NDArray, as_html: bool = False) -> str | go.Figure:
+    """Plots a raw timeseries signal using Plotly.
 
     Args:
-        channel_array (npt.NDArray): Array containing channel statistics.
-        qa_dir (str): Directory to save QA plots.
-        session_id (str, optional): Session identifier for interim path. Defaults to "null".
-        channel (str, optional): Name of the channel for labeling the plots. Defaults to "null".
+        raw_timeseries (npt.NDArray): The raw timeseries data to plot, as a NumPy array.
+        as_html (bool, optional): If True, returns the plot as an HTML string. If False, returns a Plotly Figure object.
 
     Returns:
-        dict[str, str]: Dictionary containing paths to the saved QA plots.
+        str | go.Figure: The plot as an HTML string if `as_html` is True, otherwise a Plotly Figure object.
     """
-    mean_frame, std_frame, maxip = dask.compute(
-        channel_array.mean(axis=0),
-        channel_array.std(axis=0),
-        channel_array.max(axis=0),
+    fig = go.Figure(
+        layout=go.Layout(
+            xaxis={"title": {"text": "Frame index"}},
+            yaxis={"title": {"text": "Signal"}},
+            margin={"l": 20, "r": 20, "t": 20, "b": 20},
+        )
     )
 
-    outpath = qa_dir + os.sep + session_id + f"_qa_{channel}_mean.png"
-    plots.plot_frame(mean_frame, outpath, message=f"Saved mean frame at {outpath}")
-
-    outpath = qa_dir + os.sep + session_id + f"_qa_{channel}_std.png"
-    plots.plot_frame(std_frame, outpath, message=f"Saved std frame at {outpath}")
-
-    outpath = qa_dir + os.sep + session_id + f"_qa_{channel}_maxip.png"
-    plots.plot_frame(maxip, outpath, message=f"Saved maxip frame at {outpath}")
-
-    return {
-        f"{channel}_mean_projection": outpath,
-        f"{channel}_std_projection": outpath,
-        f"{channel}_maxip_projection": outpath,
-    }
+    fig.add_trace(go.Scatter(y=raw_timeseries, mode="markers", name="Signal"))
+    if as_html:
+        return fig.to_html(full_html=False)
+    return fig
 
 
-def plot_dual_dff_timeseries(
-    dff_arrays: tuple[npt.NDArray, npt.NDArray], qa_dir: str = ".", session_id: str = "null"
-) -> dict[str, str]:
-    """Plot and save dual channel DFF timeseries.
+def plot_raw_histogram(data: npt.NDArray, as_html: bool = False) -> str | go.Figure:
+    """Plots a histogram of raw data using Plotly.
 
     Args:
-        dff_arrays (tuple[npt.NDArray, npt.NDArray]): Tuple containing the ∆F for each channel.
-        qa_dir (str): Directory to save QA plots.
-        session_id (str, optional): Session identifier for interim path. Defaults to "null".
+        data (npt.NDArray): The raw data to plot as a histogram, as a NumPy array.
+        as_html (bool, optional): If True, returns the plot as an HTML string. If False, returns a Plotly Figure object.
 
     Returns:
-        dict[str, str]: Dictionary containing paths to the saved QA plots.
+        str | go.Figure: The plot as an HTML string if `as_html` is True, otherwise a Plotly Figure object.
     """
-    outpath = qa_dir + os.sep + session_id + "_qa_dual_dff_timeseries.png"
-    plots.plot_lines(
-        [dff_arrays[0], dff_arrays[1]],
-        outpath,
-        message=f"Saved dual channel DFF timeseries at {outpath}",
+    fig = go.Figure(
+        layout=go.Layout(
+            xaxis={"title": {"text": "Signal"}},
+            yaxis={"title": {"text": "Count"}},
+            margin={"l": 20, "r": 20, "t": 20, "b": 20},
+        )
     )
 
-    return {
-        "dual_dff_timeseries": outpath,
-    }
+    fig.add_trace(go.Histogram(x=data))
+    if as_html:
+        return fig.to_html(full_html=False)
+    return fig
 
 
-def plot_f_example(f_signal: npt.NDArray, qa_dir: str = ".", session_id: str = "null") -> dict[str, str]:
-    """Plot and save an example frame of the F signal.
-
-    Args:
-        f_signal (npt.NDArray): Array containing the F signal.
-        qa_dir (str): Directory to save QA plots.
-        session_id (str, optional): Session identifier for interim path. Defaults to "null".
-
-    Returns:
-        dict[str, str]: Dictionary containing paths to the saved QA plots.
-    """
-    outpath = qa_dir + os.sep + session_id + "_qa_f_example.png"
-    plots.plot_frame(f_signal[200], outpath, message=f"Saved F signal example at {outpath}")
-
-    return {
-        "f_example": outpath,
-    }
-
-
-def plot_mean_f_timeseries(f_signal: npt.NDArray, qa_dir: str = ".", session_id: str = "null") -> dict[str, str]:
-    """Plot and save the mean F signal timeseries.
+def plot_channels_timeseries(
+    gcamp_channel: npt.NDArray, isosb_channel: npt.NDArray, as_html: bool = False
+) -> str | go.Figure:
+    """Plots the timeseries of GCaMP and Isosb channels.
 
     Args:
-        f_signal (npt.NDArray): Array containing the F signal.
-        qa_dir (str): Directory to save QA plots.
-        session_id (str, optional): Session identifier for interim path. Defaults to "null".
+        gcamp_channel (npt.NDArray): The GCaMP channel timeseries data
+        isosb_channel (npt.NDArray): The Isosb channel timeseries data
+        as_html (bool, optional): If True, returns the plot as an HTML string.
 
     Returns:
-        dict[str, str]: Dictionary containing paths to the saved QA plots.
+        str | go.Figure: The plot as an HTML string if `as_html` is True, otherwise a Plotly Figure object.
     """
-    outpath = qa_dir + os.sep + session_id + "_qa_mean_f_timeseries.png"
-    plots.plot_line(f_signal.mean(axis=(1, 2)), outpath, message=f"Saved mean F timeseries at {outpath}")
+    fig = go.Figure(
+        layout=go.Layout(
+            xaxis={"title": {"text": "Frame index"}},
+            yaxis={"title": {"text": "Signal"}},
+            margin={"l": 20, "r": 20, "t": 20, "b": 20},
+        )
+    )
 
-    return {
-        "mean_f_timeseries": outpath,
-    }
+    fig.add_trace(go.Scatter(y=gcamp_channel, mode="lines", name="GCaMP channel"))
+    fig.add_trace(go.Scatter(y=isosb_channel, mode="lines", name="Isosb channel"))
+    if as_html:
+        return fig.to_html(full_html=False)
+    return fig
+
+
+def plot_projection(data: npt.NDArray, as_html: bool = False) -> str | go.Figure:
+    """Plots a channel projection using Plotly.
+
+    Args:
+        data (npt.NDArray): The projection data to plot as a NumPy array.
+        as_html (bool, optional): If True, returns the plot as an HTML string. If False, returns a Plotly Figure object.
+
+    Returns:
+        str | go.Figure: The plot as an HTML string if `as_html` is True, otherwise a Plotly Figure object.
+    """
+    if as_html:
+        return px.imshow(data).to_html(full_html=False)
+    return px.imshow(data)
+
+
+def plot_frame_ids(gcamp_ids: npt.NDArray, isosb_ids: npt.NDArray, as_html: bool = False) -> str | go.Figure:
+    """Plots the frame IDs of GCaMP and Isosb channels.
+
+    Args:
+        gcamp_ids (npt.NDArray): The GCaMP channel frame IDs.
+        isosb_ids (npt.NDArray): The Isosb channel frame IDs.
+        as_html (bool, optional): If True, returns the plot as an HTML string. If False, returns a Plotly Figure object.
+
+    Returns:
+        str | go.Figure: The plot as an HTML string if `as_html` is True, otherwise a Plotly Figure object.
+    """
+    fig = go.Figure(
+        layout=go.Layout(
+            xaxis={"title": {"text": "Processed frame index"}},
+            yaxis={"title": {"text": "Original frame index"}},
+            margin={"l": 20, "r": 20, "t": 20, "b": 20},
+        )
+    )
+
+    fig.add_trace(go.Scatter(y=gcamp_ids, mode="lines", name="GCaMP channel IDs"))
+    fig.add_trace(go.Scatter(y=isosb_ids, mode="lines", name="Isosb channel IDs"))
+    if as_html:
+        return fig.to_html(full_html=False)
+    return fig
+
+
+def plot_filter_pie(gcamp_ids: npt.NDArray, isosb_ids: npt.NDArray, as_html: bool = False) -> str | go.Figure:
+    """Plots a pie chart of the frame IDs for GCaMP and Isosb channels.
+
+    Args:
+        gcamp_ids (npt.NDArray): The GCaMP channel frame IDs.
+        isosb_ids (npt.NDArray): The Isosb channel frame IDs.
+        as_html (bool, optional): If True, returns the plot as an HTML string. If False, returns a Plotly Figure object.
+
+    Returns:
+        str | go.Figure: The plot as an HTML string if `as_html` is True, otherwise a Plotly Figure object.
+    """
+    labels = ["GCaMP frame IDs", "Isosb frame IDs"]
+    values = [len(gcamp_ids), len(isosb_ids)]
+    fig = go.Figure(
+        go.Pie(labels=labels, values=values),
+        layout=go.Layout(
+            margin={"l": 20, "r": 20, "t": 20, "b": 20},
+        ),
+    )
+    if as_html:
+        return fig.to_html(full_html=False)
+    return fig
+
+
+def plot_channels_dff(gcamp_channel: npt.NDArray, isosb_channel: npt.NDArray, as_html: bool = False) -> str | go.Figure:
+    """Plots the ∆F/F time series of GCaMP and Isosb channels.
+
+    Args:
+        gcamp_channel (npt.NDArray): The GCaMP channel ∆F/F time series data.
+        isosb_channel (npt.NDArray): The Isosb channel ∆F/F time series data.
+        as_html (bool, optional): If True, returns the plot as an HTML string. If False, returns a Plotly Figure object.
+
+    Returns:
+        str | go.Figure: The plot as an HTML string if `as_html` is True, otherwise a Plotly Figure object.
+    """
+    fig = go.Figure(
+        layout=go.Layout(
+            xaxis={"title": {"text": "Frame index"}},
+            yaxis={"title": {"text": "∆F/F"}},
+            margin={"l": 20, "r": 20, "t": 20, "b": 20},
+        )
+    )
+
+    fig.add_trace(go.Scatter(y=gcamp_channel, mode="lines", name="GCaMP channel ∆F/F"))
+    fig.add_trace(go.Scatter(y=isosb_channel, mode="lines", name="Isosb channel ∆F/F"))
+    if as_html:
+        return fig.to_html(full_html=False)
+    return fig
+
+
+def plot_corrected_dff(data: npt.NDArray, as_html: bool = False) -> str | go.Figure:
+    """Plots the corrected ∆F/F time series.
+
+    Args:
+        data (npt.NDArray): The corrected ∆F/F time series data.
+        as_html (bool, optional): If True, returns the plot as an HTML string. If False, returns a Plotly Figure object.
+
+    Returns:
+        str | go.Figure: The plot as an HTML string if `as_html` is True, otherwise a Plotly Figure object.
+    """
+    fig = go.Figure(
+        layout=go.Layout(
+            xaxis={"title": {"text": "Frame index"}},
+            yaxis={"title": {"text": "∆F/F"}},
+            margin={"l": 20, "r": 20, "t": 20, "b": 20},
+        )
+    )
+
+    fig.add_trace(go.Scatter(y=data, mode="lines", name="Corrected ∆F/F"))
+    if as_html:
+        return fig.to_html(full_html=False)
+    return fig
+
+
+def plot_frame(data: npt.NDArray, as_html: bool = False) -> str | go.Figure:
+    """Plots a single frame of data using Plotly.
+
+    Args:
+        data (npt.NDArray): The frame data to plot, as a NumPy array.
+        as_html (bool, optional): If True, returns the plot as an HTML string. If False, returns a Plotly Figure object.
+
+    Returns:
+        str | go.Figure: The plot as an HTML string if `as_html` is True, otherwise a Plotly Figure object.
+    """
+    if as_html:
+        return px.imshow(data).to_html(full_html=False)
+    return px.imshow(data)

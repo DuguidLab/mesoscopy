@@ -31,7 +31,7 @@ def landmarks_affine(
     template_landmarks: dict,
     crop_x: int = 0,
     crop_y: int = 0,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, trf.ProjectiveTransform]:
     """Warp a DeltaF/F series to match a template using anatomical landmarks.
 
     Args:
@@ -55,13 +55,13 @@ def landmarks_affine(
     end = time.time()
     click.echo(f"Transform estimated in {end - start} s")
 
-    _warped = []
+    warped_ = []
     with click.progressbar(range(deltaf_series.shape[0]), label="Registering recording to template...") as frame_ids:
         for idx in frame_ids:
             if crop_x > 0 or crop_y > 0:
-                _warped.append(trf.warp(deltaf_series[idx, :crop_y, :crop_x], tform, order=3))
+                warped_.append(trf.warp(deltaf_series[idx, :crop_y, :crop_x], tform.inverse, order=3))
             else:
-                _warped.append(trf.warp(deltaf_series[idx], tform, order=3))
-    warped = np.array(_warped)
+                warped_.append(trf.warp(deltaf_series[idx], tform.inverse, order=3))
+    warped = np.array(warped_)
 
-    return warped, tform.params[None, :]
+    return warped, tform
