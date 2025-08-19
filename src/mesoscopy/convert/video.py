@@ -65,7 +65,7 @@ def to_hdf5(
         f.create_dataset(
             "frames",
             shape=(len(video_data), *video_data[0].shape),
-            chunks=True,
+            chunks=(100, video_data[0].shape[0], video_data[0].shape[1]),
             dtype=np.int8,
         )
 
