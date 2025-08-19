@@ -24,9 +24,19 @@ import scipy.ndimage as ndi
 
 def laplace_gaussian(
     deltaf_series: np.ndarray,
-    sigma: tuple = (0, 2, 2),
+    sigma: int = 2,
     **kwargs,
 ):
-    """Spatial smoothing using a Laplace of Gaussian filter"""
+    """Spatial smoothing using a Laplace of Gaussian filter.
 
-    return ndi.gaussian_laplace(deltaf_series, sigma=sigma, **kwargs)
+    Args:
+        deltaf_series (np.ndarray): DeltaF/F series.
+        sigma (int, optional): Standard deviation for Gaussian kernel. Defaults to 2.
+        **kwargs: Additional keyword arguments for `scipy.ndimage.gaussian_laplace`.
+
+    Returns:
+        np.ndarray: Smoothed DeltaF/F series.
+    """
+    sigma_iso = (0, sigma, sigma)
+
+    return ndi.gaussian_laplace(deltaf_series, sigma=sigma_iso, **kwargs)

@@ -48,8 +48,23 @@ def process_cmd(): ...
     default="./",
     help="Output directory for smoothed recording.",
 )
-def smooth_cmd(path: str, out_dir: str):
-    session_id, deltaf_series, timestamps = load_deltaf(path)
+@click.option(
+    "-s",
+    "--sigma",
+    type=int,
+    default=2,
+    help="Output directory for smoothed recording.",
+)
+def smooth_cmd(path: str, out_dir: str, sigma: int = 2):
+    """Generate a smoothed DeltaF/F recording using a Laplace of Gaussian filter."""
+    if not os.path.exists(out_dir):
+        click.echo(f"Creating output directory {out_dir}...")
+        os.makedirs(out_dir)
+
+    click.echo(f"Loading preprocessed recording from {path}...")
+    # Determine whether we're working with an NWB file
+    nwb = bool(path.endswith(".nwb"))
+    session_id, deltaf_series, timestamps = load_deltaf(path, nwb=nwb)
 
     outpath = out_dir + os.sep + session_id + "_smoothed.h5"
 
