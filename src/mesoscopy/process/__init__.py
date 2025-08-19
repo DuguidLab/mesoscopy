@@ -80,13 +80,6 @@ def smooth_cmd(path: str, out_dir: str, sigma: int = 2):
         )
     click.echo(f"Saved smoothed recording at {outpath}")
 
-    # if nwb:
-    #     click.echo("Updating NWB file...")
-    #     update_nwb(path, outpath, tform)
-    #     click.echo(f"Updated NWB file at {path}")
-
-    return outpath
-
 
 def load_deltaf(path: str, nwb: bool = False) -> tuple[str, np.ndarray, np.ndarray]:
     """Load preprocessed deltaf from an HDF5 or NWB file.
