@@ -5,6 +5,9 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 ## [Unreleased]
 
+### Added
+
+- Spatial smoothing (Laplacian of Gaussian) to `process` module via `process smooth`.
 
 
 ## [0.7.0] - 2025-08-15
