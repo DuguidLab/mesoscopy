@@ -21,10 +21,15 @@
 
 """Processing submodule."""
 
+import os
 import click
 import numpy as np
+import dask.array as da
+
+import mesoscopy.timer as timer
 
 import mesoscopy.io as io
+import mesoscopy.process.smooth as psm
 
 
 @click.group("process")
@@ -43,7 +48,29 @@ def process_cmd(): ...
     default="./",
     help="Output directory for smoothed recording.",
 )
-def smooth_cmd(): ...
+def smooth_cmd(path: str, out_dir: str):
+    session_id, deltaf_series, timestamps = load_deltaf(path)
+
+    outpath = out_dir + os.sep + session_id + "_smoothed.h5"
+
+    with timer.Timer(message="Smoothing with LoG"):
+        smoothed_deltaf = psm.laplace_gaussian(deltaf_series)
+
+        outpath = io.write_h5(
+            path=outpath,
+            data={
+                "/F": smoothed_deltaf,
+                "/timestamps": timestamps,
+            },
+        )
+    click.echo(f"Saved smoothed recording at {outpath}")
+
+    # if nwb:
+    #     click.echo("Updating NWB file...")
+    #     update_nwb(path, outpath, tform)
+    #     click.echo(f"Updated NWB file at {path}")
+
+    return outpath
 
 
 def load_deltaf(path: str, nwb: bool = False) -> tuple[str, np.ndarray, np.ndarray]:
@@ -67,4 +94,4 @@ def load_deltaf(path: str, nwb: bool = False) -> tuple[str, np.ndarray, np.ndarr
         deltaf_series = f_preproc["/F"]
         timestamps = f_preproc["/timestamps"]
 
-    return session_id, deltaf_series, timestamps
+    return session_id, np.array(deltaf_series), np.array(timestamps)
