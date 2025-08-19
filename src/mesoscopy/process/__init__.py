@@ -30,6 +30,7 @@ import mesoscopy.timer as timer
 
 import mesoscopy.io as io
 import mesoscopy.process.smooth as psm
+import mesoscopy.process.zscore as pzs
 
 
 @click.group("process")
@@ -55,7 +56,7 @@ def process_cmd(): ...
     default=2,
     help="Output directory for smoothed recording.",
 )
-def smooth_cmd(path: str, out_dir: str, sigma: int = 2):
+def smooth_cmd(path: str, out_dir: str, sigma: int = 2) -> None:
     """Generate a smoothed DeltaF/F recording using a Laplace of Gaussian filter."""
     if not os.path.exists(out_dir):
         click.echo(f"Creating output directory {out_dir}...")
@@ -79,6 +80,43 @@ def smooth_cmd(path: str, out_dir: str, sigma: int = 2):
             },
         )
     click.echo(f"Saved smoothed recording at {outpath}")
+
+
+@process_cmd.command("zscore")
+@click.argument(
+    "path",
+    type=click.Path(exists=True),
+)
+@click.option(
+    "-o",
+    "--out_dir",
+    type=click.Path(dir_okay=True),
+    default="./",
+    help="Output directory for smoothed recording.",
+)
+def zscore_cmd(path: str, out_dir: str) -> None:
+    """Pixel-wise z-score ∆F/F signal."""
+    if not os.path.exists(out_dir):
+        click.echo(f"Creating output directory {out_dir}...")
+        os.makedirs(out_dir)
+
+    click.echo(f"Loading preprocessed recording from {path}...")
+    # Determine whether we're working with an NWB file
+    nwb = bool(path.endswith(".nwb"))
+    session_id, deltaf_series, timestamps = load_deltaf(path, nwb=nwb)
+
+    outpath = out_dir + os.sep + session_id + "_zscored.h5"
+    with timer.Timer(message="Z-scoring DeltaF/F"):
+        zscored = pzs.zscore_deltaf(deltaf_series)
+        outpath = io.write_h5(
+            path=outpath,
+            data={
+                "/F": zscored,
+                "/timestamps": timestamps,
+            },
+        )
+
+    click.echo(f"Saved z-scored recording at {outpath}")
 
 
 def load_deltaf(path: str, nwb: bool = False) -> tuple[str, np.ndarray, np.ndarray]:
