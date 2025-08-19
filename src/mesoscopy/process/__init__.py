@@ -20,9 +20,51 @@
 #  SOFTWARE.
 
 """Processing submodule."""
+
 import click
+import numpy as np
+
+import mesoscopy.io as io
 
 
-@click.group()
-def process_cmd():
-    raise NotImplementedError("This command is not implemented yet.")
+@click.group("process")
+def process_cmd(): ...
+
+
+@process_cmd.command("smooth")
+@click.argument(
+    "path",
+    type=click.Path(exists=True),
+)
+@click.option(
+    "-o",
+    "--out_dir",
+    type=click.Path(dir_okay=True),
+    default="./",
+    help="Output directory for smoothed recording.",
+)
+def smooth_cmd(): ...
+
+
+def load_deltaf(path: str, nwb: bool = False) -> tuple[str, np.ndarray, np.ndarray]:
+    """Load preprocessed deltaf from an HDF5 or NWB file.
+
+    Args:
+        path (str): Path to the preprocessed file.
+        nwb (bool, optional): Whether the file is an NWB file. Defaults to False.
+
+    Returns:
+        tuple[str, np.ndarray, np.ndarray]: Session identifier, dF/F series, and timestamps.
+    """
+    if nwb:
+        nwbfile = io.read_nwb(path)
+        session_id = nwbfile.identifier
+        deltaf_series = nwbfile.processing["ophys"]["DeltaFSeries"].data
+        timestamps = nwbfile.processing["ophys"]["DeltaFSeries"].timestamps
+    else:
+        session_id = path.split("/")[-1].replace(".h5", "")
+        f_preproc = io.read_h5(path)
+        deltaf_series = f_preproc["/F"]
+        timestamps = f_preproc["/timestamps"]
+
+    return session_id, deltaf_series, timestamps
