@@ -61,7 +61,7 @@ def landmarks_affine(
             if crop_x > 0 or crop_y > 0:
                 warped_.append(trf.warp(deltaf_series[idx, :crop_y, :crop_x], tform.inverse, order=3))
             else:
-                warped_.append(trf.warp(deltaf_series[idx], tform.inverse, order=3))
+                warped_.append(trf.warp(deltaf_series[idx, :, :], tform.inverse, order=3))
     warped = np.array(warped_)
 
     return warped, tform
