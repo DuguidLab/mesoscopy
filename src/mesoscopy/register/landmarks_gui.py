@@ -107,7 +107,7 @@ def mark_landmarks(
         symbol="o",
         face_color="label",
         face_color_cycle=COLOR_CYCLE,
-        edge_width=0,  # fraction of point size
+        border_width=0,  # fraction of point size
         size=5,
     )
     points_layer.face_color_mode = "cycle"

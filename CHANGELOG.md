@@ -3,7 +3,7 @@
 Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<patch>`).
 
 
-## [Unreleased]
+## [0.7.1]
 
 ### Added
 
