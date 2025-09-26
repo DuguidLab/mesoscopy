@@ -20,11 +20,15 @@
 #  SOFTWARE.
 """Export functions for mesoscopy-generated files."""
 
+import os
 import typing
 
 import click
+import imageio.v2 as iio
+import numpy as np
 
 import mesoscopy.export.nwb as exp_nwb
+import mesoscopy.process as proc
 
 
 @click.group("export")
@@ -53,8 +57,8 @@ def export_nwb(nwb_path: str, out_path: str = "") -> str:
 
     Args:
         nwb_path (str): Path to the source NWB file.
-        out_path (str, optional): Path to save the exported NWB file. "
-        "If not provided, the output file will be named as the input file with '_export.nwb' appended. Defaults to "".
+        out_path (str, optional): Path to save the exported NWB file. If not provided, the output file will be named as
+            the input file with '_export.nwb' appended. Defaults to "".
 
     Returns:
         str: Path to the exported NWB file.
@@ -66,13 +70,27 @@ def export_nwb(nwb_path: str, out_path: str = "") -> str:
 @click.argument("path", type=click.Path(exists=True, dir_okay=False, path_type=str))
 @click.option(
     "--out-path",
-    type=click.Path(dir_okay=False, path_type=str),
-    default="",
+    type=click.Path(dir_okay=True, path_type=str),
+    default=".",
     help="Path to save the exported video file."
     "If not provided, the output file will be named as the input file with '_deltaf.mp4' appended.",
 )
 def export_deltaf_cmd(**kwargs: typing.Any) -> None:
     """Export delta F frames as a video file."""
+    export_deltaf(**kwargs)
 
 
-def export_deltaf(): ...
+def export_deltaf(path: str, out_path: str) -> str:
+    session_id = path.split("/")[-1].replace(".h5", "").replace(".nwb", "")
+
+    _, deltaf, _ = proc.load_deltaf(path)
+
+    # Rescale deltaf to positive integer values between 0 and 255
+    deltaf_scaled = np.array((deltaf + abs(deltaf.min())) / (deltaf + abs(deltaf.min())).max() * 255, dtype=np.uint8)
+
+    out_path = f"{out_path}{os.sep}{session_id}_deltaf.mp4"
+    video_writer = iio.get_writer(out_path, format="FFMPEG", fps=25, pixelformat="yuv420p", mode="I")
+    for frame in deltaf_scaled:
+        video_writer.append_data(np.stack([frame] * 3, axis=2))
+
+    return out_path
