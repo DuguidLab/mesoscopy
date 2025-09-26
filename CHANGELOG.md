@@ -2,6 +2,18 @@
 
 Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<patch>`).
 
+## Unreleased
+
+### Added 
+
+- Export ∆F/F as movie file via `export deltaf` ([#66](https://github.com/DuguidLab/mesoscopy/issues/66)).
+
+## [0.7.2]
+
+### Fixed
+
+- Preprocessing f0 padding at start end now pads the whole image instead of single value
+
 
 ## [0.7.1]
 
