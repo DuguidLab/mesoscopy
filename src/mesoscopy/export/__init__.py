@@ -81,6 +81,15 @@ def export_deltaf_cmd(**kwargs: typing.Any) -> None:
 
 
 def export_deltaf(path: str, out_path: str) -> str:
+    """Export delta F frames as a video file.
+
+    Args:
+        path (str): Path to the source file (HDF5 or NWB).
+        out_path (str): Path to save the exported video file.
+
+    Returns:
+        str: Path to the exported video file.
+    """
     session_id = path.split("/")[-1].replace(".h5", "").replace(".nwb", "")
 
     _, deltaf, _ = proc.load_deltaf(path)
