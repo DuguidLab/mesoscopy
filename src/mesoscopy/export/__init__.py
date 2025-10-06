@@ -30,6 +30,8 @@ import numpy as np
 import mesoscopy.export.nwb as exp_nwb
 import mesoscopy.process as proc
 
+from tqdm import tqdm
+
 
 @click.group("export")
 def export_cmd() -> None:
@@ -92,14 +94,23 @@ def export_deltaf(path: str, out_path: str) -> str:
     """
     session_id = path.split("/")[-1].replace(".h5", "").replace(".nwb", "")
 
-    _, deltaf, _ = proc.load_deltaf(path)
+    nwb = bool(path.endswith(".nwb"))
+
+    click.echo("Loading delta F data...")
+    _, deltaf, _ = proc.load_deltaf(path, nwb)
 
     # Rescale deltaf to positive integer values between 0 and 255
+    click.echo("Rescaling delta F for export...")
     deltaf_scaled = np.array((deltaf + abs(deltaf.min())) / (deltaf + abs(deltaf.min())).max() * 255, dtype=np.uint8)
 
     out_path = f"{out_path}{os.sep}{session_id}_deltaf.mp4"
     video_writer = iio.get_writer(out_path, format="FFMPEG", fps=25, pixelformat="yuv420p", mode="I")
-    for frame in deltaf_scaled:
+
+    for _, frame in tqdm(
+        enumerate(deltaf_scaled),
+        desc="Converting delta F trace to video",
+        total=len(deltaf_scaled),
+    ):
         video_writer.append_data(np.stack([frame] * 3, axis=2))
 
     return out_path
