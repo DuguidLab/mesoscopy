@@ -25,6 +25,7 @@ import os
 import click
 import numpy as np
 import dask.array as da
+from pynwb.image import ImageSeries
 
 import mesoscopy.timer as timer
 
@@ -105,18 +106,43 @@ def zscore_cmd(path: str, out_dir: str) -> None:
     nwb = bool(path.endswith(".nwb"))
     session_id, deltaf_series, timestamps = load_deltaf(path, nwb=nwb)
 
-    outpath = out_dir + os.sep + session_id + "_zscored.h5"
+    h5_outpath = out_dir + os.sep + session_id + "_zscored.h5"
     with timer.Timer(message="Z-scoring DeltaF/F"):
         zscored = pzs.zscore_deltaf(deltaf_series)
-        outpath = io.write_h5(
-            path=outpath,
+        h5_outpath = io.write_h5(
+            path=h5_outpath,
             data={
                 "/F": zscored,
                 "/timestamps": timestamps,
             },
         )
 
-    click.echo(f"Saved z-scored recording at {outpath}")
+    click.echo(f"Saved z-scored recording at {h5_outpath}")
+
+    # Append to NWB file
+    if nwb:
+        click.echo("Appending to NWB file...")
+        nwbfile, nwbio = io.read_nwb(path, return_io=True)
+        f = io.read_h5(h5_outpath)
+        try:
+            ophys_module = nwbfile.create_processing_module(
+                name="ophys", description="optical physiology processed data"
+            )
+        except ValueError:
+            click.echo("Processing module already exists...")
+            ophys_module = nwbfile.processing["ophys"]
+
+        zscored_series = ImageSeries(
+            name="zScoredDeltaF",
+            data=f["/F"],
+            timestamps=f["/timestamps"],
+            unit="df/f",
+            description="z-scored dF/F widefield cortical imaging series",
+        )
+
+        ophys_module.add(zscored_series)
+
+        io.write_nwb(path, nwbfile, io=nwbio)
 
 
 def load_deltaf(path: str, nwb: bool = False) -> tuple[str, np.ndarray, np.ndarray]:
