@@ -25,11 +25,13 @@ import os
 import click
 import numpy as np
 import dask.array as da
+from pynwb.image import ImageSeries
 
 import mesoscopy.timer as timer
 
 import mesoscopy.io as io
 import mesoscopy.process.smooth as psm
+import mesoscopy.process.zscore as pzs
 
 
 @click.group("process")
@@ -55,7 +57,7 @@ def process_cmd(): ...
     default=2,
     help="Output directory for smoothed recording.",
 )
-def smooth_cmd(path: str, out_dir: str, sigma: int = 2):
+def smooth_cmd(path: str, out_dir: str, sigma: int = 2) -> None:
     """Generate a smoothed DeltaF/F recording using a Laplace of Gaussian filter."""
     if not os.path.exists(out_dir):
         click.echo(f"Creating output directory {out_dir}...")
@@ -80,12 +82,67 @@ def smooth_cmd(path: str, out_dir: str, sigma: int = 2):
         )
     click.echo(f"Saved smoothed recording at {outpath}")
 
-    # if nwb:
-    #     click.echo("Updating NWB file...")
-    #     update_nwb(path, outpath, tform)
-    #     click.echo(f"Updated NWB file at {path}")
 
-    return outpath
+@process_cmd.command("zscore")
+@click.argument(
+    "path",
+    type=click.Path(exists=True),
+)
+@click.option(
+    "-o",
+    "--out_dir",
+    type=click.Path(dir_okay=True),
+    default="./",
+    help="Output directory for smoothed recording.",
+)
+def zscore_cmd(path: str, out_dir: str) -> None:
+    """Pixel-wise z-score ∆F/F signal."""
+    if not os.path.exists(out_dir):
+        click.echo(f"Creating output directory {out_dir}...")
+        os.makedirs(out_dir)
+
+    click.echo(f"Loading preprocessed recording from {path}...")
+    # Determine whether we're working with an NWB file
+    nwb = bool(path.endswith(".nwb"))
+    session_id, deltaf_series, timestamps = load_deltaf(path, nwb=nwb)
+
+    h5_outpath = out_dir + os.sep + session_id + "_zscored.h5"
+    with timer.Timer(message="Z-scoring DeltaF/F"):
+        zscored = pzs.zscore_deltaf(deltaf_series)
+        h5_outpath = io.write_h5(
+            path=h5_outpath,
+            data={
+                "/F": zscored,
+                "/timestamps": timestamps,
+            },
+        )
+
+    click.echo(f"Saved z-scored recording at {h5_outpath}")
+
+    # Append to NWB file
+    if nwb:
+        click.echo("Appending to NWB file...")
+        nwbfile, nwbio = io.read_nwb(path, return_io=True)
+        f = io.read_h5(h5_outpath)
+        try:
+            ophys_module = nwbfile.create_processing_module(
+                name="ophys", description="optical physiology processed data"
+            )
+        except ValueError:
+            click.echo("Processing module already exists...")
+            ophys_module = nwbfile.processing["ophys"]
+
+        zscored_series = ImageSeries(
+            name="zScoredDeltaF",
+            data=f["/F"],
+            timestamps=f["/timestamps"],
+            unit="df/f",
+            description="z-scored dF/F widefield cortical imaging series",
+        )
+
+        ophys_module.add(zscored_series)
+
+        io.write_nwb(path, nwbfile, io=nwbio)
 
 
 def load_deltaf(path: str, nwb: bool = False) -> tuple[str, np.ndarray, np.ndarray]:

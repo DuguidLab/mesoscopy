@@ -20,7 +20,7 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 ### Added
 
 - Spatial smoothing (Laplacian of Gaussian) to `process` module via `process smooth`.
-
+- Per-pixel z-scoring for ∆F/F signal to `process` via `process zscore`.
 
 ## [0.7.0] - 2025-08-15
 
