@@ -21,7 +21,9 @@
 """Module for quality assurance (QA) functions in the mesoscopy preprocessing pipeline."""
 
 import diptest
-
+from datetime import datetime
+import scipy.stats as stats
+import numpy as np
 import numpy.typing as npt
 import plotly.express as px
 import plotly.graph_objects as go
@@ -37,11 +39,57 @@ def check_histogram_separation(array: npt.NDArray, alpha: float = 0.05) -> bool:
     Returns:
         bool: Indicates whether histogram separates successfully (i.e. distribution is bimodal).
     """
-    _dip, p_value = diptest.diptest(array)  # type: ignore
+    _dip, p_value = diptest.diptest(array)  # pyright: ignore[reportAssignmentType]
     return p_value < alpha
 
 
-def check_timestamp_drift(): ...
+def check_timestamp_consistency(
+    timestamps: npt.NDArray | list, std_threshold: float = 2.0, percentile: float = 99.0
+) -> bool:
+    """Check for timestamp consistency by analyzing the standard deviation of frame intervals.
+
+    Consistent timestamps should have low variability in timestamp intervals.
+    Generally, anything above two standard deviations is considered inconsistent.
+    This function computes the z-score of the frame intervals and checks if the specified percentile exceeds the given
+    standard deviation threshold.
+
+    Args:
+        timestamps (npt.NDArray | list): Sequence of timestamp values.
+        std_threshold (float, optional): Threshold for standard deviation of frame intervals to indicate drift.
+        Defaults to 2.0.
+        percentile (float, optional): Percentile of the z-scored frame intervals to consider for drift detection.
+        Defaults to 99.0.
+
+    Returns:
+        bool: Indicates whether timestamp drift is detected (True if drift is detected).
+    """
+    timestamps = np.array([datetime.fromisoformat(str(ts, encoding="utf-8")) for ts in timestamps])
+    timedeltas = np.diff(timestamps).astype("timedelta64[ms]").astype(float)
+    zscored_intervals = stats.zscore(timedeltas)
+    critical_value = np.percentile(zscored_intervals, percentile)  # type: ignore[reportArgumentType]
+
+    return critical_value <= std_threshold
+
+
+def check_timestamp_jumps(timestamps: npt.NDArray | list, std_threshold: float = 2.0) -> bool:
+    """Check for timestamp jumps by analyzing the standard deviation of frame intervals.
+
+    Jumps in timestamps are defined as anything above two standard deviations in the z-scored frame intervals.
+
+    Args:
+        timestamps (npt.NDArray | list): Sequence of timestamp values.
+        std_threshold (float, optional): Threshold for standard deviation of frame intervals to indicate jumps.
+        Defaults to 2.0.
+
+    Returns:
+        bool: Indicates whether timestamp jumps are detected (True if jumps are detected).
+    """
+    timestamps = np.array([datetime.fromisoformat(str(ts, encoding="utf-8")) for ts in timestamps])
+    timedeltas = np.diff(timestamps).astype("timedelta64[ms]").astype(float)
+    zscored_intervals = stats.zscore(timedeltas)
+    max_deviation = np.abs(np.array(zscored_intervals)).max()
+
+    return max_deviation <= std_threshold
 
 
 def calculate_noise(): ...
