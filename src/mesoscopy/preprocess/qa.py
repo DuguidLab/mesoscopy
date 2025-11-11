@@ -20,9 +20,43 @@
 #  SOFTWARE.
 """Module for quality assurance (QA) functions in the mesoscopy preprocessing pipeline."""
 
+import diptest
+
 import numpy.typing as npt
 import plotly.express as px
 import plotly.graph_objects as go
+
+
+def check_histogram_separation(array: npt.NDArray, alpha: float = 0.05) -> bool:
+    """Check whether array histogram contains two separable peaks using Hartigan's dip test for unimodality.
+
+    Args:
+        array (npt.NDArray): Signal array to check for separation.
+        alpha (float, optional): Significance level for the dip test. Defaults to 0.05.
+
+    Returns:
+        bool: Indicates whether histogram separates successfully (i.e. distribution is bimodal).
+    """
+    _dip, p_value = diptest.diptest(array)  # type: ignore
+    return p_value < alpha
+
+
+def check_timestamp_drift(): ...
+
+
+def calculate_noise(): ...
+
+
+def calculate_snr(): ...
+
+
+def check_noise(): ...
+
+
+def check_snr(): ...
+
+
+def check_bleaching(): ...
 
 
 def plot_timestamps(timestamps: list | npt.NDArray, as_html: bool = False) -> str | go.Figure:

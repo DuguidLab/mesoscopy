@@ -41,7 +41,8 @@ dependencies = [
     "pyqt5",
     "plotly",
     "Jinja2",
-    "imageio[ffmpeg]"
+    "imageio[ffmpeg]",
+    "diptest",
 ]
 dynamic = ["version"]
 
