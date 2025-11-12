@@ -49,7 +49,8 @@ def check_timestamp_consistency(
     """Check for timestamp consistency by analyzing the standard deviation of frame intervals.
 
     Consistent timestamps should have low variability in timestamp intervals.
-    Generally, anything above two standard deviations is considered inconsistent.
+    Generally, anything above two standard deviations is considered inconsistent, i.e. we want most of our timestamp
+    intervals to fall within two standard deviations.
     This function computes the z-score of the frame intervals and checks if the specified percentile exceeds the given
     standard deviation threshold.
 
