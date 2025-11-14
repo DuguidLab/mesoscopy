@@ -20,6 +20,7 @@
 #  SOFTWARE.
 """Module for quality assurance (QA) functions in the mesoscopy preprocessing pipeline."""
 
+import typing
 import diptest
 from datetime import datetime
 import scipy.stats as stats
@@ -138,13 +139,106 @@ def calculate_snr(data: npt.NDArray, noise_levels: npt.NDArray | None = None, fr
     return float(np.median(np.percentile(data, 99, axis=0) / np.percentile((noise_levels / 100), 99)))
 
 
-def check_noise(): ...
+def check_noise(
+    data: npt.NDArray, framerate: int = 25, threshold: float = 10.0, return_noise: bool = False
+) -> bool | tuple[bool, npt.NDArray]:
+    """Check whether recording noise is below a predetermined acceptable noise threshold.
+
+    This function will first call `calculate_noise` to calculate the noise levels in the deltaF trace and then check
+    whether the median noise level is below a pre-defined threshold.
+
+    Based on https://gcamp6f.com/2021/10/04/large-scale-calcium-imaging-noise-levels/ it looks like
+    anything above 10% shot is in the upper bound of acceptability, likely more so for mesoscale data.
+
+    This function will optionally return the calculated noise levels per pixel.
+
+    Args:
+        data (npt.NDArray): deltaF array (time x height x width).
+        framerate (int, optional): Frame rate of extracted deltaF trace. Defaults to 25.
+        threshold (float, optional): Shot noise percentage threshold. Defaults to 10.0.
+        return_noise (bool, optional): Return the calculate noise levels per pixel alongside the check result.
+        Defaults to False.
+
+    Returns:
+        bool | tuple[bool, npt.NDArray]: Returns true if check is passed (i.e. median noise level is below threshold).
+        If `return_noise` is True, returns a tuple with check result alongside the pixel-wise calculated noise levels as
+        an array of width x height.
+    """
+    noise_levels = calculate_noise(data, framerate)
+    passed = bool(np.median(noise_levels) <= threshold)
+
+    if return_noise:
+        return passed, noise_levels
+    return passed
 
 
-def check_snr(): ...
+def check_snr(
+    data: npt.NDArray,
+    noise_levels: npt.NDArray | None = None,
+    framerate: int = 25,
+    threshold: float = 1.5,
+    return_snr: bool = False,
+) -> bool | tuple[bool, float]:
+    """Check whether recording noise is below a predetermined acceptable SNR threshold.
+
+    This function will first call `calculate_snr` to calculate the signal-to-noise ratio in the deltaF trace and then
+    check whether SNR is above a pre-defined threshold.
+
+    This function will optionally return the calculated SNR for the session.
+
+    Args:
+        data (npt.NDArray): deltaF array (time x height x width).
+        noise_levels (npt.NDArray | None, optional): Map of normalised noise level per pixel as a percentage, as would
+        be returned by the `calculate_noise` function. This will be computed if not provided. Defaults to None.
+        framerate (int, optional): Frame rate of extracted deltaF trace. Only used if noise_levels are calculated on the
+        fly. Defaults to 25.
+        threshold (float, optional): SNR threshold. Defaults to 1.5.
+        return_snr (bool, optional): Return the calculate SNR alongside the check result.
+        Defaults to False.
+
+    Returns:
+        bool | tuple[bool, float]: Returns true if check is passed (i.e. SNR is above
+          threshold).
+        If `return_noise` is True, returns a tuple with check result alongside the SNR as a float.
+    """
+    if not noise_levels:
+        noise_levels = calculate_noise(data, framerate)
+    snr = calculate_snr(data, noise_levels)
+    passed = bool(snr >= threshold)
+
+    if return_snr:
+        return passed, snr
+    return passed
 
 
-def check_bleaching(): ...
+def check_bleaching(
+    f_mean_timeseries: npt.NDArray, threshold: float = 5e-7, return_slope: bool = False
+) -> bool | tuple[bool, float]:
+    """Check mean deltaF signal for photobleaching.
+
+    This function will fit a straight line through the average delta F trace. If the slope of this line is lower than a
+    critical negative threshold (i.e. the delta F signal is decreasing in slope across the recording)
+    this would suggest that photobleaching is quite likely present.
+
+    Args:
+        f_mean_timeseries (npt.NDArray): Average delta F signal over time as a one-dimensional array. If the recording
+        was preprocessed with mesoscopy, this is found under "/qa/f_mean_timeseries"
+        threshold (float, optional): Critical slope threshold value. Can be expressed as an absolute value, or as a
+        negative value. Defaults to 5e-7.
+        return_slope (bool, optional): Return the calculated slope in addition to the check result. Defaults to False.
+
+    Returns:
+        bool | tuple[bool, float]: Returns True if the check passed (i.e. no photobleaching was detected).
+        Optionally returns the calculated slope if `return_slope` is True.
+    """
+    slope, _ = np.polyfit(x=range(f_mean_timeseries.shape[0]), y=f_mean_timeseries, deg=1)
+
+    threshold = -abs(threshold)
+    passed = slope >= threshold
+
+    if return_slope:
+        return passed, slope
+    return passed
 
 
 def plot_timestamps(timestamps: list | npt.NDArray, as_html: bool = False) -> str | go.Figure:
