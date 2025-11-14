@@ -33,7 +33,7 @@ def check_histogram_separation(array: npt.NDArray, alpha: float = 0.05) -> bool:
     """Check whether array histogram contains two separable peaks using Hartigan's dip test for unimodality.
 
     Args:
-        array (npt.NDArray): Signal array to check for separation.
+        array (npt.NDArray): Signal array to check for separation (i.e. raw recording array in time x width x height).
         alpha (float, optional): Significance level for the dip test. Defaults to 0.05.
 
     Returns:
@@ -44,7 +44,7 @@ def check_histogram_separation(array: npt.NDArray, alpha: float = 0.05) -> bool:
 
 
 def check_timestamp_consistency(
-    timestamps: npt.NDArray | list, std_threshold: float = 2.0, percentile: float = 99.0
+    timestamps: npt.NDArray | list, threshold: float = 2.0, percentile: float = 99.0
 ) -> bool:
     """Check for timestamp consistency by analyzing the standard deviation of frame intervals.
 
@@ -56,7 +56,7 @@ def check_timestamp_consistency(
 
     Args:
         timestamps (npt.NDArray | list): Sequence of timestamp values.
-        std_threshold (float, optional): Threshold for standard deviation of frame intervals to indicate drift.
+        threshold (float, optional): Threshold for standard deviation of frame intervals to indicate drift.
         Defaults to 2.0.
         percentile (float, optional): Percentile of the z-scored frame intervals to consider for drift detection.
         Defaults to 99.0.
@@ -69,7 +69,7 @@ def check_timestamp_consistency(
     zscored_intervals = stats.zscore(timedeltas)
     critical_value = np.percentile(zscored_intervals, percentile)  # type: ignore[reportArgumentType]
 
-    return critical_value <= std_threshold
+    return critical_value <= threshold
 
 
 def check_timestamp_jumps(timestamps: npt.NDArray | list, std_threshold: float = 2.0) -> bool:
@@ -93,10 +93,49 @@ def check_timestamp_jumps(timestamps: npt.NDArray | list, std_threshold: float =
     return max_deviation <= std_threshold
 
 
-def calculate_noise(): ...
+def calculate_noise(data: npt.NDArray, framerate: int = 25) -> npt.NDArray:
+    """Calculate noise levels for each pixel in a the preprocessed delta F signal.
+
+    Based on Cascade calculation for 2p imaging (https://github.com/HelmchenLabSoftware/Cascade/blob/8735f5022447d4942e5d466ab0775a4bfca1c7e8/cascade2p/utils.py#L97).
+
+    From the Cascade documentation:
+        The noise level is computed as the median absolute dF/F difference
+        between two subsequent time points. This is a outlier-robust measurement
+        that converges to the simple standard deviation of the dF/F trace for
+        uncorrelated and outlier-free dF/F traces.
+
+        Afterwards, the value is divided by the square root of the frame rate
+        in order to make it comparable across recordings with different frame rates.
+
+    Args:
+        data (npt.NDArray): deltaF array (time x height x width).
+        framerate (int, optional): Frame rate of extracted deltaF trace. Defaults to 25 Hz.
+
+    Returns:
+        npt.NDArray: Map of normalised noise level per pixel, scaled as a percentage (height x width).
+    """
+    return (np.nanmedian(np.abs(np.diff(data, axis=0)), axis=0) / np.sqrt(framerate)) * 100
 
 
-def calculate_snr(): ...
+def calculate_snr(data: npt.NDArray, noise_levels: npt.NDArray | None = None, framerate: int = 25) -> float:
+    """Estimate the signal-to-noise ratio (SNR) for a preprocessed delta F recording.
+
+    SNR is calculated as the median of the 99th percentile of deltaF across each pixel divided by the (unscaled) noise
+    level per pixel.
+
+    Args:
+        data (npt.NDArray): deltaF array (time x height x width).
+        noise_levels (npt.NDArray | None, optional): Map of normalised noise level per pixel as a percentage, as would
+        be returned by the `calculate_noise` function. This will be computed if not provided. Defaults to None.
+        framerate (int, optional): Frame rate of extracted deltaF trace. Only used if noise_levels are calculated on the
+        fly. Defaults to 25.
+
+    Returns:
+        float: Signal-to-noise ratio.
+    """
+    if not noise_levels:
+        noise_levels = calculate_noise(data, framerate)
+    return float(np.median(np.percentile(data, 99, axis=0) / np.percentile((noise_levels / 100), 99)))
 
 
 def check_noise(): ...
