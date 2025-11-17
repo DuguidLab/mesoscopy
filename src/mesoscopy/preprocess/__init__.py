@@ -113,13 +113,15 @@ def run_preprocessing(
     and extracts the delta F signal.
 
     Args:
-        raw_path (str): Path to the raw recording HDF5 or NWB file.
+        path (str): Path to the raw recording HDF5 or NWB file.
         out_dir (str): Path to the output directory.
         chunks (int, optional): Number of chunks to load in memory. Defaults to 100.
         crop (int, optional): Number of pixels to crop from the edges of the recording. Defaults to 0.
         bins (int, optional): Recording pixel binning factor. Defaults to 2.
-        channel_means_only (bool, optional): Extract the channel means and exit without extracting a delta F series. Defaults to False.
-        use_means (bool, optional): Use means histogram instead of standard deviation to separate channels. Defaults to False.
+        channel_means_only (bool, optional): Extract the channel means and exit without extracting a delta F series.
+        Defaults to False.
+        use_means (bool, optional): Use means histogram instead of standard deviation to separate channels.
+        Defaults to False.
         flip_channels (bool, optional): Flip extracted channel order. Defaults to False.
         interim_dir (str, optional): Path to the interim directory. Defaults to "interim/".
         skip_start (int, optional): Number of frames to skip at the start of the recording. Defaults to None.
@@ -135,12 +137,12 @@ def run_preprocessing(
     click.echo("Loading data...")
 
     # Determine whether we're working with an NWB file
-    nwb = True if path.endswith(".nwb") else False
+    nwb = bool(path.endswith(".nwb"))
 
     session_id, d, ts = load_raw(path, nwb=nwb)
 
     if skip_start and skip_start != 0:
-        skip_start = skip_start - 1
+        skip_start -= 1
 
     # If odd or even skips, add one to make them even to avoid strangeness
     if skip_start and skip_start % 2 != 0:
@@ -222,7 +224,9 @@ def run_preprocessing(
 
     if window_width > binned_frames.shape[0]:
         click.echo(
-            f"WARNING: Default window width is larger than the number of frames. Setting window width to {binned_frames.shape[0] // 4}."
+            f"WARNING: Default window width is larger than the number of frames. Setting window width to {
+                binned_frames.shape[0] // 4
+            }."
         )
         window_width = binned_frames.shape[0] // 4
 
