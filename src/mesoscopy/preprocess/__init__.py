@@ -290,7 +290,7 @@ def run_preprocessing(
     if not no_qa:
         click.echo("Running QA checks...")
 
-        qa_histogram_separation = qa.check_histogram_separation(np.array(binned_frames))
+        qa_histogram_separation = qa.check_histogram_separation(np.array(frame_stds if not use_means else frame_means))
         if qa_histogram_separation:
             click.echo("✅ Histogram separation check passed.")
         else:

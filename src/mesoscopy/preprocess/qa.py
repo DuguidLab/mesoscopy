@@ -30,17 +30,18 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 
-def check_histogram_separation(array: npt.NDArray, alpha: float = 0.05) -> bool:
+def check_histogram_separation(filter_statistic_timeseries: npt.NDArray, alpha: float = 0.05) -> bool:
     """Check whether array histogram contains two separable peaks using Hartigan's dip test for unimodality.
 
     Args:
-        array (npt.NDArray): Signal array to check for separation (i.e. raw recording array in time x width x height).
+        filter_statistic_timeseries (npt.NDArray): Filter array used for signal separation (e.g. frame means or frame
+        standard deviation timeseries)
         alpha (float, optional): Significance level for the dip test. Defaults to 0.05.
 
     Returns:
         bool: Indicates whether histogram separates successfully (i.e. distribution is bimodal).
     """
-    _dip, p_value = diptest.diptest(array)  # pyright: ignore[reportAssignmentType]
+    _dip, p_value = diptest.diptest(filter_statistic_timeseries)  # pyright: ignore[reportAssignmentType]
     return p_value < alpha
 
 
@@ -65,7 +66,8 @@ def check_timestamp_consistency(
     Returns:
         bool: Indicates whether timestamp drift is detected (True if drift is detected).
     """
-    timestamps = np.array([datetime.fromisoformat(str(ts, encoding="utf-8")) for ts in timestamps])
+    print(timestamps[:])
+    timestamps = np.array([datetime.fromisoformat(str(ts, encoding="utf-8")) for ts in timestamps[:]])
     timedeltas = np.diff(timestamps).astype("timedelta64[ms]").astype(float)
     zscored_intervals = stats.zscore(timedeltas)
     critical_value = np.percentile(zscored_intervals, percentile)  # type: ignore[reportArgumentType]
