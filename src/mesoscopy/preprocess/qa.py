@@ -66,7 +66,6 @@ def check_timestamp_consistency(
     Returns:
         bool: Indicates whether timestamp drift is detected (True if drift is detected).
     """
-    print(timestamps[:])
     timestamps = np.array([datetime.fromisoformat(str(ts, encoding="utf-8")) for ts in timestamps[:]])
     timedeltas = np.diff(timestamps).astype("timedelta64[ms]").astype(float)
     zscored_intervals = stats.zscore(timedeltas)
