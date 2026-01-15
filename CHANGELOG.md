@@ -7,13 +7,13 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 ### Added
 
 - Export ∆F/F as movie file via `export deltaf` ([#66](https://github.com/DuguidLab/mesoscopy/issues/66)).
+- Add automated QA checks to preprocessing ([[#80](https://github.com/DuguidLab/mesoscopy/issues/80)]).
 
 ## [0.7.2]
 
 ### Fixed
 
 - Preprocessing f0 padding at start end now pads the whole image instead of single value
-
 
 ## [0.7.1]
 
@@ -44,7 +44,7 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 ### Fixed
 
 - Registration uses DeltaF series instead of raw fluorescence series when reading from NWB.
-- Fix padding insertion error when calculating dF/F, remove redundant padding to cumsum vector. 
+- Fix padding insertion error when calculating dF/F, remove redundant padding to cumsum vector.
 
 ### Removed
 
@@ -59,5 +59,4 @@ Not necessarily fit for public consumption, but here it is anyway.
 
 ---
 
-[unreleased]: https://github.com/DuguidLab/mesoscopy/compare/v0.7.0...HEAD
 [0.1.0]: https://github.com/DuguidLab/mesoscopy/compare/v0.1.0...v0.7.0
