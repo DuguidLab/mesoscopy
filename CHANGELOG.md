@@ -4,10 +4,16 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 ## Unreleased
 
+## [0.7.3]
+
 ### Added
 
 - Export ∆F/F as movie file via `export deltaf` ([#66](https://github.com/DuguidLab/mesoscopy/issues/66)).
 - Add automated QA checks to preprocessing ([[#80](https://github.com/DuguidLab/mesoscopy/issues/80)]).
+
+### Fixed
+
+- Various preprocessing data type issues when switching between nwb & HDF5 files.
 
 ## [0.7.2]
 
