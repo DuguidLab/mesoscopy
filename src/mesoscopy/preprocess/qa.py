@@ -66,7 +66,10 @@ def check_timestamp_consistency(
     Returns:
         bool: Indicates whether timestamp drift is detected (True if drift is detected).
     """
-    timestamps = np.array([datetime.fromisoformat(str(ts, encoding="utf-8")) for ts in np.array(timestamps)])
+    try:
+        timestamps = np.array([datetime.fromisoformat(str(ts, encoding="utf-8")) for ts in np.array(timestamps)])
+    except ValueError:
+        timestamps = np.array([float(ts) for ts in timestamps])
     timedeltas = np.diff(timestamps).astype("timedelta64[ms]").astype(float)
     zscored_intervals = stats.zscore(timedeltas)
     critical_value = np.percentile(zscored_intervals, percentile)  # type: ignore[reportArgumentType]
@@ -87,7 +90,10 @@ def check_timestamp_jumps(timestamps: npt.NDArray | list, std_threshold: float =
     Returns:
         bool: Indicates whether timestamp jumps are detected (True if jumps are detected).
     """
-    timestamps = np.array([datetime.fromisoformat(str(ts, encoding="utf-8")) for ts in np.array(timestamps)])
+    try:
+        timestamps = np.array([datetime.fromisoformat(str(ts, encoding="utf-8")) for ts in np.array(timestamps)])
+    except ValueError:
+        timestamps = np.array([float(ts) for ts in timestamps])
     timedeltas = np.diff(timestamps).astype("timedelta64[ms]").astype(float)
     zscored_intervals = stats.zscore(timedeltas)
     max_deviation = np.abs(np.array(zscored_intervals)).max()
