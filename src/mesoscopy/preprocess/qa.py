@@ -66,7 +66,7 @@ def check_timestamp_consistency(
     Returns:
         bool: Indicates whether timestamp drift is detected (True if drift is detected).
     """
-    timestamps = np.array([datetime.fromisoformat(str(ts, encoding="utf-8")) for ts in timestamps[:]])
+    timestamps = np.array([datetime.fromisoformat(str(ts, encoding="utf-8")) for ts in np.array(timestamps)])
     timedeltas = np.diff(timestamps).astype("timedelta64[ms]").astype(float)
     zscored_intervals = stats.zscore(timedeltas)
     critical_value = np.percentile(zscored_intervals, percentile)  # type: ignore[reportArgumentType]
@@ -87,7 +87,7 @@ def check_timestamp_jumps(timestamps: npt.NDArray | list, std_threshold: float =
     Returns:
         bool: Indicates whether timestamp jumps are detected (True if jumps are detected).
     """
-    timestamps = np.array([datetime.fromisoformat(str(ts, encoding="utf-8")) for ts in timestamps])
+    timestamps = np.array([datetime.fromisoformat(str(ts, encoding="utf-8")) for ts in np.array(timestamps)])
     timedeltas = np.diff(timestamps).astype("timedelta64[ms]").astype(float)
     zscored_intervals = stats.zscore(timedeltas)
     max_deviation = np.abs(np.array(zscored_intervals)).max()
@@ -116,7 +116,7 @@ def calculate_noise(data: npt.NDArray, framerate: int = 25) -> npt.NDArray:
     Returns:
         npt.NDArray: Map of normalised noise level per pixel, scaled as a percentage (height x width).
     """
-    return (np.nanmedian(np.abs(np.diff(data, axis=0)), axis=0) / np.sqrt(framerate)) * 100
+    return np.array((np.nanmedian(np.abs(np.diff(data, axis=0)), axis=0) / np.sqrt(framerate)) * 100)
 
 
 def calculate_snr(data: npt.NDArray, noise_levels: npt.NDArray | None = None, framerate: int = 25) -> float:
@@ -135,9 +135,9 @@ def calculate_snr(data: npt.NDArray, noise_levels: npt.NDArray | None = None, fr
     Returns:
         float: Signal-to-noise ratio.
     """
-    if not noise_levels:
+    if noise_levels is None:
         noise_levels = calculate_noise(data, framerate)
-    return float(np.median(np.percentile(data, 99, axis=0) / np.percentile((noise_levels / 100), 99)))
+    return float(np.median(np.percentile(np.array(data), 99, axis=0) / np.percentile((noise_levels / 100), 99)))
 
 
 def check_noise(
@@ -169,7 +169,7 @@ def check_noise(
     passed = bool(np.median(noise_levels) <= threshold)
 
     if return_noise:
-        return passed, noise_levels
+        return passed, np.array(noise_levels)
     return passed
 
 
@@ -202,7 +202,7 @@ def check_snr(
           threshold).
         If `return_noise` is True, returns a tuple with check result alongside the SNR as a float.
     """
-    if not noise_levels:
+    if noise_levels is None:
         noise_levels = calculate_noise(data, framerate)
     snr = calculate_snr(data, noise_levels)
     passed = bool(snr >= threshold)
@@ -232,6 +232,7 @@ def check_bleaching(
         bool | tuple[bool, float]: Returns True if the check passed (i.e. no photobleaching was detected).
         Optionally returns the calculated slope if `return_slope` is True.
     """
+    f_mean_timeseries = np.array(f_mean_timeseries)
     slope, _ = np.polyfit(x=range(f_mean_timeseries.shape[0]), y=f_mean_timeseries, deg=1)
 
     threshold = -abs(threshold)
