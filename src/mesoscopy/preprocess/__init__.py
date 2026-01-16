@@ -30,6 +30,7 @@ from dask import array as da
 from pynwb.image import ImageSeries
 
 import mesoscopy.preprocess.compute as calc
+import mesoscopy.preprocess.qa as qa
 from mesoscopy import io
 from mesoscopy import timer
 
@@ -87,6 +88,13 @@ from mesoscopy import timer
     type=int,
     help="Number of frames to skip at the end of the recording.",
 )
+@click.option(
+    "--no-qa",
+    is_flag=True,
+    show_default=True,
+    default=False,
+    help="Skip automatic quality control checks.",
+)
 def preprocess_cmd(
     **kwargs: typing.Any,
 ) -> None:
@@ -106,6 +114,7 @@ def run_preprocessing(
     interim_dir: str = "interim/",
     skip_start: int | None = None,
     skip_end: int | None = None,
+    no_qa: bool = False,
 ) -> None:
     """Preprocessing to extract deltaF from a single session dual-channel mixed recording.
 
@@ -113,17 +122,20 @@ def run_preprocessing(
     and extracts the delta F signal.
 
     Args:
-        raw_path (str): Path to the raw recording HDF5 or NWB file.
+        path (str): Path to the raw recording HDF5 or NWB file.
         out_dir (str): Path to the output directory.
         chunks (int, optional): Number of chunks to load in memory. Defaults to 100.
         crop (int, optional): Number of pixels to crop from the edges of the recording. Defaults to 0.
         bins (int, optional): Recording pixel binning factor. Defaults to 2.
-        channel_means_only (bool, optional): Extract the channel means and exit without extracting a delta F series. Defaults to False.
-        use_means (bool, optional): Use means histogram instead of standard deviation to separate channels. Defaults to False.
+        channel_means_only (bool, optional): Extract the channel means and exit without extracting a delta F series.
+        Defaults to False.
+        use_means (bool, optional): Use means histogram instead of standard deviation to separate channels.
+        Defaults to False.
         flip_channels (bool, optional): Flip extracted channel order. Defaults to False.
         interim_dir (str, optional): Path to the interim directory. Defaults to "interim/".
         skip_start (int, optional): Number of frames to skip at the start of the recording. Defaults to None.
         skip_end (int, optional): Number of frames to skip at the end of the recording. Defaults to None.
+        no_qa (bool, optional): Skip automatic quality control checks. Defaults to False.
     """
     click.echo(f"Preprocessing file {path}.")
 
@@ -135,12 +147,12 @@ def run_preprocessing(
     click.echo("Loading data...")
 
     # Determine whether we're working with an NWB file
-    nwb = True if path.endswith(".nwb") else False
+    nwb = bool(path.endswith(".nwb"))
 
     session_id, d, ts = load_raw(path, nwb=nwb)
 
     if skip_start and skip_start != 0:
-        skip_start = skip_start - 1
+        skip_start -= 1
 
     # If odd or even skips, add one to make them even to avoid strangeness
     if skip_start and skip_start % 2 != 0:
@@ -222,7 +234,9 @@ def run_preprocessing(
 
     if window_width > binned_frames.shape[0]:
         click.echo(
-            f"WARNING: Default window width is larger than the number of frames. Setting window width to {binned_frames.shape[0] // 4}."
+            f"WARNING: Default window width is larger than the number of frames. Setting window width to {
+                binned_frames.shape[0] // 4
+            }."
         )
         window_width = binned_frames.shape[0] // 4
 
@@ -266,6 +280,55 @@ def run_preprocessing(
 
     timestamps = da.from_array(np.array(ts[gcamp_filter[:max_idx]], dtype="S25"), chunks="auto")
 
+    # Quality control checks
+    qa_histogram_separation = None
+    qa_timestamp_consistency = None
+    qa_timestamp_jump = None
+    qa_check_noise, qa_noise_levels = None, None
+    qa_check_snr, qa_snr = None, None
+    qa_check_bleaching, qa_bleaching = None, None
+    if not no_qa:
+        click.echo("Running QA checks...")
+
+        qa_histogram_separation = qa.check_histogram_separation(np.array(frame_stds if not use_means else frame_means))
+        if qa_histogram_separation:
+            click.echo("✅ Histogram separation check passed.")
+        else:
+            click.echo("❌ ERROR - histogram separation failed, channels could not be fully separated!")
+
+        qa_timestamp_consistency = qa.check_timestamp_consistency(timestamps)
+        if qa_timestamp_consistency:
+            click.echo("✅ Timestamp consistency check passed, low interval standard deviation.")
+        else:
+            click.echo("❌ ERROR - timestamp consistency check failed, timestamp drift detected!!")
+
+        qa_timestamp_jump = qa.check_timestamp_jumps(timestamps)
+        if qa_timestamp_jump:
+            click.echo("✅ Timestamp jump check passed, no timestamp interval above two standard deviations.")
+        else:
+            click.echo("❌ ERROR - timestamp jump check failed, intervals above two standard deviations detected!")
+
+        qa_check_noise, qa_noise_levels = qa.check_noise(f_signal, return_noise=True)
+        if qa_check_noise:
+            click.echo(f"✅ Noise level check passed, median recording shot noise {np.median(qa_noise_levels):.2f} %.")
+        else:
+            click.echo(
+                "❌ ERROR - noise level check failed, recording has high noise "
+                f"(median {np.median(qa_noise_levels):.2f} %)!"
+            )
+
+        qa_check_snr, qa_snr = qa.check_snr(f_signal, return_snr=True)
+        if qa_check_snr:
+            click.echo(f"✅ SNR check passed (recording SNR is {qa_snr:.2f}).")
+        else:
+            click.echo(f"❌ ERROR - SNR check failed (recording SNR is {qa_snr:.2f})!")
+
+        qa_check_bleaching, qa_bleaching = qa.check_bleaching(f_mean_timeseries, return_slope=True)
+        if qa_check_bleaching:
+            click.echo("✅ Photobleaching check passed.")
+        else:
+            click.echo(f"❌ ERROR - photobleaching check failed (bleaching factor is {qa_bleaching})")
+
     outpath = out_dir + os.sep + session_id + "_preprocessed.h5"
     with timer.Timer(f"Writing data to {outpath}"):
         # da.to_hdf5(
@@ -290,6 +353,17 @@ def run_preprocessing(
                 "/qa/isosb_maxip_projection": isosb_projections.get("maxip"),
                 "/qa/f_mean_timeseries": f_mean_timeseries,
                 "/qa/f_maxip": f_maxip,
+                "/qa/noise_levels": qa_noise_levels,
+            },
+            attributes={
+                "/qa/checks/histogram_separation": qa_histogram_separation,
+                "/qa/checks/timestamp_consistency": qa_timestamp_consistency,
+                "/qa/checks/timestamp_jump": qa_timestamp_jump,
+                "/qa/checks/noise_check": qa_check_noise,
+                "/qa/checks/snr_check": qa_check_snr,
+                "/qa/checks/snr": qa_snr,
+                "/qa/checks/bleaching_check": qa_check_bleaching,
+                "/qa/checks/bleaching_factor": qa_bleaching,
             },
             compression="lzf",
         )
