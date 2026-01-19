@@ -4,6 +4,10 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 ## Unreleased
 
+### Fixed
+
+- Pin pynwb version to pre-3.0, which currently breaks installs.
+
 ## [0.7.3]
 
 ### Added
