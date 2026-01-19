@@ -107,6 +107,10 @@ def generate_preprocessing_report(path: str, out_dir: str = ".") -> str:
             [np.datetime64(ts) for ts in preproc.get("timestamps")],  # type: ignore[attr-defined]
             as_html=True,
         ),
+        "fig_integrity_timestamp_jumps": preqa.plot_timestamp_jumps(
+            preproc.get("timestamps"),  # type: ignore[attr-defined]
+            as_html=True,
+        ),
         "fig_separation_pre_timeseries_mean": preqa.plot_raw_timeseries(
             preproc.get("qa").get("frame_means_timeseries"),  # type: ignore[attr-defined]
             as_html=True,

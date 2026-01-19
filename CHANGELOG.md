@@ -7,6 +7,7 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 ### Added
 
 - Add automated QA check results to preprocessing reports ([[#80](https://github.com/DuguidLab/mesoscopy/issues/80)])
+- Add timedelta series to preprocessing report.
 
 ### Fixed
 

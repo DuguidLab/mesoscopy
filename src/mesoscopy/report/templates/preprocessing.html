@@ -116,9 +116,14 @@
 <div class="row mb-3">
     <h2 id="integrity">Timeseries integrity</h2>
 
-    <div class="col-md-12 mb-3 mt-3">
+    <div class="col-md-6 mb-3 mt-3">
         <h6>Timestamp series</h6>
         {{ fig_integrity_timestamps | safe }}
+    </div>
+
+    <div class="col-md-6 mb-3 mt-3">
+        <h6>Timedelta series</h6>
+        {{ fig_integrity_timestamp_jumps | safe }}
     </div>
 </div>
 
