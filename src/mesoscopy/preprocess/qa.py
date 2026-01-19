@@ -273,6 +273,30 @@ def plot_timestamps(timestamps: list | npt.NDArray, as_html: bool = False) -> st
     return fig
 
 
+def plot_timestamp_jumps(
+    timestamps: npt.NDArray | list, std_threshold: float = 2.0, as_html: bool = False
+) -> str | go.Figure:
+    try:
+        timestamps = np.array([datetime.fromisoformat(str(ts, encoding="utf-8")) for ts in np.array(timestamps)])
+    except ValueError:
+        timestamps = np.array([float(ts) for ts in timestamps])
+    timedeltas = np.diff(timestamps).astype("timedelta64[ms]").astype(float)
+    zscored_intervals = stats.zscore(timedeltas)
+
+    fig = go.Figure(
+        layout=go.Layout(
+            xaxis={"title": {"text": "Frame index"}},
+            yaxis={"title": {"text": "Timedelta (ms)"}},
+            margin={"l": 20, "r": 20, "t": 20, "b": 20},
+        )
+    )
+
+    fig.add_trace(go.Scatter(y=timedeltas, mode="lines", name="Timestamp"))
+    if as_html:
+        return fig.to_html(full_html=False)
+    return fig
+
+
 def plot_raw_timeseries(raw_timeseries: npt.NDArray, as_html: bool = False) -> str | go.Figure:
     """Plots a raw timeseries signal using Plotly.
 

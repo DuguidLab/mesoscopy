@@ -4,6 +4,15 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 ## Unreleased
 
+### Added
+
+- Add automated QA check results to preprocessing reports ([[#80](https://github.com/DuguidLab/mesoscopy/issues/80)])
+- Add timedelta series to preprocessing report.
+
+### Fixed
+
+- Pin pynwb version to pre-3.0, which currently breaks installs.
+
 ## [0.7.3]
 
 ### Added

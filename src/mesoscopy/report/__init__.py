@@ -94,8 +94,21 @@ def generate_preprocessing_report(path: str, out_dir: str = ".") -> str:
         ),
         "frame_num": len(preproc.get("F")),  # type: ignore[attr-defined]
         "filesize": preproc.id.get_filesize() / (1024 * 1024),
+        "qa_histogram_separation": preproc.attrs.get("/qa/checks/histogram_separation"),
+        "qa_timestamp_consistency": preproc.attrs.get("/qa/checks/timestamp_consistency"),
+        "qa_timestamp_jump": preproc.attrs.get("/qa/checks/timestamp_jump"),
+        "qa_check_noise": preproc.attrs.get("/qa/checks/noise_check"),
+        "qa_median_noise": np.median(np.array(preproc.get("/qa/noise_levels", 0))),
+        "qa_check_snr": preproc.attrs.get("/qa/checks/snr_check"),
+        "qa_snr": preproc.attrs.get("/qa/checks/snr"),
+        "qa_check_bleaching": preproc.attrs.get("/qa/checks/bleaching_check"),
+        "qa_bleaching_factor": preproc.attrs.get("/qa/checks/bleaching_factor"),
         "fig_integrity_timestamps": preqa.plot_timestamps(
             [np.datetime64(ts) for ts in preproc.get("timestamps")],  # type: ignore[attr-defined]
+            as_html=True,
+        ),
+        "fig_integrity_timestamp_jumps": preqa.plot_timestamp_jumps(
+            preproc.get("timestamps"),  # type: ignore[attr-defined]
             as_html=True,
         ),
         "fig_separation_pre_timeseries_mean": preqa.plot_raw_timeseries(
