@@ -1499,7 +1499,7 @@ requires-dist = [
     { name = "pandas" },
     { name = "pims", specifier = ">=0.7" },
     { name = "plotly" },
-    { name = "pynwb", specifier = ">=2.3.1" },
+    { name = "pynwb", specifier = ">=2.3.1,<3" },
     { name = "pyqt5" },
     { name = "scikit-image" },
     { name = "scikit-video" },
@@ -2546,19 +2546,18 @@ wheels = [
 
 [[package]]
 name = "pynwb"
-version = "3.1.1"
+version = "2.8.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "h5py" },
     { name = "hdmf" },
     { name = "numpy" },
     { name = "pandas" },
-    { name = "platformdirs" },
     { name = "python-dateutil" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/97/c2/cea8b04b71b6c097ea47e9df5efd9cefe892c16d32a11c01647863563354/pynwb-3.1.1.tar.gz", hash = "sha256:1cd3f611899115944ebb5bb2e183dc5e1d129bdef937bcf67cf550e69cdbf535", size = 35672287, upload-time = "2025-07-23T03:35:12.971Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0c/f4/864dc16896491fbeeded37ebc50b03f3030ba13c74ad762150667a31d44e/pynwb-2.8.3.tar.gz", hash = "sha256:e0683a9525ae389e87341eed9bd7908d4d0a7c35def74ce5822a707cca230959", size = 35622362, upload-time = "2024-11-20T01:23:00.186Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a7/ab/ef1f9ae54538ea7086b70bde65c4d238faf06b18c9fe0b2bc9421519392d/pynwb-3.1.1-py3-none-any.whl", hash = "sha256:d3492ad939837be82dd46f7f2b8c93309b1645a3d4f9c3c1bfa5356432355c44", size = 1394986, upload-time = "2025-07-23T03:35:11.045Z" },
+    { url = "https://files.pythonhosted.org/packages/83/f8/c6b2ebbee27c99a2d747462a0b1a1ec02484255bce83564d3ccfc3a5952b/pynwb-2.8.3-py3-none-any.whl", hash = "sha256:3ed35db747caa2b511edd8b243f6112034e5dd056f965b9f89a9c5dd1756dda0", size = 1385030, upload-time = "2024-11-20T01:22:57.794Z" },
 ]
 
 [[package]]
