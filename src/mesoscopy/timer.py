@@ -1,4 +1,4 @@
-#  Copyright (c) 2024 Constantinos Eleftheriou <Constantinos.Eleftheriou@ed.ac.uk>.
+#  Copyright (c) 2025 Constantinos Eleftheriou <Constantinos.Eleftheriou@ed.ac.uk>.
 #
 #   Permission is hereby granted, free of charge, to any person obtaining a copy of this
 #   software and associated documentation files (the "Software"), to deal in the
@@ -18,22 +18,31 @@
 #  IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
-from importlib import resources
 
-import mesoscopy.resources
-from mesoscopy import io
+import time
+
+import click
 
 
-def get_default_landmarks() -> dict:
-    """Get default landmark coordinates.
+class Timer:
+    """Timer context manager for measuring execution time of analysis blocks."""
 
-    Returns:
-        dict: Default landmark coordinates.
-    """
-    return io.read_points(
-        str(
-            resources.files(mesoscopy.resources).joinpath(
-                "ccf_template_landmarks_140x142.csv"
-            )
-        )
-    )
+    def __init__(self, message: str = "Analysis"):
+        self.message = message
+
+    def __enter__(self):
+        self.start_time = time.time()
+        click.echo(f"{self.message}...")
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        elapsed_time = time.time() - self.start_time
+        if elapsed_time > 60:
+            minutes, seconds = divmod(elapsed_time, 60)
+            click.echo(f"{self.message} took {int(minutes)} minutes and {seconds:.2f} seconds.")
+        else:
+            click.echo(f"{self.message} took {elapsed_time:.2f} seconds.")
+
+
+class TimerError(Exception):
+    """Custom exception for timer errors."""

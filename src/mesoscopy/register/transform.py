@@ -18,14 +18,11 @@
 #  IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
-import os
-import click
 import time
+
+import click
 import numpy as np
-
 from skimage import transform as trf
-
-import mesoscopy.plots as plots
 
 
 def landmarks_affine(
@@ -34,9 +31,7 @@ def landmarks_affine(
     template_landmarks: dict,
     crop_x: int = 0,
     crop_y: int = 0,
-    qa_dir: str = "",
-    session_id: str = "",
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, trf.ProjectiveTransform]:
     """Warp a DeltaF/F series to match a template using anatomical landmarks.
 
     Args:
@@ -58,45 +53,15 @@ def landmarks_affine(
     start = time.time()
     tform = trf.estimate_transform("affine", template, recording)
     end = time.time()
-    click.echo("Transform estimated in {} s".format(end - start))
+    click.echo(f"Transform estimated in {end - start} s")
 
-    if qa_dir:
-        plots.plot_scatters(
-            xs=[template[:, 1], recording[:, 1]],
-            ys=[template[:, 0], recording[:, 0]],
-            outpath=qa_dir
-            + os.sep
-            + session_id
-            + "_qa_registration_unregistered-landmarks.png",
-            labels=["template", "recording"],
-            message="Saved scatter of unregistered landmarks.",
-        )
-
-        plots.plot_scatters(
-            xs=[template[:, 1], tform.inverse(recording)[:, 1]],
-            ys=[template[:, 0], tform.inverse(recording)[:, 0]],
-            outpath=qa_dir
-            + os.sep
-            + session_id
-            + "_qa_registration_registered-landmarks.png",
-            labels=["template", "registered"],
-            message="Saved scatter of registered landmarks.",
-        )
-
-    start = time.time()
-    _warped = []
-    with click.progressbar(
-        range(deltaf_series.shape[0]), label="Registering recording to template..."
-    ) as frame_ids:
+    warped_ = []
+    with click.progressbar(range(deltaf_series.shape[0]), label="Registering recording to template...") as frame_ids:
         for idx in frame_ids:
             if crop_x > 0 or crop_y > 0:
-                _warped.append(
-                    trf.warp(deltaf_series[idx, :crop_y, :crop_x], tform, order=3)
-                )
+                warped_.append(trf.warp(deltaf_series[idx, :crop_y, :crop_x], tform.inverse, order=3))
             else:
-                _warped.append(trf.warp(deltaf_series[idx], tform, order=3))
-    warped = np.array(_warped)
-    end = time.time()
-    click.echo("Session registered in {} s".format(end - start))
+                warped_.append(trf.warp(deltaf_series[idx, :, :], tform.inverse, order=3))
+    warped = np.array(warped_)
 
-    return warped, tform.params[None, :]
+    return warped, tform

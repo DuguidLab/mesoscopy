@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+
+{% block toc%}
+<li class="nav-item"> <a class="nav-link d-flex align-items-center gap-2" href="#metadata">
+        <svg class="bi" aria-hidden="true">
+            <use xlink:href="#file-earmark-text"></use>
+        </svg>
+        Metadata
+    </a> </li>
+<li class="nav-item"> <a class="nav-link d-flex align-items-center gap-2" href="#autoqa">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-flag"
+            viewBox="0 0 16 16">
+            <path
+                d="M14.778.085A.5.5 0 0 1 15 .5V8a.5.5 0 0 1-.314.464L14.5 8l.186.464-.003.001-.006.003-.023.009a12 12 0 0 1-.397.15c-.264.095-.631.223-1.047.35-.816.252-1.879.523-2.71.523-.847 0-1.548-.28-2.158-.525l-.028-.01C7.68 8.71 7.14 8.5 6.5 8.5c-.7 0-1.638.23-2.437.477A20 20 0 0 0 3 9.342V15.5a.5.5 0 0 1-1 0V.5a.5.5 0 0 1 1 0v.282c.226-.079.496-.17.79-.26C4.606.272 5.67 0 6.5 0c.84 0 1.524.277 2.121.519l.043.018C9.286.788 9.828 1 10.5 1c.7 0 1.638-.23 2.437-.477a20 20 0 0 0 1.349-.476l.019-.007.004-.002h.001M14 1.221c-.22.078-.48.167-.766.255-.81.252-1.872.523-2.734.523-.886 0-1.592-.286-2.203-.534l-.008-.003C7.662 1.21 7.139 1 6.5 1c-.669 0-1.606.229-2.415.478A21 21 0 0 0 3 1.845v6.433c.22-.078.48-.167.766-.255C4.576 7.77 5.638 7.5 6.5 7.5c.847 0 1.548.28 2.158.525l.028.01C9.32 8.29 9.86 8.5 10.5 8.5c.668 0 1.606-.229 2.415-.478A21 21 0 0 0 14 7.655V1.222z" />
+        </svg>
+        Auto-QA
+    </a> </li>
+<li class="nav-item"> <a class="nav-link d-flex align-items-center gap-2" href="#integriy">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-stopwatch"
+            viewBox="0 0 16 16">
+            <path d="M8.5 5.6a.5.5 0 1 0-1 0v2.9h-3a.5.5 0 0 0 0 1H8a.5.5 0 0 0 .5-.5z" />
+            <path
+                d="M6.5 1A.5.5 0 0 1 7 .5h2a.5.5 0 0 1 0 1v.57c1.36.196 2.594.78 3.584 1.64l.012-.013.354-.354-.354-.353a.5.5 0 0 1 .707-.708l1.414 1.415a.5.5 0 1 1-.707.707l-.353-.354-.354.354-.013.012A7 7 0 1 1 7 2.071V1.5a.5.5 0 0 1-.5-.5M8 3a6 6 0 1 0 .001 12A6 6 0 0 0 8 3" />
+        </svg>
+        Timeseries integriy
+    </a>
+</li>
+<li class="nav-item"> <a class="nav-link d-flex align-items-center gap-2" href="#separation">
+        <svg class="bi" aria-hidden="true">
+            <use xlink:href="#graph-up"></use>
+        </svg>
+        Channel separation
+    </a>
+</li>
+<li class="nav-item"> <a class="nav-link d-flex align-items-center gap-2" href="#channel-dff">
+        <svg class="bi" aria-hidden="true">
+            <use xlink:href="#graph-up"></use>
+        </svg>
+        Channel ∆F/F
+    </a>
+</li>
+<li class="nav-item"> <a class="nav-link d-flex align-items-center gap-2" href="#corrected-dff">
+        <svg class="bi" aria-hidden="true">
+            <use xlink:href="#graph-up"></use>
+        </svg>
+        Corrected ∆F/F
+    </a>
+</li>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1>Preprocessing Report</h1>
+    <h3>{{ session_id }}</h3>
+</div>
+
+
+<div class="row mb-3">
+    <h2 id="metadata">Session metadata</h2>
+
+    <div class="row mb-1">
+        <div class="col-md-4 mb-1">
+            <strong>Animal ID:</strong> {{ animal_id or "Unknown" }}
+        </div>
+        <div class="col-md-4 mb-1">
+            <strong>Session date:</strong> {{ session_date or "Unknown" }}
+        </div>
+        <div class="col-md-4 mb-1">
+            <strong>Experiment ID:</strong> {{ experiment_id or "Unknown" }}
+        </div>
+    </div>
+    <div class="row mb-1">
+        <div class="col-md-4 mb-1">
+            <strong>Recording duration:</strong> {{ duration or "Unknown" }}
+        </div>
+        <div class="col-md-4 mb-1">
+            <strong>∆F/F frames:</strong> {{ frame_num or "Unknown" }}
+        </div>
+        <div class="col-md-4 mb-1">
+            <strong>File size:</strong> {{ '%0.2f'| format(filesize|float) or "Unknown" }} MB
+        </div>
+    </div>
+</div>
+
+<div class="row mb-3">
+    <h2 id="autoqa">Preprocessing auto-QA checks</h2>
+
+    <div class="row mb-1">
+        <div class="col-md-4 mb-1">
+            <strong>Histogram separation:</strong> {{ "✅" if qa_histogram_separation else "❌" }}
+        </div>
+        <div class="col-md-4 mb-1">
+            <strong>Timestamp consistency:</strong> {{ "✅" if qa_timestamp_consistency else "❌" }}
+        </div>
+        <div class="col-md-4 mb-1">
+            <strong>Timestamp jumps:</strong> {{ "✅" if qa_timestamp_jump else "❌" }}
+        </div>
+    </div>
+    <div class="row mb-1">
+        <div class="col-md-4 mb-1">
+            <strong>Noise levels:</strong> {{ "✅" if qa_check_noise else "❌" }} (Median noise {{ '%0.2f'|
+            format(qa_median_noise|float) if qa_median_noise is defined else "Unknown" }} %)
+        </div>
+        <div class="col-md-4 mb-1">
+            <strong>Signal-to-Noise:</strong> {{ "✅" if qa_check_snr else "❌" }} ({{ '%0.2f'| format(qa_snr|float) if
+            qa_snr is
+            defined else "Unknown" }} SNR)
+        </div>
+        <div class="col-md-4 mb-1">
+            <strong>Bleaching drift:</strong> {{ "✅" if qa_check_bleaching else "❌" }} ({{ '%0.2f'|
+            format(qa_bleaching_factor|float) if qa_bleaching_factor is defined else "Unknown" }} BF)
+        </div>
+    </div>
+</div>
+
+<div class="row mb-3">
+    <h2 id="integrity">Timeseries integrity</h2>
+
+    <div class="col-md-6 mb-3 mt-3">
+        <h6>Timestamp series</h6>
+        {{ fig_integrity_timestamps | safe }}
+    </div>
+
+    <div class="col-md-6 mb-3 mt-3">
+        <h6>Timedelta series</h6>
+        {{ fig_integrity_timestamp_jumps | safe }}
+    </div>
+</div>
+
+<div class="row mb-3">
+    <h2 id="separation">Channel separation</h2>
+
+    <h4>Pre-separation statistics</h4>
+    <div class="row mb-3 mt-3">
+        <h6>Mean raw signal timeseries</h6>
+        {{ fig_separation_pre_timeseries_mean | safe}}
+    </div>
+    <div class="row mb-3 mt-3">
+        <div class="col-md-6 mb-3">
+            <h6>Frame mean histogram</h6>
+            {{ fig_separation_pre_hist_mean | safe }}
+        </div>
+        <div class="col-md-6 mb-3">
+            <h6>Frame standard deviation histogram</h6>
+            {{ fig_separation_pre_hist_std | safe }}
+        </div>
+    </div>
+
+    <h4>Post-separation QA</h4>
+    <div class="row mb-3">
+        <div class="col-md-12 mb-3 mt-3">
+            <h6>Channel raw signal timeseries</h6>
+            {{ fig_separation_post_timeseries | safe }}
+        </div>
+    </div>
+    <div class="row mb-3">
+        <div class="col-md-6 mb-3 mt-3">
+            <h6>GCaMP (470nm) channel maximum intensity projection</h6>
+            {{ fig_separation_post_gcamp_maxip | safe }}
+        </div>
+        <div class="col-md-6 mb-3 mt-3">
+            <h6>Isosbestic (405nm) channel maximum intensity projection</h6>
+            {{ fig_separation_post_isosb_maxip | safe }}
+        </div>
+    </div>
+    <div class="row mb-3">
+        <div class="col-md-6 mb-3 mt-3">
+            <h6>GCaMP (470nm) channel standard deviation projection</h6>
+            {{ fig_separation_post_gcamp_stdp | safe }}
+        </div>
+        <div class="col-md-6 mb-3 mt-3">
+            <h6>Isosbestic (405nm) channel standard deviation projection</h6>
+            {{ fig_separation_post_isosb_stdp | safe }}
+        </div>
+    </div>
+    <div class="row mb-3">
+        <div class="col-md-6 mb-3 mt-3">
+            <h6>Channel filter timeseries</h6>
+            {{ fig_separation_post_filter_idx | safe }}
+        </div>
+        <div class="col-md-6 mb-3 mt-3">
+            <h6>Channel filter proportion</h6>
+            {{ fig_separation_post_filter_pie | safe }}
+        </div>
+    </div>
+</div>
+
+<div class="row mb-3">
+    <h2 id="channel-dff">∆F/F per channel</h2>
+
+    <div class="col-md-12 mb-3 mt-3">
+        <h6>Mean channel ∆F/F timeseries</h6>
+        {{ fig_channel_dff | safe }}
+    </div>
+</div>
+
+
+<div class="row mb-3">
+    <h2 id="corrected-dff">Corrected ∆F/F</h2>
+
+    <div class="row">
+        <div class="col-md-12 mb-3 mt-3">
+            <h6>Mean ∆F/F timeseries</h6>
+            {{ fig_corrected_dff | safe }}
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-md-6 mb-3 mt-3">
+            <h6>∆F/F maximum intensity projection</h6>
+            {{ fig_corrected_maxip | safe }}
+        </div>
+        <div class="col-md-6 mb-3 mt-3">
+            <h6>Example frame</h6>
+            {{ fig_corrected_example | safe }}
+        </div>
+    </div>
+</div>
+
+{% endblock %}

@@ -18,35 +18,34 @@
 #  IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
+import json
 import os
+import pathlib
+
 import click
 import h5py
 import numpy as np
-
-import time
-
-import skimage.io as skio
-
-import mesoscopy.io as io
-import mesoscopy.plots as plots
-import mesoscopy.register.landmarks_gui as reg_gui
-import mesoscopy.register.transform as trf
-import mesoscopy.resources as res
-
 from pynwb import TimeSeries
 from pynwb.image import ImageSeries
 from pynwb.ophys import CorrectedImageStack
+
+import mesoscopy.preprocess as preproc
+import mesoscopy.preprocess.compute as preproc_compute
+import mesoscopy.register.landmarks_gui as reg_gui
+import mesoscopy.register.transform as trf
+import mesoscopy.resources as res
+from mesoscopy import io
+from mesoscopy import timer as timer
 
 
 @click.group("register")
 def register_cmd() -> None:
     """Register recordings to a template."""
-    pass
 
 
-@register_cmd.command("mark-landmarks")
+@register_cmd.command("label")
 @click.argument(
-    "maxip_path",
+    "path",
     type=click.Path(exists=True),
 )
 @click.option(
@@ -67,18 +66,39 @@ def register_cmd() -> None:
     type=str,
     help="Session ID for the recording.",
 )
-def mark_landmarks(maxip_path, out_dir, template_points, session_id) -> dict:
+def label_cmd(path, out_dir, template_points, session_id) -> dict:
     """Mark landmarks on a recording for registration to a template using the landmarks GUI.
 
     Args:
-        maxip_path (str): Path to maximum intensity projection image.
-        out_dir (str): Output directory for registered recording.
+        path (str): Path to preprocessed HDF5 file or NWB file.
+        out_dir (str): Output directory for registration landmarks file.
         template_points (str): Path to template landmark points in CSV or Fiji XML points format.
         session_id (str): Session ID for the recording.
-    """
 
+    Returns:
+        dict: Dictionary with the landmarks and their x-y coordinates.
+              Dictionary keys are landmark names, while x-y coordinates are stored as an (y, x)
+    """
     click.echo("Loading imaging data...")
-    maxip = skio.imread(maxip_path)
+    nwb = bool(path.endswith(".nwb"))
+
+    if not session_id:
+        session_id = path.split("/")[-1].replace(".nwb", "") if nwb else path.split("/")[-1].replace(".h5", "")
+        session_id = session_id.replace("_preprocessed", "")
+
+    maxip = None
+    isosb_maxip = None
+
+    # Load maxip from preprocessed file.
+    # if it does not exist, generate maxip from raw data.
+    if path.endswith("_preprocessed.h5"):
+        maxip, isosb_maxip = load_maxips(path)
+    else:
+        # generate maxip from raw data
+        click.echo("⚠️ No maximum intensity projection found. Generating from raw data, this might take some time...")
+        with timer.Timer("Generating maximum intensity projection"):
+            _, raw_data, _ = preproc.load_raw(path, nwb=nwb)
+            maxip = preproc_compute.projections(raw_data)["maxip"]
 
     click.echo("Loading template landmarks...")
     template_landmarks = res.get_default_landmarks()
@@ -86,10 +106,7 @@ def mark_landmarks(maxip_path, out_dir, template_points, session_id) -> dict:
         template_landmarks = io.read_points(template_points)
 
     click.echo("Launching landmark identification GUI...")
-    recording_landmarks = reg_gui.mark_landmarks(maxip, template_landmarks)
-
-    if not session_id:
-        session_id = os.path.basename(maxip_path).split(".")[0].split("_qa")[0]
+    recording_landmarks = reg_gui.mark_landmarks(maxip, isosb_maxip, template_landmarks)
 
     click.echo("Saving recording landmarks...")
     outpath = out_dir + os.sep + session_id + "_landmarks.csv"
@@ -126,14 +143,14 @@ def mark_landmarks(maxip_path, out_dir, template_points, session_id) -> dict:
 )
 @click.option("--crop-x", default=0, help="Crop recording along the x-axis.")
 @click.option("--crop-y", default=0, help="Crop recording along the y-axis.")
-def register_landmarks(
+def landmarks_cmd(
     path: str,
     out_dir: str,
     recording_points: str,
     template_points: str,
     crop_x: int = 0,
     crop_y: int = 0,
-) -> None:
+) -> str:
     """Register a recording to a template based on defined landmarks.
 
     Args:
@@ -143,22 +160,23 @@ def register_landmarks(
         template_points (str, optional): Path to template landmark points in CSV or Fiji XML points format.
         crop_x (int, optional): Number of pixels to crop from the x-axis of the recording. Defaults to 0.
         crop_y (int, optional): Number of pixels to crop from the y-axis of the recording. Defaults to 0.
-    """
-    click.echo("Registering recording {} to template.".format(path))
 
-    registration_start = time.time()
+    Returns:
+        str: Path to the registered recording file.
+
+    Raises:
+        ValueError: If the path to recording landmarks cannot be inferred.
+    """
+    click.echo(f"Registering recording {path} to template.")
 
     os.makedirs(out_dir, exist_ok=True)
-
-    qa_dir = out_dir + os.sep + "qa"
-    os.makedirs(qa_dir, exist_ok=True)
 
     click.echo("Loading imaging data...")
 
     # Determine whether we're working with an NWB file
     nwb = True if path.endswith(".nwb") else False
 
-    session_id, deltaf_series, timestamps = load_preprocessed(path, nwb)
+    session_id, deltaf_series, timestamps = load_deltaf(path, nwb)
 
     click.echo("Loading landmarks...")
     template_landmarks = res.get_default_landmarks()
@@ -166,14 +184,13 @@ def register_landmarks(
         template_landmarks = io.read_points(template_points)
 
     if not recording_points:
-        if nwb and os.path.exists(path.replace(".nwb", "_landmarks.csv")):
+        if nwb and pathlib.Path(path.replace(".nwb", "_landmarks.csv")).exists():
             recording_points = path.replace(".nwb", "_landmarks.csv")
-        elif os.path.exists(path.replace(".h5", "_landmarks.csv")):
+        elif pathlib.Path(path.replace(".h5", "_landmarks.csv")).exists():
             recording_points = path.replace(".h5", "_landmarks.csv")
         else:
-            raise ValueError(
-                "Path to recording landmarks could not be inferred. Please supply a recording landmarks file."
-            )
+            msg = "Path to recording landmarks could not be inferred. Please supply a recording landmarks file."
+            raise ValueError(msg)
     recording_landmarks = io.read_points(recording_points)
 
     warped, tform = trf.landmarks_affine(
@@ -182,40 +199,33 @@ def register_landmarks(
         template_landmarks,
         crop_x=crop_x,
         crop_y=crop_y,
-        qa_dir=qa_dir,
-        session_id=session_id,
-    )
-
-    plots.plot_frame(
-        warped[100],
-        outpath=qa_dir + os.sep + session_id + "_qa_registration_registered-frame.png",
-        message="Saved frame of registered session.",
     )
 
     # Save warped frames and timestamps
-    h5_path = out_dir + os.sep + session_id + "-registered.h5"
-    with h5py.File(h5_path, "w") as hf:
-        hf.create_dataset("F", data=warped)
-        hf.create_dataset("ts", data=timestamps)
-    click.echo("Saved registered frames at {}".format(h5_path))
-
-    registration_end = time.time()
-    click.echo(
-        "Registration took a total of {} mins.".format(
-            (registration_end - registration_start) / 60
-        )
+    outpath = out_dir + os.sep + session_id + "_registered.h5"
+    outpath = io.write_h5(
+        path=outpath,
+        data={
+            "/F": warped,
+            "/timestamps": timestamps,
+            "/tform": tform.params,
+            "/qa/recording_landmarks": np.array(list(recording_landmarks.values())),
+            "/qa/template_landmarks": np.array(list(template_landmarks.values())),
+            "/qa/registered_landmarks": tform.inverse(np.array(list(recording_landmarks.values()))),
+        },
     )
+    click.echo(f"Saved registered frames at {outpath}")
 
     if nwb:
         click.echo("Updating NWB file...")
-        update_nwb(path, h5_path, tform)
-        click.echo("Updated NWB file at {}".format(path))
+        update_nwb(path, outpath, tform)
+        click.echo(f"Updated NWB file at {path}")
+
+    return outpath
 
 
-def load_preprocessed(
-    path: str, nwb: bool = False
-) -> tuple[str, np.ndarray, np.ndarray]:
-    """Load preprocessed data from an HDF5 or NWB file.
+def load_deltaf(path: str, nwb: bool = False) -> tuple[str, np.ndarray, np.ndarray]:
+    """Load preprocessed deltaf from an HDF5 or NWB file.
 
     Args:
         path (str): Path to the preprocessed file.
@@ -232,10 +242,26 @@ def load_preprocessed(
     else:
         session_id = path.split("/")[-1].replace(".h5", "")
         f_preproc = h5py.File(path)
-        deltaf_series = f_preproc["/data"]
+        deltaf_series = f_preproc["/F"]
         timestamps = f_preproc["/timestamps"]
 
     return session_id, deltaf_series, timestamps
+
+
+def load_maxips(path: str) -> tuple[np.ndarray, np.ndarray]:
+    """Load maximum intensity projections from a preprocessed HDF5 file.
+
+    Args:
+        path (str): Path to the preprocessed HDF5 file.
+
+    Returns:
+        tuple[np.ndarray, np.ndarray]: Maximum intensity projection for gcamp and isosb channels.
+    """
+    f_preproc = h5py.File(path, "r")
+    gcamp_maxip_projection = np.array(f_preproc["/qa/gcamp_maxip_projection"])
+    isosb_maxip_projection = np.array(f_preproc["/qa/isosb_maxip_projection"])
+
+    return gcamp_maxip_projection, isosb_maxip_projection
 
 
 def update_nwb(nwb_path: str, h5_path: str, tform_params: np.ndarray) -> None:
@@ -252,16 +278,14 @@ def update_nwb(nwb_path: str, h5_path: str, tform_params: np.ndarray) -> None:
     f = h5py.File(h5_path, "r")
 
     try:
-        ophys_module = nwbfile.create_processing_module(
-            name="ophys", description="optical physiology processed data"
-        )
+        ophys_module = nwbfile.create_processing_module(name="ophys", description="optical physiology processed data")
     except ValueError:
         click.echo("Processing module already exists...")
         ophys_module = nwbfile.processing["ophys"]
 
     registered_series = ImageSeries(
         name="corrected",
-        data=f["/data"],
+        data=f["/F"],
         timestamps=f["/timestamps"],
         unit="df/f",
         description="dF/F widefield cortical imaging series.",

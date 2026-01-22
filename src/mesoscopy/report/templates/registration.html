@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block toc%}
+<li class="nav-item"> <a class="nav-link d-flex align-items-center gap-2" href="#metadata"> <svg class="bi"
+            aria-hidden="true">
+            <use xlink:href="#file-earmark-text"></use>
+        </svg>
+        Metadata
+    </a>
+</li>
+{% endblock %}
+
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1>Registration Report</h1>
+    <h3>{{ session_id }}</h3>
+</div>
+
+<div class="row mb-3">
+    <h2 id="metadata">Session metadata</h2>
+
+    <div class="row mb-1">
+        <div class="col-md-4 mb-1">
+            <strong>Animal ID:</strong> {{ animal_id or "Unknown" }}
+        </div>
+        <div class="col-md-4 mb-1">
+            <strong>Session date:</strong> {{ session_date or "Unknown" }}
+        </div>
+        <div class="col-md-4 mb-1">
+            <strong>Experiment ID:</strong> {{ experiment_id or "Unknown" }}
+        </div>
+    </div>
+    <div class="row mb-1">
+        <div class="col-md-4 mb-1">
+            <strong>Recording duration:</strong> {{ duration or "Unknown" }}
+        </div>
+        <div class="col-md-4 mb-1">
+            <strong>∆F/F frames:</strong> {{ frame_num or "Unknown" }}
+        </div>
+        <div class="col-md-4 mb-1">
+            <strong>File size:</strong> {{ '%0.2f'| format(filesize|float) or "Unknown" }} MB
+        </div>
+    </div>
+</div>
+
+<div class="row mb-3">
+    <h2 id="landmarks">Landmark affine transform</h2>
+
+    <div class="col-md-6 mb-3 mt-3">
+        <h6>Unregistered landmarks</h6>
+        {{ fig_landmarks_unregistered | safe }}
+    </div>
+    <div class="col-md-6 mb-3 mt-3">
+        <h6>Registered landmarks</h6>
+        {{ fig_landmarks_registered | safe }}
+    </div>
+</div>
+
+<div class="row mb-3">
+    <h2 id="frames">Frame registration</h2>
+
+    <div class="col-md-12 mb-3 mt-3">
+        <h6>Registered frame example</h6>
+        {{ fig_frame_example | safe }}
+    </div>
+</div>
+
+
+
+{% endblock %}

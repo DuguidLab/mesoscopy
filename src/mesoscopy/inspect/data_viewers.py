@@ -18,22 +18,35 @@
 #  IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
-from importlib import resources
 
-import mesoscopy.resources
-from mesoscopy import io
+"""Data inspection GUIs, based on Napari."""
+
+import napari
+from pynwb import NWBFile
 
 
-def get_default_landmarks() -> dict:
-    """Get default landmark coordinates.
+def acquisition_viewer(nwbfile: NWBFile) -> None:
+    """Napari viewer for raw acquisition data.
 
-    Returns:
-        dict: Default landmark coordinates.
+    Args:
+        nwbfile (NWBFile): NWB file object.
     """
-    return io.read_points(
-        str(
-            resources.files(mesoscopy.resources).joinpath(
-                "ccf_template_landmarks_140x142.csv"
-            )
-        )
+    viewer = napari.view_image(
+        nwbfile.acquisition.get("DualChannelImagingSeries").data, name="DualChannelImagingSeries"
     )
+
+    napari.run()
+
+
+def deltaf_viewer(nwbfile):
+    viewer = napari.view_image(nwbfile.processing.get("ophys").get("DeltaFSeries").data, name="DeltaFSeries")
+
+    napari.run()
+
+
+def ccfregistered_viewer(nwbfile):
+    viewer = napari.view_image(
+        nwbfile.processing.get("ophys").get("CCFRegisteredSeries").corrected.data, name="CCFRegisteredSeries"
+    )
+
+    napari.run()

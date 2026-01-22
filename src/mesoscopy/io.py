@@ -20,31 +20,26 @@
 #  SOFTWARE.
 import csv
 import typing
-import xmltodict
 from collections import OrderedDict
 
 import h5py
-import zarr
-
-import numpy as np
 import numpy.typing as npt
+import xmltodict
+import zarr
 from dask import array as da
-from pynwb import NWBHDF5IO, NWBFile
+from pynwb import NWBHDF5IO
+from pynwb import NWBFile
 
 
 @typing.overload
-def read_nwb(path: str, mode: str = "a") -> NWBFile: ...
+def read_nwb(path: str, mode: str = "a") -> NWBFile: ...  # pyright: ignore[reportOverlappingOverload]
 
 
 @typing.overload
-def read_nwb(
-    path: str, mode: str = "a", return_io: bool = True
-) -> typing.Tuple[NWBFile, NWBHDF5IO]: ...
+def read_nwb(path: str, mode: str = "a", return_io: bool = True) -> tuple[NWBFile, NWBHDF5IO]: ...
 
 
-def read_nwb(
-    path: str, mode: str = "a", return_io: bool = False
-) -> NWBFile | typing.Tuple[NWBFile, NWBHDF5IO]:
+def read_nwb(path: str, mode: str = "a", return_io: bool = False) -> NWBFile | tuple[NWBFile, NWBHDF5IO]:
     """Read an NWB file.
 
     Args:
@@ -63,20 +58,19 @@ def read_nwb(
     return nwbfile
 
 
-def write_nwb(
-    path: str, nwbfile: NWBFile, mode: str = "a", io: NWBHDF5IO = None
-) -> None:
+def write_nwb(path: str, nwbfile: NWBFile, mode: str = "w", io: NWBHDF5IO = None, **kwargs) -> None:
     """Write an NWB file.
 
     Args:
         path (str): Path to the NWB file.
         nwbfile (NWBFile): NWB file object.
         mode (str, optional): File write mode (i.e. write/append). Defaults to "w".
+        **kwargs: Parameters passed to NWBHDF5IO.write.
     """
     if io:
-        return io.write(nwbfile)
+        return io.write(nwbfile, **kwargs)
     with NWBHDF5IO(path, mode=mode) as io:
-        return io.write(nwbfile)
+        return io.write(nwbfile, **kwargs)
 
 
 def read_h5(path: str) -> h5py.File:
@@ -91,8 +85,28 @@ def read_h5(path: str) -> h5py.File:
     return h5py.File(path, "r")
 
 
-def write_h5():
-    raise NotImplementedError
+def write_h5(path: str, data: dict, compression: str = "lzf", attributes: dict = {}) -> str:
+    """Write a dictionary to an HDF5 file.
+
+    Args:
+        path (str): Path to the HDF5 file.
+        data (dict): Dictionary containing datasets to write in {'dataset_name': data_array} format.
+        compression (str, optional): Compression method for the datasets. Defaults to "lzf".
+        attributes (dict, optional): Attributes to write to the HDF5 file. Defaults to {}.
+
+    Returns:
+        str: Path to the written HDF5 file.
+
+    Example:
+        >>> data = {"dataset1": np.array([1, 2, 3]), "dataset2": np.array([[1, 2], [3, 4]])}
+        >>> write_h5("output.h5", data)
+    """
+    with h5py.File(path, "w") as h5file:
+        for key, value in data.items():
+            h5file.create_dataset(key, data=value, compression=compression)
+        if attributes:
+            h5file.attrs.update(attributes)
+    return path
 
 
 def store_interim(
@@ -153,7 +167,7 @@ def _read_fiji_points(path: str) -> dict[str, tuple[float, float]]:
     Returns:
         dict[str, tuple[float, float]]: Dictionary with the landmark names as keys and their x-y coordinates
     """
-    with open(path, "r") as fp:
+    with open(path) as fp:
         points = xmltodict.parse(fp.read())
         points = OrderedDict(
             {
@@ -174,11 +188,9 @@ def _read_csv_points(path: str) -> dict[str, tuple[float, float]]:
     Returns:
         dict[str, tuple[float, float]]: Dictionary with the landmark names as keys and their x-y coordinates
     """
-    with open(path, "r") as fp:
+    with open(path) as fp:
         csv_reader = csv.DictReader(fp)
-        points = OrderedDict(
-            {row["landmark"]: (float(row["y"]), float(row["x"])) for row in csv_reader}
-        )
+        points = OrderedDict({row["landmark"]: (float(row["y"]), float(row["x"])) for row in csv_reader})
 
     return points
 

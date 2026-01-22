@@ -1,4 +1,4 @@
-#  Copyright (c) 2024 Constantinos Eleftheriou <Constantinos.Eleftheriou@ed.ac.uk>.
+#  Copyright (c) 2025 Constantinos Eleftheriou <Constantinos.Eleftheriou@ed.ac.uk>.
 #
 #   Permission is hereby granted, free of charge, to any person obtaining a copy of this
 #   software and associated documentation files (the "Software"), to deal in the
@@ -18,22 +18,17 @@
 #  IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
-from importlib import resources
-
-import mesoscopy.resources
-from mesoscopy import io
+import numpy as np
+import scipy.stats as sst
 
 
-def get_default_landmarks() -> dict:
-    """Get default landmark coordinates.
+def zscore_deltaf(deltaf_series: np.ndarray) -> np.ndarray:
+    """Z-score a DeltaF/F series along the time axis.
+
+    Args:
+        deltaf_series (np.ndarray): DeltaF/F series to be z-scored.
 
     Returns:
-        dict: Default landmark coordinates.
+        np.ndarray: Z-scored DeltaF/F series.
     """
-    return io.read_points(
-        str(
-            resources.files(mesoscopy.resources).joinpath(
-                "ccf_template_landmarks_140x142.csv"
-            )
-        )
-    )
+    return np.array(sst.zscore(deltaf_series, axis=0))
