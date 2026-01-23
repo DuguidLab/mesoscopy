@@ -1,4 +1,9 @@
-# Mesoscopy
+![https://www.mesoscopy.org](./resources/mesoscopy-logo-banner.png)
+
+---
+
+[![Build & Test](https://github.com/DuguidLab/mesoscopy/actions/workflows/build-and-test.yml/badge.svg?branch=main)](https://github.com/DuguidLab/mesoscopy/actions/workflows/build-and-test.yml)
+![PyPI - Version](https://img.shields.io/pypi/v/mesoscopy)
 
 Mesoscopy is an open-source package for the analysis of mesoscale calcium recordings. It handles the preprocessing of mesoscale recording files to extract ∆F responses, the anatomical registration of recordings to the Allen Brain atlas as well as analysis of recordings captured at rest or with behaviour.
 
@@ -80,3 +85,33 @@ Then install `mesoscopy` via `pipx`:
 ```powershell
 pipx install mesoscopy
 ```
+
+## Usage
+
+For detailed documentation on how to use `mesoscopy`, please refer to our [documentation](mesoscopy.org).
+
+To see all available `mesoscopy` commands, run
+
+```bash
+mesoscopy --help
+```
+
+`mesoscopy` commands are self-documenting. Run `mesoscopy <command> --help` to get more information or see available sub-commands.
+
+## Upgrading
+
+Use `pipx` to upgrade mesoscopy:
+
+```bash
+pipx upgrade mesoscopy
+```
+
+## Contributing
+
+Mesoscopy is currently closed to PRs, except bugfixes. Please open an issue if you wish to contribute.
+
+## Funders
+
+<p align="left">
+  <img width="250" src="./resources/sidb.jpg"  alt="logo"/>
+</p>
