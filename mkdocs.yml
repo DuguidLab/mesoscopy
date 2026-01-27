@@ -97,7 +97,7 @@ nav:
     - Troubleshooting: troubleshooting.md
   - How-to:
     - Overview: how-to/index.md
-    - Data Acquisition: how-to/data-acquisition.md
+    - Data acquisition: how-to/data-acquisition.md
     - Preprocessing: how-to/preprocessing.md
     - Registration to the ABA: how-to/registration.md
     - Quality control: how-to/qa.md
