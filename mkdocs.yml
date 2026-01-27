@@ -5,11 +5,11 @@ repo_name: DuguidLab/mesoscopy
 
 theme:
   name: material
-  # favicon: assets/mesoscopy_logo_icon.png
+  favicon: assets/favicon.png
   # custom_dir: docs/overrides
   font:
     text: Montserrat 
-  # logo: assets/mesoscopy_logo_icon.png
+  logo: assets/mesoscopy-logo.png
   icon:
     repo: fontawesome/brands/github
   features:
@@ -29,16 +29,16 @@ theme:
   palette:
     - media: "(prefers-color-scheme: light)"
       primary: deep purple
-      accent: blue
+      accent: teal
       toggle:
-        icon: material/moon-waxing-crescent
+        icon: material/eye
         name: Switch to dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
       primary: deep purple
-      accent: blue
+      accent: teal
       toggle:
-        icon: material/weather-sunny
+        icon: material/eye-outline
         name: Switch to light mode
 
 extra_css:
