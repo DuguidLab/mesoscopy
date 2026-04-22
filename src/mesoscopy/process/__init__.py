@@ -22,16 +22,15 @@
 """Processing submodule."""
 
 import os
+
 import click
 import numpy as np
-import dask.array as da
 from pynwb.image import ImageSeries
 
-import mesoscopy.timer as timer
-
-import mesoscopy.io as io
 import mesoscopy.process.smooth as psm
 import mesoscopy.process.zscore as pzs
+from mesoscopy import io
+from mesoscopy import timer
 
 
 @click.group("process")
