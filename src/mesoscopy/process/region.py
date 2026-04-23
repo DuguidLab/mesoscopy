@@ -66,4 +66,21 @@ def extract_region_activity(
     return np.ma.array(deltaf_series, mask=~region_mask).mean(axis=(1, 2))
 
 
-def extract_all_regions(deltaf_series): ...
+def extract_all_regions(deltaf_series: npt.NDArray) -> dict:
+    annotations = resources.get_atlas_annotations()
+    regions = annotations.acronym.unique()
+
+    region_activity = {}
+
+    for region in regions:
+        region_left_hemisphere = f"L_{region}"
+        region_right_hemisphere = f"R_{region}"
+
+        region_activity[region_left_hemisphere] = extract_region_activity(
+            deltaf_series=deltaf_series, region_acronym=region, hemisphere="left"
+        )
+        region_activity[region_right_hemisphere] = extract_region_activity(
+            deltaf_series=deltaf_series, region_acronym=region, hemisphere="right"
+        )
+
+    return region_activity
