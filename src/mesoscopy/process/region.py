@@ -68,7 +68,7 @@ def extract_region_activity(
 
 def extract_all_regions(deltaf_series: npt.NDArray) -> dict:
     annotations = resources.get_atlas_annotations()
-    regions = annotations.acronym.unique()
+    regions = [region for region in annotations.acronym.unique() if region not in DEFAULT_EXCLUDE]
 
     region_activity = {}
 
