@@ -59,9 +59,9 @@ def landmarks_affine(
     with click.progressbar(range(deltaf_series.shape[0]), label="Registering recording to template...") as frame_ids:
         for idx in frame_ids:
             if crop_x > 0 or crop_y > 0:
-                warped_.append(trf.warp(deltaf_series[idx, :crop_y, :crop_x], tform.inverse, order=3))
+                warped_.append(trf.warp(deltaf_series[idx, :crop_y, :crop_x], tform, order=3))
             else:
-                warped_.append(trf.warp(deltaf_series[idx, :, :], tform.inverse, order=3))
+                warped_.append(trf.warp(deltaf_series[idx, :, :], tform, order=3))
     warped = np.array(warped_)
 
     return warped, tform
