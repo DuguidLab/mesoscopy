@@ -66,8 +66,16 @@ def extract_region_activity(
     return np.ma.array(deltaf_series, mask=~region_mask).mean(axis=(1, 2))
 
 
-def extract_all_regions(deltaf_series: npt.NDArray) -> dict:
+def extract_all_regions(
+    deltaf_series: npt.NDArray, exclude: list | None = None, ignore_default_exclude: bool = False
+) -> dict:
     annotations = resources.get_atlas_annotations()
+
+    if exclude is None:
+        exclude = []
+
+    excluded_regions = DEFAULT_EXCLUDE if not ignore_default_exclude else []
+    excluded_regions.extend(exclude)
     regions = [region for region in annotations.acronym.unique() if region not in DEFAULT_EXCLUDE]
 
     region_activity = {}
