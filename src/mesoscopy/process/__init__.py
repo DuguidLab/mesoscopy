@@ -144,6 +144,28 @@ def zscore_cmd(path: str, out_dir: str) -> None:
         io.write_nwb(path, nwbfile, io=nwbio)
 
 
+@process_cmd.command("regions")
+@click.argument(
+    "path",
+    type=click.Path(exists=True),
+)
+@click.option(
+    "-o",
+    "--out_dir",
+    type=click.Path(dir_okay=True),
+    default="./",
+    help="Output directory for smoothed recording.",
+)
+def regions_cmd(path: str, out_dir: str) -> None:
+    """Extract ∆F signal averages from ABA-defined regions.
+
+    Args:
+        path (str): Path to registered HDF5 recording or NWB file.
+        out_dir (str): Path to output directory.
+    """
+    ...
+
+
 def load_deltaf(path: str, nwb: bool = False) -> tuple[str, np.ndarray, np.ndarray]:
     """Load preprocessed deltaf from an HDF5 or NWB file.
 
