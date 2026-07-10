@@ -19,12 +19,13 @@
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
 
+from concurrent.futures import ThreadPoolExecutor
+from typing import Literal
+
 import numpy as np
 import numpy.typing as npt
-import pandas as pd
-from typing import Literal
-from mesoscopy import resources
 
+from mesoscopy import resources
 
 DEFAULT_EXCLUDE = [
     "FRP1",
@@ -70,25 +71,32 @@ def extract_all_regions(
     deltaf_series: npt.NDArray, exclude: list | None = None, ignore_default_exclude: bool = False
 ) -> dict:
     annotations = resources.get_atlas_annotations()
+    left_aba, right_aba = resources.get_atlas()
 
     if exclude is None:
         exclude = []
 
-    excluded_regions = DEFAULT_EXCLUDE if not ignore_default_exclude else []
+    excluded_regions = list(DEFAULT_EXCLUDE) if not ignore_default_exclude else []
     excluded_regions.extend(exclude)
-    regions = [region for region in annotations.acronym.unique() if region not in DEFAULT_EXCLUDE]
+    regions = [region for region in annotations.acronym.unique() if region not in excluded_regions]
+
+    region_ids = {
+        region: annotations.loc[annotations["acronym"] == region, "id"].values[0]
+        for region in regions
+    }
+
+    def _process_region(region: str) -> tuple[str, npt.NDArray, str, npt.NDArray]:
+        region_id = region_ids[region]
+        left_mask = np.broadcast_to(left_aba == region_id, deltaf_series.shape)
+        right_mask = np.broadcast_to(right_aba == region_id, deltaf_series.shape)
+        left_activity = np.ma.array(deltaf_series, mask=~left_mask).mean(axis=(1, 2))
+        right_activity = np.ma.array(deltaf_series, mask=~right_mask).mean(axis=(1, 2))
+        return f"L_{region}", left_activity, f"R_{region}", right_activity
 
     region_activity = {}
-
-    for region in regions:
-        region_left_hemisphere = f"L_{region}"
-        region_right_hemisphere = f"R_{region}"
-
-        region_activity[region_left_hemisphere] = extract_region_activity(
-            deltaf_series=deltaf_series, region_acronym=region, hemisphere="left"
-        )
-        region_activity[region_right_hemisphere] = extract_region_activity(
-            deltaf_series=deltaf_series, region_acronym=region, hemisphere="right"
-        )
+    with ThreadPoolExecutor() as executor:
+        for l_key, l_activity, r_key, r_activity in executor.map(_process_region, regions):
+            region_activity[l_key] = l_activity
+            region_activity[r_key] = r_activity
 
     return region_activity
