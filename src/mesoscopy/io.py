@@ -23,6 +23,7 @@ import typing
 from collections import OrderedDict
 
 import h5py
+import numpy as np
 import numpy.typing as npt
 import xmltodict
 import zarr
@@ -140,6 +141,30 @@ def store_interim(
 
     zarr.save(interim_path, array)
     return zarr.load(interim_path)
+
+
+def load_deltaf(path: str, nwb: bool = False) -> tuple[str, np.ndarray, np.ndarray]:
+    """Load preprocessed dF/F from an HDF5 or NWB file.
+
+    Args:
+        path (str): Path to the preprocessed file.
+        nwb (bool, optional): Whether the file is an NWB file. Defaults to False.
+
+    Returns:
+        tuple[str, np.ndarray, np.ndarray]: Session identifier, dF/F series, and timestamps.
+    """
+    if nwb:
+        nwbfile = read_nwb(path)
+        session_id = nwbfile.identifier
+        deltaf_series = np.array(nwbfile.processing["ophys"]["DeltaFSeries"].data)
+        timestamps = np.array(nwbfile.processing["ophys"]["DeltaFSeries"].timestamps)
+    else:
+        session_id = path.split("/")[-1].replace(".h5", "")
+        with h5py.File(path, "r") as f:
+            deltaf_series = f["/F"][:]
+            timestamps = f["/timestamps"][:]
+
+    return session_id, deltaf_series, timestamps
 
 
 def read_points(path: str) -> dict[str, tuple[float, float]]:

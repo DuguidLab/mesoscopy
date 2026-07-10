@@ -28,8 +28,8 @@ import imageio.v2 as iio
 import numpy as np
 
 import mesoscopy.export.nwb as exp_nwb
-import mesoscopy.process as proc
 
+from mesoscopy import io
 from tqdm import tqdm
 
 
@@ -97,7 +97,7 @@ def export_deltaf(path: str, out_path: str) -> str:
     nwb = bool(path.endswith(".nwb"))
 
     click.echo("Loading delta F data...")
-    _, deltaf, _ = proc.load_deltaf(path, nwb)
+    _, deltaf, _ = io.load_deltaf(path, nwb)
 
     # Rescale deltaf to positive integer values between 0 and 255
     click.echo("Rescaling delta F for export...")

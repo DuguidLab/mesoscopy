@@ -176,7 +176,7 @@ def landmarks_cmd(
     # Determine whether we're working with an NWB file
     nwb = True if path.endswith(".nwb") else False
 
-    session_id, deltaf_series, timestamps = load_deltaf(path, nwb)
+    session_id, deltaf_series, timestamps = io.load_deltaf(path, nwb)
 
     click.echo("Loading landmarks...")
     template_landmarks = res.get_default_landmarks()
@@ -222,30 +222,6 @@ def landmarks_cmd(
         click.echo(f"Updated NWB file at {path}")
 
     return outpath
-
-
-def load_deltaf(path: str, nwb: bool = False) -> tuple[str, np.ndarray, np.ndarray]:
-    """Load preprocessed deltaf from an HDF5 or NWB file.
-
-    Args:
-        path (str): Path to the preprocessed file.
-        nwb (bool, optional): Whether the file is an NWB file. Defaults to False.
-
-    Returns:
-        tuple[str, np.ndarray, np.ndarray]: Session identifier, dF/F series, and timestamps.
-    """
-    if nwb:
-        nwbfile = io.read_nwb(path)
-        session_id = nwbfile.identifier
-        deltaf_series = np.array(nwbfile.processing["ophys"]["DeltaFSeries"].data)
-        timestamps = np.array(nwbfile.processing["ophys"]["DeltaFSeries"].timestamps)
-    else:
-        session_id = path.split("/")[-1].replace(".h5", "")
-        with h5py.File(path, "r") as f_preproc:
-            deltaf_series = f_preproc["/F"][:]
-            timestamps = f_preproc["/timestamps"][:]
-
-    return session_id, deltaf_series, timestamps
 
 
 def load_maxips(path: str) -> tuple[np.ndarray, np.ndarray]:
