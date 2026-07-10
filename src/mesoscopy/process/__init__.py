@@ -65,7 +65,7 @@ def smooth_cmd(path: str, out_dir: str, sigma: int = 2) -> None:
     click.echo(f"Loading preprocessed recording from {path}...")
     # Determine whether we're working with an NWB file
     nwb = bool(path.endswith(".nwb"))
-    session_id, deltaf_series, timestamps = load_deltaf(path, nwb=nwb)
+    session_id, deltaf_series, timestamps = io.load_deltaf(path, nwb=nwb)
 
     outpath = out_dir + os.sep + session_id + "_smoothed.h5"
 
@@ -103,7 +103,7 @@ def zscore_cmd(path: str, out_dir: str) -> None:
     click.echo(f"Loading preprocessed recording from {path}...")
     # Determine whether we're working with an NWB file
     nwb = bool(path.endswith(".nwb"))
-    session_id, deltaf_series, timestamps = load_deltaf(path, nwb=nwb)
+    session_id, deltaf_series, timestamps = io.load_deltaf(path, nwb=nwb)
 
     h5_outpath = out_dir + os.sep + session_id + "_zscored.h5"
     with timer.Timer(message="Z-scoring DeltaF/F"):
@@ -166,25 +166,4 @@ def regions_cmd(path: str, out_dir: str) -> None:
     ...
 
 
-def load_deltaf(path: str, nwb: bool = False) -> tuple[str, np.ndarray, np.ndarray]:
-    """Load preprocessed deltaf from an HDF5 or NWB file.
 
-    Args:
-        path (str): Path to the preprocessed file.
-        nwb (bool, optional): Whether the file is an NWB file. Defaults to False.
-
-    Returns:
-        tuple[str, np.ndarray, np.ndarray]: Session identifier, dF/F series, and timestamps.
-    """
-    if nwb:
-        nwbfile = io.read_nwb(path)
-        session_id = nwbfile.identifier
-        deltaf_series = nwbfile.processing["ophys"]["DeltaFSeries"].data
-        timestamps = nwbfile.processing["ophys"]["DeltaFSeries"].timestamps
-    else:
-        session_id = path.split("/")[-1].replace(".h5", "")
-        f_preproc = io.read_h5(path)
-        deltaf_series = f_preproc["/F"]
-        timestamps = f_preproc["/timestamps"]
-
-    return session_id, np.array(deltaf_series), np.array(timestamps)
