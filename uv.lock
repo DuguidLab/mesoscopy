@@ -1468,6 +1468,7 @@ docs = [
     { name = "mkdocs-material" },
     { name = "mkdocstrings-python" },
     { name = "pymdown-extensions" },
+    { name = "ruff" },
 ]
 lint = [
     { name = "ruff" },
@@ -1534,6 +1535,7 @@ docs = [
     { name = "mkdocs-material" },
     { name = "mkdocstrings-python" },
     { name = "pymdown-extensions" },
+    { name = "ruff" },
 ]
 lint = [{ name = "ruff" }]
 test = [
