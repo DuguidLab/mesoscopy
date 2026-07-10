@@ -237,13 +237,13 @@ def load_deltaf(path: str, nwb: bool = False) -> tuple[str, np.ndarray, np.ndarr
     if nwb:
         nwbfile = io.read_nwb(path)
         session_id = nwbfile.identifier
-        deltaf_series = nwbfile.processing["ophys"]["DeltaFSeries"].data
-        timestamps = nwbfile.processing["ophys"]["DeltaFSeries"].timestamps
+        deltaf_series = np.array(nwbfile.processing["ophys"]["DeltaFSeries"].data)
+        timestamps = np.array(nwbfile.processing["ophys"]["DeltaFSeries"].timestamps)
     else:
         session_id = path.split("/")[-1].replace(".h5", "")
-        f_preproc = h5py.File(path)
-        deltaf_series = f_preproc["/F"]
-        timestamps = f_preproc["/timestamps"]
+        with h5py.File(path, "r") as f_preproc:
+            deltaf_series = f_preproc["/F"][:]
+            timestamps = f_preproc["/timestamps"][:]
 
     return session_id, deltaf_series, timestamps
 

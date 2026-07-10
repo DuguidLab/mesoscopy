@@ -43,12 +43,15 @@ def landmarks_affine(
         template_landmarks (dict): Template landmarks.
         crop_x (int, optional): Crop x-axis. Defaults to 0.
         crop_y (int, optional): Crop y-axis. Defaults to 0.
-        qa_dir (str, optional): Directory to save QA plots. Defaults to "".
-        session_id (str, optional): Session ID. Defaults to "".
 
     Returns:
-        tuple[np.ndarray, np.ndarray]: Registered DeltaF/F series and affine transformation matrix.
+        tuple[np.ndarray, trf.ProjectiveTransform]: Registered DeltaF/F series and affine
+            transformation matrix.
     """
+    if not isinstance(deltaf_series, np.ndarray):
+        click.echo("Loading imaging data into memory...")
+        deltaf_series = np.asarray(deltaf_series)
+
     template = np.array(list(template_landmarks.values()), dtype=np.float32)
     recording = np.array(list(recording_landmarks.values()), dtype=np.float32)
 
