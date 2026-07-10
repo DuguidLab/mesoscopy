@@ -68,13 +68,18 @@ def landmarks_affine(
             return trf.warp(deltaf_series[idx, :crop_y, :crop_x], tform, order=3)
         return trf.warp(deltaf_series[idx], tform, order=3)
 
+    start = time.time()
     results: list[np.ndarray | None] = [None] * n_frames
     n_workers = os.cpu_count() or 1
-    with click.progressbar(length=n_frames, label="Registering recording to template...") as bar:
-        with ThreadPoolExecutor(max_workers=n_workers) as executor:
-            futures = {executor.submit(_warp_frame, i): i for i in range(n_frames)}
-            for future in as_completed(futures):
-                results[futures[future]] = future.result()
-                bar.update(1)
+    with (
+        click.progressbar(length=n_frames, label="Registering recording to template...") as bar,
+        ThreadPoolExecutor(max_workers=n_workers) as executor,
+    ):
+        futures = {executor.submit(_warp_frame, i): i for i in range(n_frames)}
+        for future in as_completed(futures):
+            results[futures[future]] = future.result()
+            bar.update(1)
+    end = time.time()
+    click.echo(f"Recording registered in {end - start} s")
 
     return np.stack(results), tform
