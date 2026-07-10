@@ -18,7 +18,10 @@
 #  IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
+import os
 import time
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import as_completed
 
 import click
 import numpy as np
@@ -55,13 +58,20 @@ def landmarks_affine(
     end = time.time()
     click.echo(f"Transform estimated in {end - start} s")
 
-    warped_ = []
-    with click.progressbar(range(deltaf_series.shape[0]), label="Registering recording to template...") as frame_ids:
-        for idx in frame_ids:
-            if crop_x > 0 or crop_y > 0:
-                warped_.append(trf.warp(deltaf_series[idx, :crop_y, :crop_x], tform, order=3))
-            else:
-                warped_.append(trf.warp(deltaf_series[idx, :, :], tform, order=3))
-    warped = np.array(warped_)
+    n_frames = deltaf_series.shape[0]
 
-    return warped, tform
+    def _warp_frame(idx: int) -> np.ndarray:
+        if crop_x > 0 or crop_y > 0:
+            return trf.warp(deltaf_series[idx, :crop_y, :crop_x], tform, order=3)
+        return trf.warp(deltaf_series[idx], tform, order=3)
+
+    results: list[np.ndarray | None] = [None] * n_frames
+    n_workers = os.cpu_count() or 1
+    with click.progressbar(length=n_frames, label="Registering recording to template...") as bar:
+        with ThreadPoolExecutor(max_workers=n_workers) as executor:
+            futures = {executor.submit(_warp_frame, i): i for i in range(n_frames)}
+            for future in as_completed(futures):
+                results[futures[future]] = future.result()
+                bar.update(1)
+
+    return np.stack(results), tform
