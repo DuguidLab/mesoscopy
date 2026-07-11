@@ -159,12 +159,7 @@ def zscore_cmd(path: str, out_dir: str) -> None:
     help="Output directory for smoothed recording.",
 )
 def regions_cmd(path: str, out_dir: str) -> None:
-    """Extract ∆F signal averages from ABA-defined regions.
-
-    Args:
-        path (str): Path to registered HDF5 recording or NWB file.
-        out_dir (str): Path to output directory.
-    """
+    """Extract ∆F signal averages from ABA-defined regions."""
     if not Path(out_dir).exists():
         click.echo(f"Creating output directory {out_dir}...")
         Path(out_dir).mkdir(parents=True)
