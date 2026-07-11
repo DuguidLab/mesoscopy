@@ -22,11 +22,13 @@
 """Processing submodule."""
 
 import os
+from pathlib import Path
 
 import click
-import numpy as np
+import pandas as pd
 from pynwb.image import ImageSeries
 
+import mesoscopy.process.region as pr
 import mesoscopy.process.smooth as psm
 import mesoscopy.process.zscore as pzs
 from mesoscopy import io
@@ -60,7 +62,7 @@ def smooth_cmd(path: str, out_dir: str, sigma: int = 2) -> None:
     """Generate a smoothed DeltaF/F recording using a Laplace of Gaussian filter."""
     if not os.path.exists(out_dir):
         click.echo(f"Creating output directory {out_dir}...")
-        os.makedirs(out_dir)
+        Path(out_dir).mkdir(parents=True)
 
     click.echo(f"Loading preprocessed recording from {path}...")
     # Determine whether we're working with an NWB file
@@ -96,9 +98,9 @@ def smooth_cmd(path: str, out_dir: str, sigma: int = 2) -> None:
 )
 def zscore_cmd(path: str, out_dir: str) -> None:
     """Pixel-wise z-score ∆F/F signal."""
-    if not os.path.exists(out_dir):
+    if not Path(out_dir).exists():
         click.echo(f"Creating output directory {out_dir}...")
-        os.makedirs(out_dir)
+        Path(out_dir).mkdir(parents=True)
 
     click.echo(f"Loading preprocessed recording from {path}...")
     # Determine whether we're working with an NWB file
@@ -163,7 +165,21 @@ def regions_cmd(path: str, out_dir: str) -> None:
         path (str): Path to registered HDF5 recording or NWB file.
         out_dir (str): Path to output directory.
     """
-    ...
+    if not Path(out_dir).exists():
+        click.echo(f"Creating output directory {out_dir}...")
+        Path(out_dir).mkdir(parents=True)
 
+    click.echo(f"Loading preprocessed recording from {path}...")
+    # Determine whether we're working with an NWB file
+    nwb = bool(path.endswith(".nwb"))
+    session_id, deltaf_series, timestamps = io.load_deltaf(path, nwb=nwb)
 
+    outpath = out_dir + os.sep + session_id + "_regions.csv"
 
+    with timer.Timer(message="Extracting region activity"):
+        region_activity = pd.DataFrame(pr.extract_all_regions(deltaf_series, as_dataframe=True))
+        region_activity["time_idx"] = timestamps[region_activity["time_idx"]]
+        region_activity.rename(columns={"time_idx": "timestamps"}, inplace=True)
+        region_activity.to_csv(outpath, index=False)
+
+    click.echo(f"Saved region activity at {outpath}")
