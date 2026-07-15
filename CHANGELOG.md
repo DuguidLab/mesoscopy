@@ -4,6 +4,12 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 ## Unreleased
 
+## [0.7.6] - 2026-07-15
+
+### Fixed
+
+- Registration leftward smear fixed by reading registration points as xy instead of yx ([#97](https://github.com/DuguidLab/mesoscopy/issues/97)).
+
 ## [0.7.5] - 2026-07-15
 
 ### Added
