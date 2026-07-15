@@ -4,6 +4,27 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 ## Unreleased
 
+## [0.7.5] - 2026-07-15
+
+### Added
+
+- `regions` subcommand to `process` CLI for extracting ΔF/F activity per ABA region ([#28](https://github.com/DuguidLab/mesoscopy/issues/28)).
+- Option to return activity across all regions as a dataframe from `extract_all_regions`.
+
+### Changed
+
+- Consolidated `load_deltaf` into `io.py`, eagerly loading the ΔF/F series into RAM for faster downstream access ([#94](https://github.com/DuguidLab/mesoscopy/pull/94)).
+- Improved README with installation instructions, usage, upgrade, contributing, and funders sections ([#22](https://github.com/DuguidLab/mesoscopy/issues/22)).
+
+### Fixed
+
+- Warp transformation now applies the affine transform without inversion, fixing incorrect registration output ([#91](https://github.com/DuguidLab/mesoscopy/issues/91)).
+
+### Performance
+
+- `extract_all_regions` sped up with boolean mask pre-calculation.
+- `landmarks_affine` parallelised with `ThreadPoolExecutor`.
+
 ## [0.7.4]
 
 ### Added
