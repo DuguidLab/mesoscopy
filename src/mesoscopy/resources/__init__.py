@@ -20,6 +20,10 @@
 #  SOFTWARE.
 from importlib import resources
 
+import imageio
+import numpy as np
+import pandas as pd
+
 import mesoscopy.resources
 from mesoscopy import io
 
@@ -30,10 +34,18 @@ def get_default_landmarks() -> dict:
     Returns:
         dict: Default landmark coordinates.
     """
-    return io.read_points(
-        str(
-            resources.files(mesoscopy.resources).joinpath(
-                "ccf_template_landmarks_140x142.csv"
-            )
-        )
+    return io.read_points(str(resources.files(mesoscopy.resources).joinpath("ccf_template_landmarks_140x142.csv")))
+
+
+def get_atlas():
+    left_hemisphere_aba = imageio.imread(
+        str(resources.files(mesoscopy.resources).joinpath("ccf_template_top_140x142.tiff"))
+    )
+    right_hemisphere_aba = np.flip(left_hemisphere_aba, axis=1)
+    return left_hemisphere_aba, right_hemisphere_aba
+
+
+def get_atlas_annotations():
+    return pd.read_csv(
+        str(resources.files(mesoscopy.resources).joinpath("ccf_annotations.csv")), delimiter=", ", engine="python"
     )

@@ -22,16 +22,17 @@
 """Processing submodule."""
 
 import os
+from pathlib import Path
+
 import click
-import numpy as np
-import dask.array as da
+import pandas as pd
 from pynwb.image import ImageSeries
 
-import mesoscopy.timer as timer
-
-import mesoscopy.io as io
+import mesoscopy.process.region as pr
 import mesoscopy.process.smooth as psm
 import mesoscopy.process.zscore as pzs
+from mesoscopy import io
+from mesoscopy import timer
 
 
 @click.group("process")
@@ -61,12 +62,12 @@ def smooth_cmd(path: str, out_dir: str, sigma: int = 2) -> None:
     """Generate a smoothed DeltaF/F recording using a Laplace of Gaussian filter."""
     if not os.path.exists(out_dir):
         click.echo(f"Creating output directory {out_dir}...")
-        os.makedirs(out_dir)
+        Path(out_dir).mkdir(parents=True)
 
     click.echo(f"Loading preprocessed recording from {path}...")
     # Determine whether we're working with an NWB file
     nwb = bool(path.endswith(".nwb"))
-    session_id, deltaf_series, timestamps = load_deltaf(path, nwb=nwb)
+    session_id, deltaf_series, timestamps = io.load_deltaf(path, nwb=nwb)
 
     outpath = out_dir + os.sep + session_id + "_smoothed.h5"
 
@@ -97,14 +98,14 @@ def smooth_cmd(path: str, out_dir: str, sigma: int = 2) -> None:
 )
 def zscore_cmd(path: str, out_dir: str) -> None:
     """Pixel-wise z-score ∆F/F signal."""
-    if not os.path.exists(out_dir):
+    if not Path(out_dir).exists():
         click.echo(f"Creating output directory {out_dir}...")
-        os.makedirs(out_dir)
+        Path(out_dir).mkdir(parents=True)
 
     click.echo(f"Loading preprocessed recording from {path}...")
     # Determine whether we're working with an NWB file
     nwb = bool(path.endswith(".nwb"))
-    session_id, deltaf_series, timestamps = load_deltaf(path, nwb=nwb)
+    session_id, deltaf_series, timestamps = io.load_deltaf(path, nwb=nwb)
 
     h5_outpath = out_dir + os.sep + session_id + "_zscored.h5"
     with timer.Timer(message="Z-scoring DeltaF/F"):
@@ -145,25 +146,37 @@ def zscore_cmd(path: str, out_dir: str) -> None:
         io.write_nwb(path, nwbfile, io=nwbio)
 
 
-def load_deltaf(path: str, nwb: bool = False) -> tuple[str, np.ndarray, np.ndarray]:
-    """Load preprocessed deltaf from an HDF5 or NWB file.
+@process_cmd.command("regions")
+@click.argument(
+    "path",
+    type=click.Path(exists=True),
+)
+@click.option(
+    "-o",
+    "--out_dir",
+    type=click.Path(dir_okay=True),
+    default="./",
+    help="Output directory for smoothed recording.",
+)
+def regions_cmd(path: str, out_dir: str) -> None:
+    """Extract ∆F signal averages from ABA-defined regions."""
+    if not Path(out_dir).exists():
+        click.echo(f"Creating output directory {out_dir}...")
+        Path(out_dir).mkdir(parents=True)
 
-    Args:
-        path (str): Path to the preprocessed file.
-        nwb (bool, optional): Whether the file is an NWB file. Defaults to False.
+    click.echo(f"Loading preprocessed recording from {path}...")
+    # Determine whether we're working with an NWB file
+    nwb = bool(path.endswith(".nwb"))
+    session_id, deltaf_series, timestamps = io.load_deltaf(path, nwb=nwb)
 
-    Returns:
-        tuple[str, np.ndarray, np.ndarray]: Session identifier, dF/F series, and timestamps.
-    """
-    if nwb:
-        nwbfile = io.read_nwb(path)
-        session_id = nwbfile.identifier
-        deltaf_series = nwbfile.processing["ophys"]["DeltaFSeries"].data
-        timestamps = nwbfile.processing["ophys"]["DeltaFSeries"].timestamps
-    else:
-        session_id = path.split("/")[-1].replace(".h5", "")
-        f_preproc = io.read_h5(path)
-        deltaf_series = f_preproc["/F"]
-        timestamps = f_preproc["/timestamps"]
+    outpath = out_dir + os.sep + session_id + "_regions.csv"
 
-    return session_id, np.array(deltaf_series), np.array(timestamps)
+    with timer.Timer(message="Extracting region activity"):
+        region_activity = pd.DataFrame(pr.extract_all_regions(deltaf_series, as_dataframe=True))
+        region_activity["time_idx"] = [
+            str(timestamp, encoding="utf-8") for timestamp in timestamps[region_activity["time_idx"]]
+        ]
+        region_activity.rename(columns={"time_idx": "timestamp"}, inplace=True)
+        region_activity.to_csv(outpath, index=False)
+
+    click.echo(f"Saved region activity at {outpath}")
