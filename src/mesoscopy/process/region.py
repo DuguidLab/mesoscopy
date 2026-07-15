@@ -19,7 +19,6 @@
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
 
-from concurrent.futures import ThreadPoolExecutor
 from typing import Literal
 
 import numpy as np
@@ -114,19 +113,21 @@ def extract_all_regions(
 
     region_ids = {region: annotations.loc[annotations["acronym"] == region, "id"].values[0] for region in regions}
 
-    def _process_region(region: str) -> tuple[str, npt.NDArray, str, npt.NDArray]:
-        region_id = region_ids[region]
-        left_mask = np.broadcast_to(left_aba == region_id, deltaf_series.shape)
-        right_mask = np.broadcast_to(right_aba == region_id, deltaf_series.shape)
-        left_activity = np.ma.array(deltaf_series, mask=~left_mask).mean(axis=(1, 2))
-        right_activity = np.ma.array(deltaf_series, mask=~right_mask).mean(axis=(1, 2))
-        return f"L_{region}", left_activity, f"R_{region}", right_activity
+    hw = left_aba.shape[0] * left_aba.shape[1]
+    left_masks = np.array([(left_aba == region_ids[r]).ravel() for r in regions])   # (n_regions, H*W)
+    right_masks = np.array([(right_aba == region_ids[r]).ravel() for r in regions])
+
+    left_counts = left_masks.sum(axis=1).astype(float)   # (n_regions,)
+    right_counts = right_masks.sum(axis=1).astype(float)
+
+    data_flat = deltaf_series.reshape(deltaf_series.shape[0], hw)  # (T, H*W)
+    left_activities = (data_flat @ left_masks.T) / left_counts     # (T, n_regions)
+    right_activities = (data_flat @ right_masks.T) / right_counts
 
     region_activity = {}
-    with ThreadPoolExecutor() as executor:
-        for l_key, l_activity, r_key, r_activity in executor.map(_process_region, regions):
-            region_activity[l_key] = l_activity
-            region_activity[r_key] = r_activity
+    for i, region in enumerate(regions):
+        region_activity[f"L_{region}"] = left_activities[:, i]
+        region_activity[f"R_{region}"] = right_activities[:, i]
 
     if as_dataframe:
         df = pd.DataFrame(region_activity)
