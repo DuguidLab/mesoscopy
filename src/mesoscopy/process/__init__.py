@@ -173,8 +173,10 @@ def regions_cmd(path: str, out_dir: str) -> None:
 
     with timer.Timer(message="Extracting region activity"):
         region_activity = pd.DataFrame(pr.extract_all_regions(deltaf_series, as_dataframe=True))
-        region_activity["time_idx"] = timestamps[region_activity["time_idx"]]
-        region_activity.rename(columns={"time_idx": "timestamps"}, inplace=True)
+        region_activity["time_idx"] = [
+            str(timestamp, encoding="utf-8") for timestamp in timestamps[region_activity["time_idx"]]
+        ]
+        region_activity.rename(columns={"time_idx": "timestamp"}, inplace=True)
         region_activity.to_csv(outpath, index=False)
 
     click.echo(f"Saved region activity at {outpath}")
