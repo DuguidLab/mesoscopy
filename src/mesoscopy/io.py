@@ -196,7 +196,7 @@ def _read_fiji_points(path: str) -> dict[str, tuple[float, float]]:
         points = xmltodict.parse(fp.read())
         points = OrderedDict(
             {
-                point["@name"]: (float(point["@y"]), float(point["@x"]))
+                point["@name"]: (float(point["@x"]), float(point["@y"]))
                 for point in points["namedpointset"]["pointworld"]
             }
         )
@@ -215,7 +215,7 @@ def _read_csv_points(path: str) -> dict[str, tuple[float, float]]:
     """
     with open(path) as fp:
         csv_reader = csv.DictReader(fp)
-        points = OrderedDict({row["landmark"]: (float(row["y"]), float(row["x"])) for row in csv_reader})
+        points = OrderedDict({row["landmark"]: (float(row["x"]), float(row["y"])) for row in csv_reader})
 
     return points
 
@@ -230,7 +230,7 @@ def write_points(path: str, points: dict[str, tuple[float, float]]) -> None:
     if not path.endswith(".csv"):
         path += ".csv"
     with open(path, "w") as fp:
-        csv_writer = csv.DictWriter(fp, fieldnames=["landmark", "y", "x"])
+        csv_writer = csv.DictWriter(fp, fieldnames=["landmark", "x", "y"])
         csv_writer.writeheader()
-        for landmark, (y, x) in points.items():
-            csv_writer.writerow({"landmark": landmark, "y": y, "x": x})
+        for landmark, (x, y) in points.items():
+            csv_writer.writerow({"landmark": landmark, "x": x, "y": y})
