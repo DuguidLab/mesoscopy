@@ -68,6 +68,21 @@ def export_deltaf_cmd(**kwargs: typing.Any) -> None:
     export_deltaf(**kwargs)
 
 
+@export_cmd.command("timestamps")
+@click.argument("path", type=click.Path(exists=True, dir_okay=False, path_type=str))
+@click.option(
+    "--out-dir",
+    type=click.Path(dir_okay=True, path_type=str),
+    default=".",
+    help="Directory to save the exported timestamps file.",
+)
+def export_timestamps_cmd(**kwargs: typing.Any) -> None:
+    """Export timestamps as a text file."""
+    click.echo("Exporting timestamps...")
+    export_timestamps(**kwargs)
+    click.echo(f"Timestamps exported to {kwargs['out_dir']}")
+
+
 def export_nwb(nwb_path: str, out_path: str = "") -> str:
     """Create a sharable copy of an NWB file by resolving external data links.
 
@@ -114,3 +129,27 @@ def export_deltaf(path: str, out_path: str) -> str:
         video_writer.append_data(np.stack([frame] * 3, axis=2))
 
     return out_path
+
+
+def export_timestamps(path: str, out_dir: str) -> str:
+    """Export timestamps as a TXT file. Timestamps are in ISO datetime format.
+
+    Args:
+        path (str): Path to the source file (HDF5 or NWB).
+        out_dir (str): Directory to save the exported timestamps file.
+
+    Returns:
+        str: Path to the exported timestamps file.
+    """
+    session_id = path.split("/")[-1].replace(".h5", "").replace(".nwb", "")
+
+    nwb = bool(path.endswith(".nwb"))
+
+    click.echo("Loading timestamps...")
+    _, _, timestamps = io.load_deltaf(path, nwb)
+    timestamps = np.array([str(ts, encoding="utf-8") for ts in timestamps])
+
+    out_dir = f"{out_dir}{os.sep}{session_id}_timestamps.txt"
+    np.savetxt(out_dir, timestamps, fmt="%s")
+
+    return out_dir
