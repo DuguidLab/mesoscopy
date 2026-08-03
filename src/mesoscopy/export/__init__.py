@@ -54,20 +54,6 @@ def export_nwb_cmd(**kwargs: typing.Any) -> None:
     click.echo(f"NWB file exported to {export_path}")
 
 
-def export_nwb(nwb_path: str, out_path: str = "") -> str:
-    """Create a sharable copy of an NWB file by resolving external data links.
-
-    Args:
-        nwb_path (str): Path to the source NWB file.
-        out_path (str, optional): Path to save the exported NWB file. If not provided, the output file will be named as
-            the input file with '_export.nwb' appended. Defaults to "".
-
-    Returns:
-        str: Path to the exported NWB file.
-    """
-    return exp_nwb.export_standalone(nwb_path, out_path)
-
-
 @export_cmd.command("deltaf")
 @click.argument("path", type=click.Path(exists=True, dir_okay=False, path_type=str))
 @click.option(
@@ -80,6 +66,20 @@ def export_nwb(nwb_path: str, out_path: str = "") -> str:
 def export_deltaf_cmd(**kwargs: typing.Any) -> None:
     """Export delta F frames as a video file."""
     export_deltaf(**kwargs)
+
+
+def export_nwb(nwb_path: str, out_path: str = "") -> str:
+    """Create a sharable copy of an NWB file by resolving external data links.
+
+    Args:
+        nwb_path (str): Path to the source NWB file.
+        out_path (str, optional): Path to save the exported NWB file. If not provided, the output file will be named as
+            the input file with '_export.nwb' appended. Defaults to "".
+
+    Returns:
+        str: Path to the exported NWB file.
+    """
+    return exp_nwb.export_standalone(nwb_path, out_path)
 
 
 def export_deltaf(path: str, out_path: str) -> str:
