@@ -110,6 +110,24 @@ def write_h5(path: str, data: dict, compression: str = "lzf", attributes: dict =
     return path
 
 
+def write_npz(path: str, data: dict) -> str:
+    """Write a dictionary to an NPZ file.
+
+    Args:
+        path (str): Path to the NPZ file.
+        data (dict): Dictionary containing arrays to write in {'array_name': array} format.
+
+    Returns:
+        str: Path to the written NPZ file.
+
+    Example:
+        >>> data = {"array1": np.array([1, 2, 3]), "array2": np.array([[1, 2], [3, 4]])}
+        >>> write_npz("output.npz", data)
+    """
+    np.savez(path, **data)
+    return path
+
+
 def store_interim(
     array: da.Array | npt.ArrayLike,
     interim_path: str,

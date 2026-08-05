@@ -25,6 +25,7 @@ import os
 from pathlib import Path
 
 import click
+import numpy as np
 import pandas as pd
 from pynwb.image import ImageSeries
 
@@ -216,7 +217,14 @@ def regions_cmd(path: str, out_dir: str) -> None:
         " all datasets. Use with caution. Defaults to False."
     ),
 )
-def regression_cmd(recording_path: str, regressor_path: str, out_dir: str, alpha: float, fast: bool) -> None:
+@click.option(
+    "--npz/h5",
+    "file_format",
+    flag_value="npz",
+)
+def regression_cmd(
+    recording_path: str, regressor_path: str, out_dir: str, alpha: float, fast: bool, file_format: str
+) -> None:
     """Perform pixel-wise ridge regression on a preprocessed ∆F/F recording."""
     if not Path(out_dir).exists():
         click.echo(f"Creating output directory {out_dir}...")
@@ -230,10 +238,10 @@ def regression_cmd(recording_path: str, regressor_path: str, out_dir: str, alpha
     click.echo(f"Loading regressors from {regressor_path}...")
     regressors, labels, trial_idx = io.read_regressors(regressor_path)
 
-    outpath = out_dir + os.sep + session_id + "_regression.h5"
+    outpath = out_dir + os.sep + session_id + f"_regression.{file_format}"
 
     trial_idx_used = False
-    if trial_idx:
+    if trial_idx is not None:
         deltaf_series = deltaf_series[trial_idx]
         trial_idx_used = True
 
@@ -243,14 +251,26 @@ def regression_cmd(recording_path: str, regressor_path: str, out_dir: str, alpha
         else:
             coefs, r2, mse = regr.ridge_regression(deltaf_series, regressors)
 
-        outpath = io.write_h5(
-            path=outpath,
-            data={
-                "/coefficients": coefs,
-                "/r2": r2,
-                "/mse": mse,
-                "/labels": labels,
-                "/trial_idx_used": trial_idx_used,
-            },
-        )
+        if file_format == "npz":
+            outpath = io.write_npz(
+                path=outpath,
+                data={
+                    "coefficients": coefs,
+                    "r2": r2,
+                    "mse": mse,
+                    "labels": np.array(labels).astype("S"),
+                    "trial_idx": trial_idx if trial_idx_used else [],
+                },
+            )
+        elif file_format == "h5":
+            outpath = io.write_h5(
+                path=outpath,
+                data={
+                    "/coefficients": coefs,
+                    "/r2": r2,
+                    "/mse": mse,
+                    "/labels": np.array(labels).astype("S"),
+                    "/trial_idx": trial_idx if trial_idx_used else [],
+                },
+            )
     click.echo(f"Saved regression results at {outpath}")
