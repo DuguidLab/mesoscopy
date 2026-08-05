@@ -18,18 +18,11 @@
 #  IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
-import os
-from pathlib import Path
 
-import click
-import pandas as pd
-from pynwb.image import ImageSeries
-from skvideo.measure import mse
-from mesoscopy import io
-from mesoscopy import timer
-from sklearn.linear_model import Ridge
-from sklearn.metrics import r2_score, mean_squared_error
 import numpy as np
+from sklearn.linear_model import Ridge
+from sklearn.metrics import mean_squared_error
+from sklearn.metrics import r2_score
 
 
 def ridge_regression(deltaf_series: np.ndarray, regressors: np.ndarray) -> tuple:
