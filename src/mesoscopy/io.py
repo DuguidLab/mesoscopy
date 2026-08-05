@@ -175,12 +175,16 @@ def read_points(path: str) -> dict[str, tuple[float, float]]:
 
     Returns:
         dict[str, tuple[float, float]]: Dictionary with the landmark names as keys and their x-y coordinates
+
+    Raises:
+        ValueError: If the file format is unsupported.
     """
-    if path.endswith(".xml") or path.endswith(".points"):
+    if path.endswith((".xml", ".points")):
         return _read_fiji_points(path)
     if path.endswith(".csv"):
         return _read_csv_points(path)
-    raise ValueError("Unsupported file format.")
+    msg = "Unsupported file format."
+    raise ValueError(msg)
 
 
 def _read_fiji_points(path: str) -> dict[str, tuple[float, float]]:
