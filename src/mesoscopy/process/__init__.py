@@ -31,6 +31,7 @@ from pynwb.image import ImageSeries
 import mesoscopy.process.region as pr
 import mesoscopy.process.smooth as psm
 import mesoscopy.process.zscore as pzs
+import mesoscopy.process.regression as regr
 from mesoscopy import io
 from mesoscopy import timer
 
@@ -180,3 +181,73 @@ def regions_cmd(path: str, out_dir: str) -> None:
         region_activity.to_csv(outpath, index=False)
 
     click.echo(f"Saved region activity at {outpath}")
+
+
+@process_cmd.command("regression")
+@click.argument(
+    "path",
+    type=click.Path(exists=True),
+    help="Path to preprocessed recording (HDF5 or NWB).",
+)
+@click.argument(
+    "regressor_path",
+    type=click.Path(exists=True),
+    help="Path to regressor file (NPZ or HDF5).",
+)
+@click.option(
+    "-o",
+    "--out_dir",
+    type=click.Path(dir_okay=True),
+    default="./",
+    help="Output directory for regression results.",
+)
+@click.option(
+    "-a",
+    "--alpha",
+    type=float,
+    default=1.0,
+    help="Ridge regularisation strength. Defaults to 1.0.",
+)
+@click.option(
+    "-f",
+    "--fast",
+    is_flag=True,
+    default=False,
+    help=(
+        "Use fast vectorised implementation of ridge regression. This is an experimental feature and may not work for"
+        " all datasets. Use with caution. Defaults to False."
+    ),
+)
+def regression_cmd(path: str, regressor_path: str, out_dir: str, alpha: float, fast: bool) -> None:
+    """Perform pixel-wise ridge regression on a preprocessed ∆F/F recording."""
+    if not Path(out_dir).exists():
+        click.echo(f"Creating output directory {out_dir}...")
+        Path(out_dir).mkdir(parents=True)
+
+    click.echo(f"Loading preprocessed recording from {path}...")
+    # Determine whether we're working with an NWB file
+    nwb = bool(path.endswith(".nwb"))
+    session_id, deltaf_series, timestamps = io.load_deltaf(path, nwb=nwb)
+
+    click.echo(f"Loading regressors from {regressor_path}...")
+    regressors, labels, trial_idx = io.read_regressors(regressor_path)
+
+    outpath = out_dir + os.sep + session_id + "_regression.h5"
+
+    with timer.Timer(message="Performing ridge regression"):
+        if fast:
+            coefs, r2, mse = regr.ridge_regression_fast(deltaf_series[trial_idx], regressors, alpha=alpha)
+        else:
+            coefs, r2, mse = regr.ridge_regression(deltaf_series[trial_idx], regressors)
+
+        outpath = io.write_h5(
+            path=outpath,
+            data={
+                "/coefficients": coefs,
+                "/r2": r2,
+                "/mse": mse,
+                "/labels": labels,
+                "/trial_idx": trial_idx,
+            },
+        )
+    click.echo(f"Saved regression results at {outpath}")
