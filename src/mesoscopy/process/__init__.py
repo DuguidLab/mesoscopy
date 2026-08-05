@@ -185,14 +185,12 @@ def regions_cmd(path: str, out_dir: str) -> None:
 
 @process_cmd.command("regression")
 @click.argument(
-    "path",
+    "recording_path",
     type=click.Path(exists=True),
-    help="Path to preprocessed recording (HDF5 or NWB).",
 )
 @click.argument(
     "regressor_path",
     type=click.Path(exists=True),
-    help="Path to regressor file (NPZ or HDF5).",
 )
 @click.option(
     "-o",
@@ -218,27 +216,32 @@ def regions_cmd(path: str, out_dir: str) -> None:
         " all datasets. Use with caution. Defaults to False."
     ),
 )
-def regression_cmd(path: str, regressor_path: str, out_dir: str, alpha: float, fast: bool) -> None:
+def regression_cmd(recording_path: str, regressor_path: str, out_dir: str, alpha: float, fast: bool) -> None:
     """Perform pixel-wise ridge regression on a preprocessed ∆F/F recording."""
     if not Path(out_dir).exists():
         click.echo(f"Creating output directory {out_dir}...")
         Path(out_dir).mkdir(parents=True)
 
-    click.echo(f"Loading preprocessed recording from {path}...")
+    click.echo(f"Loading preprocessed recording from {recording_path}...")
     # Determine whether we're working with an NWB file
-    nwb = bool(path.endswith(".nwb"))
-    session_id, deltaf_series, timestamps = io.load_deltaf(path, nwb=nwb)
+    nwb = bool(recording_path.endswith(".nwb"))
+    session_id, deltaf_series, _ = io.load_deltaf(recording_path, nwb=nwb)
 
     click.echo(f"Loading regressors from {regressor_path}...")
     regressors, labels, trial_idx = io.read_regressors(regressor_path)
 
     outpath = out_dir + os.sep + session_id + "_regression.h5"
 
-    with timer.Timer(message="Performing ridge regression"):
+    trial_idx_used = False
+    if trial_idx:
+        deltaf_series = deltaf_series[trial_idx]
+        trial_idx_used = True
+
+    with timer.Timer(message="Running regression"):
         if fast:
-            coefs, r2, mse = regr.ridge_regression_fast(deltaf_series[trial_idx], regressors, alpha=alpha)
+            coefs, r2, mse = regr.ridge_regression_fast(deltaf_series, regressors, alpha=alpha)
         else:
-            coefs, r2, mse = regr.ridge_regression(deltaf_series[trial_idx], regressors)
+            coefs, r2, mse = regr.ridge_regression(deltaf_series, regressors)
 
         outpath = io.write_h5(
             path=outpath,
@@ -247,7 +250,7 @@ def regression_cmd(path: str, regressor_path: str, out_dir: str, alpha: float, f
                 "/r2": r2,
                 "/mse": mse,
                 "/labels": labels,
-                "/trial_idx": trial_idx,
+                "/trial_idx_used": trial_idx_used,
             },
         )
     click.echo(f"Saved regression results at {outpath}")
