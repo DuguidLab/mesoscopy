@@ -269,9 +269,7 @@ def _read_csv_points(path: str) -> dict[str, tuple[float, float]]:
     """
     with open(path) as fp:
         csv_reader = csv.DictReader(fp)
-        points = OrderedDict({row["landmark"]: (float(row["x"]), float(row["y"])) for row in csv_reader})
-
-    return points
+        return OrderedDict({row["landmark"]: (float(row["x"]), float(row["y"])) for row in csv_reader})
 
 
 def write_points(path: str, points: dict[str, tuple[float, float]]) -> None:
