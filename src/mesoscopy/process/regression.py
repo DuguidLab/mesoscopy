@@ -105,7 +105,7 @@ def ridge_regression_fast(deltaf_series: np.ndarray, regressors: np.ndarray, alp
     mse = ss_res / n_samples
 
     # Reshape the coefficients, r2, and mse back to the original pixel shape.
-    coefficients = coef.reshape((n_regressors,) + pixel_shape)
+    coefficients = coef.reshape((n_regressors, *pixel_shape))
     r2 = r2.reshape(pixel_shape)
     mse = mse.reshape(pixel_shape)
 
