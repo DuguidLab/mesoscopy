@@ -218,9 +218,17 @@ def regions_cmd(path: str, out_dir: str) -> None:
     ),
 )
 @click.option(
-    "--npz/h5",
+    "--npz",
     "file_format",
     flag_value="npz",
+    default="npz",
+    help="Save regression results as a compressed NumPy .npz file. Defaults to True.",
+)
+@click.option(
+    "--h5",
+    "file_format",
+    flag_value="h5",
+    help="Save regression results as an HDF5 file. Defaults to False.",
 )
 def regression_cmd(
     recording_path: str, regressor_path: str, out_dir: str, alpha: float, fast: bool, file_format: str
@@ -258,7 +266,7 @@ def regression_cmd(
                     "coefficients": coefs,
                     "r2": r2,
                     "mse": mse,
-                    "labels": np.array(labels).astype("S"),
+                    "labels": labels,
                     "trial_idx": trial_idx if trial_idx_used else [],
                 },
             )
