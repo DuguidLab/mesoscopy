@@ -110,6 +110,24 @@ def write_h5(path: str, data: dict, compression: str = "lzf", attributes: dict =
     return path
 
 
+def write_npz(path: str, data: dict) -> str:
+    """Write a dictionary to an NPZ file.
+
+    Args:
+        path (str): Path to the NPZ file.
+        data (dict): Dictionary containing arrays to write in {'array_name': array} format.
+
+    Returns:
+        str: Path to the written NPZ file.
+
+    Example:
+        >>> data = {"array1": np.array([1, 2, 3]), "array2": np.array([[1, 2], [3, 4]])}
+        >>> write_npz("output.npz", data)
+    """
+    np.savez(path, **data)
+    return path
+
+
 def store_interim(
     array: da.Array | npt.ArrayLike,
     interim_path: str,
@@ -175,12 +193,68 @@ def read_points(path: str) -> dict[str, tuple[float, float]]:
 
     Returns:
         dict[str, tuple[float, float]]: Dictionary with the landmark names as keys and their x-y coordinates
+
+    Raises:
+        ValueError: If the file format is unsupported.
     """
-    if path.endswith(".xml") or path.endswith(".points"):
+    if path.endswith((".xml", ".points")):
         return _read_fiji_points(path)
     if path.endswith(".csv"):
         return _read_csv_points(path)
-    raise ValueError("Unsupported file format.")
+    msg = "Unsupported file format."
+    raise ValueError(msg)
+
+
+def read_regressors(path: str) -> tuple[np.ndarray, list[str], np.ndarray]:
+    """Read a regressor file in NPZ or HDF5 format.
+
+    Args:
+        path (str): Path to the regressor file.
+
+    Returns:
+        tuple[np.ndarray, list[str], np.ndarray]: Regressor matrix, list of regressor labels, and trial indexes.
+
+    Raises:
+        ValueError: If the file format is unsupported.
+    """
+    if path.endswith(".npz"):
+        return _read_npz_regressors(path)
+    if path.endswith(".h5"):
+        return _read_hdf5_regressors(path)
+    msg = "Unsupported file format."
+    raise ValueError(msg)
+
+
+def _read_npz_regressors(path: str) -> tuple[np.ndarray, list[str], np.ndarray]:
+    """Read a regressor file in NPZ format.
+
+    Args:
+        path (str): Path to the NPZ file. File should contain 'regressors', 'labels', and 'trial_idx' arrays.
+
+    Returns:
+        tuple[np.ndarray, list[str], np.ndarray]: Regressor matrix, list of regressor labels, and trial indexes.
+    """
+    with np.load(path) as f:
+        regressors = f.get("regressors")
+        labels = f.get("labels", [])
+        trial_indices = f.get("trial_idx", None)
+    return regressors, labels, trial_indices
+
+
+def _read_hdf5_regressors(path: str) -> tuple[np.ndarray, list[str], np.ndarray]:
+    """Read a regressor file in HDF5 format.
+
+    Args:
+        path (str): Path to the HDF5 file. File should contain 'regressors', 'labels', and 'trial_idx' datasets.
+
+    Returns:
+        tuple[np.ndarray, list[str], np.ndarray]: Regressor matrix, list of regressor labels, and trial indexes.
+    """
+    with h5py.File(path, "r") as f:
+        regressors = np.array(f.get("regressors")[:])  # type: ignore
+        labels = list(f.get("labels", None))  # type: ignore
+        trial_indices = np.array(f.get("trial_idx", None))
+    return regressors, labels, trial_indices
 
 
 def _read_fiji_points(path: str) -> dict[str, tuple[float, float]]:
@@ -194,14 +268,12 @@ def _read_fiji_points(path: str) -> dict[str, tuple[float, float]]:
     """
     with open(path) as fp:
         points = xmltodict.parse(fp.read())
-        points = OrderedDict(
+        return OrderedDict(
             {
                 point["@name"]: (float(point["@x"]), float(point["@y"]))
                 for point in points["namedpointset"]["pointworld"]
             }
         )
-
-    return points
 
 
 def _read_csv_points(path: str) -> dict[str, tuple[float, float]]:
@@ -215,9 +287,7 @@ def _read_csv_points(path: str) -> dict[str, tuple[float, float]]:
     """
     with open(path) as fp:
         csv_reader = csv.DictReader(fp)
-        points = OrderedDict({row["landmark"]: (float(row["x"]), float(row["y"])) for row in csv_reader})
-
-    return points
+        return OrderedDict({row["landmark"]: (float(row["x"]), float(row["y"])) for row in csv_reader})
 
 
 def write_points(path: str, points: dict[str, tuple[float, float]]) -> None:

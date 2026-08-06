@@ -43,6 +43,7 @@ dependencies = [
     "Jinja2",
     "imageio[ffmpeg]",
     "diptest",
+    "scikit-learn",
 ]
 dynamic = ["version"]
 

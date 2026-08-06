@@ -25,10 +25,12 @@ import os
 from pathlib import Path
 
 import click
+import numpy as np
 import pandas as pd
 from pynwb.image import ImageSeries
 
 import mesoscopy.process.region as pr
+import mesoscopy.process.regression as regr
 import mesoscopy.process.smooth as psm
 import mesoscopy.process.zscore as pzs
 from mesoscopy import io
@@ -180,3 +182,103 @@ def regions_cmd(path: str, out_dir: str) -> None:
         region_activity.to_csv(outpath, index=False)
 
     click.echo(f"Saved region activity at {outpath}")
+
+
+@process_cmd.command("regression")
+@click.argument(
+    "recording_path",
+    type=click.Path(exists=True),
+)
+@click.argument(
+    "regressor_path",
+    type=click.Path(exists=True),
+)
+@click.option(
+    "-o",
+    "--out_dir",
+    type=click.Path(dir_okay=True),
+    default="./",
+    help="Output directory for regression results.",
+)
+@click.option(
+    "-a",
+    "--alpha",
+    type=float,
+    default=1.0,
+    help="Ridge regularisation strength. Defaults to 1.0.",
+)
+@click.option(
+    "-f",
+    "--fast",
+    is_flag=True,
+    default=False,
+    help=(
+        "Use fast vectorised implementation of ridge regression. This is an experimental feature and may not work for"
+        " all datasets. Use with caution. Defaults to False."
+    ),
+)
+@click.option(
+    "--npz",
+    "file_format",
+    flag_value="npz",
+    default="npz",
+    help="Save regression results as a compressed NumPy .npz file. Defaults to True.",
+)
+@click.option(
+    "--h5",
+    "file_format",
+    flag_value="h5",
+    help="Save regression results as an HDF5 file. Defaults to False.",
+)
+def regression_cmd(
+    recording_path: str, regressor_path: str, out_dir: str, alpha: float, fast: bool, file_format: str
+) -> None:
+    """Perform pixel-wise ridge regression on a preprocessed ∆F/F recording."""
+    if not Path(out_dir).exists():
+        click.echo(f"Creating output directory {out_dir}...")
+        Path(out_dir).mkdir(parents=True)
+
+    click.echo(f"Loading preprocessed recording from {recording_path}...")
+    # Determine whether we're working with an NWB file
+    nwb = bool(recording_path.endswith(".nwb"))
+    session_id, deltaf_series, _ = io.load_deltaf(recording_path, nwb=nwb)
+
+    click.echo(f"Loading regressors from {regressor_path}...")
+    regressors, labels, trial_idx = io.read_regressors(regressor_path)
+
+    outpath = out_dir + os.sep + session_id + f"_regression.{file_format}"
+
+    trial_idx_used = False
+    if trial_idx is not None:
+        deltaf_series = deltaf_series[trial_idx]
+        trial_idx_used = True
+
+    with timer.Timer(message="Running regression"):
+        if fast:
+            coefs, r2, mse = regr.ridge_regression_fast(deltaf_series, regressors, alpha=alpha)
+        else:
+            coefs, r2, mse = regr.ridge_regression(deltaf_series, regressors)
+
+        if file_format == "npz":
+            outpath = io.write_npz(
+                path=outpath,
+                data={
+                    "coefficients": coefs,
+                    "r2": r2,
+                    "mse": mse,
+                    "labels": labels,
+                    "trial_idx": trial_idx if trial_idx_used else [],
+                },
+            )
+        elif file_format == "h5":
+            outpath = io.write_h5(
+                path=outpath,
+                data={
+                    "/coefficients": coefs,
+                    "/r2": r2,
+                    "/mse": mse,
+                    "/labels": np.array(labels).astype("S"),
+                    "/trial_idx": trial_idx if trial_idx_used else [],
+                },
+            )
+    click.echo(f"Saved regression results at {outpath}")
