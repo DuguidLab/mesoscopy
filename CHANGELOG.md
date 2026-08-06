@@ -4,6 +4,13 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 ## Unreleased
 
+## [0.8.0] - 2026-08-06
+
+### Added
+
+- `regression` subcommand to `process` CLI for pixel-wise ridge regression against a set of regressors, with results savable as `.npz` or `.h5` ([#10](https://github.com/DuguidLab/mesoscopy/issues/10)).
+- `timestamps` subcommand to `export` CLI for exporting frame timestamps as a text file ([#100](https://github.com/DuguidLab/mesoscopy/issues/100)).
+
 ## [0.7.6] - 2026-07-15
 
 ### Fixed
