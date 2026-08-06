@@ -20,4 +20,4 @@ jobs:
         run: uv python install
 
       - name: Deploy docs
-        run: uv run mkdocs gh-deploy --force --clean --verbose
+        run: uv run --only-group docs mkdocs gh-deploy --force --clean --verbose
