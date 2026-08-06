@@ -30,9 +30,9 @@ import pandas as pd
 from pynwb.image import ImageSeries
 
 import mesoscopy.process.region as pr
+import mesoscopy.process.regression as regr
 import mesoscopy.process.smooth as psm
 import mesoscopy.process.zscore as pzs
-import mesoscopy.process.regression as regr
 from mesoscopy import io
 from mesoscopy import timer
 
