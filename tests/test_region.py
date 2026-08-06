@@ -4,7 +4,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from mesoscopy.process.region import DEFAULT_EXCLUDE, extract_all_regions, extract_region_activity
+from mesoscopy.process.region import DEFAULT_EXCLUDE
+from mesoscopy.process.region import extract_all_regions
+from mesoscopy.process.region import extract_region_activity
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -212,7 +214,7 @@ class TestExtractAllRegions:
         with patch("mesoscopy.resources.get_atlas", return_value=(mock_left_aba, mock_right_aba)), \
              patch("mesoscopy.resources.get_atlas_annotations", return_value=mock_annotations):
             extract_all_regions(deltaf_series, exclude=["REG1"])
-        assert DEFAULT_EXCLUDE == original, "extract_all_regions must not mutate DEFAULT_EXCLUDE"
+        assert original == DEFAULT_EXCLUDE, "extract_all_regions must not mutate DEFAULT_EXCLUDE"
 
     def test_values_match_extract_region_activity(
         self, mock_left_aba, mock_right_aba, mock_annotations, deltaf_series
