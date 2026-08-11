@@ -22,6 +22,7 @@
 """Main entry point to the mesoscopy CLI"""
 
 import os
+from importlib.metadata import version
 
 import click
 import h5py
@@ -35,7 +36,8 @@ from mesoscopy import postprocess
 from mesoscopy import preprocess
 from mesoscopy import process
 from mesoscopy import report
-from mesoscopy.__about__ import __version__
+
+__version__ = version("mesoscopy")
 
 
 @click.group()

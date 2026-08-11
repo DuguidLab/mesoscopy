@@ -4,6 +4,27 @@ First off, thanks for taking the time to contribute to Mesoscopy!
 
 This document sets out a few general guidelines on how to best engage with the project.
 
+## Setting up for development
+
+Mesoscopy uses [uv](https://docs.astral.sh/uv/) for dependency and environment management. With uv installed:
+
+```
+uv sync
+```
+
+Common development tasks are wrapped in the `Makefile`. Run `make` on its own to see them all:
+
+```
+make test       # run the test suite with coverage
+make lint       # lint with ruff
+make types      # type-check with mypy
+make check      # all of the above
+make docs-serve # preview the documentation at localhost:8000
+```
+
+Each recipe is a thin wrapper around `uv run`, so you can always invoke the underlying tool directly if you
+want to target a single test or file (e.g. `uv run pytest tests/test_process.py -k region`).
+
 ## Did you find a bug?
 
 * **Ensure the bug was not already reported** by searching on GitHub under [Issues](https://github.com/DuguidLab/mesoscopy/issues).
