@@ -134,3 +134,10 @@ dmypy.json
 scratch/
 scratch
 test.*
+
+# AI agent instruction files (not yet decided if these should be tracked)
+CLAUDE.md
+AGENTS.md
+.claude/CLAUDE.md
+.cursorrules
+.github/copilot-instructions.md
