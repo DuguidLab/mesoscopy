@@ -29,6 +29,7 @@ import numpy as np
 import pandas as pd
 from pynwb.image import ImageSeries
 
+import mesoscopy.process.decoder as dec
 import mesoscopy.process.region as pr
 import mesoscopy.process.regression as regr
 import mesoscopy.process.smooth as psm
@@ -282,3 +283,88 @@ def regression_cmd(
                 },
             )
     click.echo(f"Saved regression results at {outpath}")
+
+
+@process_cmd.command("decode")
+@click.argument(
+    "recording_path",
+    type=click.Path(exists=True),
+)
+@click.argument(
+    "labels_path",
+    type=click.Path(exists=True),
+)
+@click.option(
+    "-o",
+    "--out_dir",
+    type=click.Path(dir_okay=True),
+    default="./",
+    help="Output directory for regression results.",
+)
+@click.option(
+    "-f",
+    "--decoder",
+    type=click.Choice(["logistic", "lda"], case_sensitive=False),
+    default="logistic",
+    help="Decoder to use. Defaults to logistic regression.",
+)
+@click.option(
+    "-t",
+    "--test_size",
+    type=float,
+    default=0.2,
+    help="Fraction of the dataset to include in the test split. Defaults to 0.2.",
+)
+@click.option(
+    "-m",
+    "--mask",
+    type=click.Path(exists=True),
+    help=(
+        "Path to a binary spatial mask file to apply to the deltaF series. "
+        "Should be a 2D array in NPZ or HDF5 format. "
+        "If provided, only pixels within the mask will be used for decoding."
+    ),
+)
+def decode_cmd(
+    recording_path: str, labels_path: str, out_dir: str, decoder: str, test_size: float, mask: str | None
+) -> None:
+    """Perform pixel-wise decoding on a preprocessed ∆F/F recording."""
+    if not Path(out_dir).exists():
+        click.echo(f"Creating output directory {out_dir}...")
+        Path(out_dir).mkdir(parents=True)
+
+    click.echo(f"Loading preprocessed recording from {recording_path}...")
+    # Determine whether we're working with an NWB file
+    nwb = bool(recording_path.endswith(".nwb"))
+    session_id, deltaf_series, _ = io.load_deltaf(recording_path, nwb=nwb)
+
+    click.echo(f"Loading labels from {labels_path}...")
+    labels = io.read_decoding_labels(labels_path)
+
+    if mask is not None:
+        click.echo(f"Loading spatial mask from {mask}...")
+        mask_array = io.read_mask(mask)
+        if mask_array.shape != deltaf_series.shape[1:]:
+            msg = (
+                f"Mask shape {mask_array.shape} does not match"
+                f"deltaF series spatial dimensions {deltaf_series.shape[1:]}."
+            )
+            raise ValueError(msg)
+        deltaf_series = deltaf_series[:, mask_array]
+
+    outpath = out_dir + os.sep + session_id + f"_decoding_{decoder}.json"
+
+    with timer.Timer(message="Running decoding"):
+        if decoder.lower() == "logistic":
+            results = dec.logistic_decoder(deltaf_series, labels, test_size=test_size)
+        elif decoder.lower() == "lda":
+            results = dec.lda_decoder(deltaf_series, labels, test_size=test_size)
+        else:
+            msg = f"Decoder {decoder} not recognised. Choose 'logistic' or 'lda'."
+            raise ValueError(msg)
+
+        outpath = io.write_json(
+            path=outpath,
+            data=results,
+        )
+    click.echo(f"Saved decoding results at {outpath}")
