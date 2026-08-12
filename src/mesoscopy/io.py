@@ -20,6 +20,7 @@
 #  SOFTWARE.
 import csv
 import typing
+import json
 from collections import OrderedDict
 
 import h5py
@@ -205,6 +206,22 @@ def read_points(path: str) -> dict[str, tuple[float, float]]:
     raise ValueError(msg)
 
 
+def write_points(path: str, points: dict[str, tuple[float, float]]) -> None:
+    """Write a dictionary of landmark points to a CSV file.
+
+    Args:
+        path (str): Path to output CSV file.
+        points (dict[str, tuple[float, float]]): Dictionary with the landmark names as keys and their x-y coordinates
+    """
+    if not path.endswith(".csv"):
+        path += ".csv"
+    with open(path, "w") as fp:
+        csv_writer = csv.DictWriter(fp, fieldnames=["landmark", "x", "y"])
+        csv_writer.writeheader()
+        for landmark, (x, y) in points.items():
+            csv_writer.writerow({"landmark": landmark, "x": x, "y": y})
+
+
 def read_regressors(path: str) -> tuple[np.ndarray, list[str], np.ndarray]:
     """Read a regressor file in NPZ or HDF5 format.
 
@@ -225,7 +242,91 @@ def read_regressors(path: str) -> tuple[np.ndarray, list[str], np.ndarray]:
     raise ValueError(msg)
 
 
-def _read_npz_regressors(path: str) -> tuple[np.ndarray, list[str], np.ndarray]:
+def read_decoding_labels(path: str) -> np.ndarray:
+    """Read a decoding labels file in NPZ or HDF5 format.
+
+    Args:
+        path (str): Path to the labels file.
+
+    Returns:
+        np.ndarray: Array of decoding labels.
+
+    Raises:
+        ValueError: If the file format is unsupported.
+    """
+    if path.endswith(".npz"):
+        return _read_npz_decoding_labels(path)
+    if path.endswith(".h5"):
+        return _read_hdf5_decoding_labels(path)
+    msg = "Unsupported file format."
+    raise ValueError(msg)
+
+
+def read_mask(path: str, key: str = "mask") -> np.ndarray:
+    """Read a spatial mask file in NPZ or HDF5 format.
+
+    Args:
+        path (str): Path to the mask file.
+        key (str): Key for the mask data in the file.
+
+    Returns:
+        np.ndarray: 2D array representing the spatial mask.
+
+    Raises:
+        ValueError: If the file format is unsupported.
+    """
+    if path.endswith(".npz"):
+        with np.load(path) as f:
+            return f.get(key)
+    if path.endswith(".h5"):
+        with h5py.File(path, "r") as f:
+            return np.array(f.get(key)[:])  # type: ignore
+    msg = "Unsupported file format."
+    raise ValueError(msg)
+
+
+def write_json(path: str, data: dict) -> str:
+    """Write a dictionary to a JSON file.
+
+    Args:
+        path (str): Path to the JSON file.
+        data (dict): Dictionary to write.
+
+    Returns:
+        str: Path to the written JSON file.
+    """
+    with open(path, "w") as f:
+        json.dump(data, f, indent=4)
+    return path
+
+
+def _read_npz_decoding_labels(path: str) -> np.ndarray:
+    """Read a decoding labels file in NPZ format.
+
+    Args:
+        path (str): Path to the NPZ file. File should contain 'labels' array.
+
+    Returns:
+        np.ndarray: Array of decoding labels.
+    """
+    with np.load(path) as f:
+        return f.get("labels")
+
+
+def _read_hdf5_decoding_labels(path: str) -> np.ndarray:
+    """Read a decoding labels file in HDF5 format.
+
+    Args:
+        path (str): Path to the HDF5 file. File should contain 'labels' dataset.
+
+    Returns:
+        np.ndarray: Array of decoding labels.
+    """
+    with h5py.File(path, "r") as f:
+        return np.array(f.get("labels")[:])  # type: ignore
+
+
+def _read_npz_regressors(path: str, key: str = "regressors") -> tuple[np.ndarray, list[str], np.ndarray]:
     """Read a regressor file in NPZ format.
 
     Args:
@@ -288,19 +389,3 @@ def _read_csv_points(path: str) -> dict[str, tuple[float, float]]:
     with open(path) as fp:
         csv_reader = csv.DictReader(fp)
         return OrderedDict({row["landmark"]: (float(row["x"]), float(row["y"])) for row in csv_reader})
-
-
-def write_points(path: str, points: dict[str, tuple[float, float]]) -> None:
-    """Write a dictionary of landmark points to a CSV file.
-
-    Args:
-        path (str): Path to output CSV file.
-        points (dict[str, tuple[float, float]]): Dictionary with the landmark names as keys and their x-y coordinates
-    """
-    if not path.endswith(".csv"):
-        path += ".csv"
-    with open(path, "w") as fp:
-        csv_writer = csv.DictWriter(fp, fieldnames=["landmark", "x", "y"])
-        csv_writer.writeheader()
-        for landmark, (x, y) in points.items():
-            csv_writer.writerow({"landmark": landmark, "x": x, "y": y})
