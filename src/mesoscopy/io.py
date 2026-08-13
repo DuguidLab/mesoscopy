@@ -59,14 +59,16 @@ def read_nwb(path: str, mode: str = "a", return_io: bool = False) -> NWBFile | t
     return nwbfile
 
 
-def write_nwb(path: str, nwbfile: NWBFile, mode: str = "w", io: NWBHDF5IO = None, **kwargs) -> None:
+def write_nwb(path: str, nwbfile: NWBFile, mode: str = "w", io: NWBHDF5IO = None, **kwargs: typing.Any) -> None:
     """Write an NWB file.
 
     Args:
         path (str): Path to the NWB file.
         nwbfile (NWBFile): NWB file object.
         mode (str, optional): File write mode (i.e. write/append). Defaults to "w".
-        **kwargs: Parameters passed to NWBHDF5IO.write.
+        io (NWBHDF5IO, optional): An already open IO object to write through. When given, the file
+            is not reopened and `path` and `mode` are ignored. Defaults to None.
+        **kwargs (typing.Any): Parameters passed to NWBHDF5IO.write.
     """
     if io:
         return io.write(nwbfile, **kwargs)

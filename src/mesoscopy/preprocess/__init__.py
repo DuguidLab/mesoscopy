@@ -127,10 +127,10 @@ def run_preprocessing(
         chunks (int, optional): Number of chunks to load in memory. Defaults to 100.
         crop (int, optional): Number of pixels to crop from the edges of the recording. Defaults to 0.
         bins (int, optional): Recording pixel binning factor. Defaults to 2.
-        channel_means_only (bool, optional): Extract the channel means and exit without extracting a delta F series.
-        Defaults to False.
-        use_means (bool, optional): Use means histogram instead of standard deviation to separate channels.
-        Defaults to False.
+        channel_means_only (bool, optional): Extract the channel means and exit without extracting a
+            delta F series. Defaults to False.
+        use_means (bool, optional): Use means histogram instead of standard deviation to separate
+            channels. Defaults to False.
         flip_channels (bool, optional): Flip extracted channel order. Defaults to False.
         interim_dir (str, optional): Path to the interim directory. Defaults to "interim/".
         skip_start (int, optional): Number of frames to skip at the start of the recording. Defaults to None.

@@ -1,4 +1,4 @@
-![https://www.mesoscopy.org](../assets/mesoscopy-logo-banner.png)
+![https://www.mesoscopy.org](assets/mesoscopy-logo-banner.png)
 
 ---
 
