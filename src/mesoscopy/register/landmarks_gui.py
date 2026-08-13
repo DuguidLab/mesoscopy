@@ -20,6 +20,7 @@
 #  SOFTWARE.
 from collections import OrderedDict
 
+import click
 import magicgui.widgets as mgw
 import napari
 import numpy as np
@@ -40,7 +41,10 @@ COLOR_CYCLE = [
 
 
 def mark_landmarks(
-    maxip_image: npt.NDArray | da.Array, alt_image: npt.NDArray | da.Array | None, template_landmarks: dict = {}
+    maxip_image: npt.NDArray | da.Array,
+    alt_image: npt.NDArray | da.Array | None,
+    template_landmarks: dict = {},
+    template_shape: tuple[int, int] | None = None,
 ) -> dict:
     """Launch the napari viewer to identify anatomical landmarks on a maximum intensity projection image.
 
@@ -55,13 +59,23 @@ def mark_landmarks(
     - rpRSP: Right posterior aspect of the retrosplenial cortex.
     - aIPB: Anterior aspect of the interparietal bone.
 
+    Landmark coordinates are stored as (x, y) tuples, i.e. (column, row), matching the convention used
+    by the template landmark files and by ``skimage.transform``. Napari works in (row, column) order, so
+    coordinates are transposed on the way into and out of the viewer.
+
+    Marked points are identified by their ``label`` property rather than by their position in the
+    points layer, since deleting and re-marking a point moves it to the end of the layer.
+
     Args:
         maxip_image (npt.NDArray): Maximum intensity projection image. Could be either channel.
         alt_image (npt.NDArray): Alternative image to be displayed alongside the maximum intensity projection image. Usually a second channel.
-        template_landmarks (dict, optional): Dictionary with the landmarks and their x-y coordinates. Dictionary keys are landmark names, while x-y coordinates are stored as an (y, x) tuple. Defaults to {}.
+        template_landmarks (dict, optional): Dictionary with the landmarks and their x-y coordinates, used to seed the initial point positions. Dictionary keys are landmark names, while x-y coordinates are stored as an (x, y) tuple. Defaults to {}.
+        template_shape (tuple[int, int], optional): Shape of the image the template landmarks were
+            marked on, as (height, width). When given, the seed points are scaled to the size of the
+            recording so they do not bunch up in a corner. Defaults to None (no scaling).
 
     Returns:
-        dict: Dictionary with the landmarks and their x-y coordinates. Dictionary keys are landmark names, while x-y coordinates are stored as an (y, x) tuple.
+        dict: Dictionary with the landmarks and their x-y coordinates, in template order. Dictionary keys are landmark names, while x-y coordinates are stored as an (x, y) tuple.
 
     Raises:
         ValueError: If the maximum intensity projection and alternative image do not have the same dimensions.
@@ -85,21 +99,36 @@ def mark_landmarks(
         viewer.add_image(alt_image, name="alt_maxip")
 
     default_landmark_locations = template_landmarks or {
-        "bregma": (maxip_height / 2, maxip_width / 2),
-        "cFP": (maxip_height / 7, maxip_width / 2),
-        "rFP": (maxip_height / 7, maxip_width / 1.5),
-        "lFP": (maxip_height / 7, maxip_width / 3),
-        "rPB": (maxip_height / 4, maxip_width / 1.25),
-        "lPB": (maxip_height / 4, maxip_width / 5),
-        "lpRSP": (maxip_height / 1.25, maxip_width / 2.25),
-        "rpRSP": (maxip_height / 1.25, maxip_width / 1.75),
-        "aIPB": (maxip_height / 1.4, maxip_width / 2),
+        "bregma": (maxip_width / 2, maxip_height / 2),
+        "cFP": (maxip_width / 2, maxip_height / 7),
+        "rFP": (maxip_width / 1.5, maxip_height / 7),
+        "lFP": (maxip_width / 3, maxip_height / 7),
+        "rPB": (maxip_width / 1.25, maxip_height / 4),
+        "lPB": (maxip_width / 5, maxip_height / 4),
+        "lpRSP": (maxip_width / 2.25, maxip_height / 1.25),
+        "rpRSP": (maxip_width / 1.75, maxip_height / 1.25),
+        "aIPB": (maxip_width / 2, maxip_height / 1.4),
     }
 
     landmarks = list(default_landmark_locations.keys())
 
+    # Template landmarks are in template pixels, which may be a very different size to the recording.
+    # Scale them so the seed points land roughly on the anatomy instead of bunching up in a corner.
+    if template_landmarks and template_shape is not None:
+        template_height, template_width = template_shape
+        scale_x = maxip_width / template_width
+        scale_y = maxip_height / template_height
+        if not np.isclose(scale_x, 1.0) or not np.isclose(scale_y, 1.0):
+            click.echo(f"Scaling template seed points by {scale_x:.2f} (x) and {scale_y:.2f} (y) to fit the recording.")
+            default_landmark_locations = {
+                landmark: (x * scale_x, y * scale_y) for landmark, (x, y) in default_landmark_locations.items()
+            }
+
+    # Landmarks are stored as (x, y), napari points are (row, column) - transpose on the way in.
+    seed_points = np.array([(y, x) for x, y in default_landmark_locations.values()], dtype=float)
+
     points_layer = viewer.add_points(
-        data=np.array(list(default_landmark_locations.values())),
+        data=seed_points,
         name="landmarks",
         ndim=2,
         properties={"label": landmarks},
@@ -120,7 +149,51 @@ def mark_landmarks(
 
     napari.run()
 
-    return OrderedDict(zip(landmarks, points_layer.data, strict=True))
+    return _collect_marked_points(points_layer, landmarks)
+
+
+def _collect_marked_points(points_layer: napari.layers.Points, landmarks: list[str]) -> OrderedDict:
+    """Map each landmark name to the position of the point labelled with it.
+
+    Points are matched by their ``label`` property, not by their index in the layer: deleting a point
+    and re-marking it appends it to the end of the layer, so point order does not track landmark
+    order. Results are returned in landmark (template) order, which is the order the registration
+    transform pairs the two point sets in.
+
+    Args:
+        points_layer (napari.layers.Points): The points layer the user annotated.
+        landmarks (list[str]): Landmark names, in template order.
+
+    Returns:
+        OrderedDict: Landmark names mapped to their (x, y) coordinates, in template order.
+
+    Raises:
+        ValueError: If the points layer has no usable label property.
+    """
+    points = np.asarray(points_layer.data, dtype=float)
+    labels = np.asarray(points_layer.properties.get("label", []), dtype=str)
+
+    if len(labels) != len(points):
+        msg = "Points layer labels do not correspond to the marked points, cannot identify landmarks."
+        raise ValueError(msg)
+
+    marked = OrderedDict()
+    for landmark in landmarks:
+        matches = np.flatnonzero(labels == landmark)
+        if len(matches) == 0:
+            click.echo(f"⚠️ No point is labelled '{landmark}' - this landmark will be missing from the output.")
+            continue
+        if len(matches) > 1:
+            click.echo(f"⚠️ {len(matches)} points are labelled '{landmark}' - using the most recently marked one.")
+        # napari points are (row, column), landmarks are stored as (x, y).
+        row, column = points[matches[-1]]
+        marked[landmark] = (float(column), float(row))
+
+    unknown = sorted(set(labels) - set(landmarks))
+    if unknown:
+        click.echo(f"⚠️ Ignoring points with unrecognised labels: {', '.join(unknown)}")
+
+    return marked
 
 
 def _create_label_menu(points_layer, labels):
