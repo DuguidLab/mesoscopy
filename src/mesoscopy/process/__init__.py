@@ -341,6 +341,7 @@ def decode_cmd(
     click.echo(f"Loading labels from {labels_path}...")
     labels = io.read_decoding_labels(labels_path)
 
+    mask_array = None
     if mask is not None:
         click.echo(f"Loading spatial mask from {mask}...")
         mask_array = io.read_mask(mask)
@@ -350,6 +351,7 @@ def decode_cmd(
                 f"deltaF series spatial dimensions {deltaf_series.shape[1:]}."
             )
             raise ValueError(msg)
+        # Only masked-in pixels are decoded, leaving a (time, n_pixels) series.
         deltaf_series = deltaf_series[:, mask_array]
 
     outpath = out_dir + os.sep + session_id + f"_decoding_{decoder}.json"
@@ -362,6 +364,13 @@ def decode_cmd(
         else:
             msg = f"Decoder {decoder} not recognised. Choose 'logistic' or 'lda'."
             raise ValueError(msg)
+
+        if mask_array is not None:
+            # Scatter the per-pixel coefficients back onto the full frame, so masked results stay
+            # spatially interpretable. Masked-out pixels contribute nothing, hence a zero weight.
+            coefs = np.zeros(mask_array.shape, dtype=results["coefficients"].dtype)
+            coefs[mask_array] = results["coefficients"]
+            results["coefficients"] = coefs
 
         outpath = io.write_json(
             path=outpath,
