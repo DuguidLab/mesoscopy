@@ -1,3 +1,5 @@
+import pathlib
+import shutil
 from importlib import resources
 from types import SimpleNamespace
 
@@ -8,6 +10,7 @@ from click.testing import CliRunner
 from skimage import transform as trf
 
 import mesoscopy
+import mesoscopy.preprocess as preproc
 import mesoscopy.register as reg
 import mesoscopy.register.landmarks_gui as reg_gui
 import mesoscopy.register.qa as reg_qa
@@ -217,6 +220,91 @@ def test_register_landmarks_cli_nwb_stores_the_transform_matrix(preproc_nwb, out
     np.testing.assert_allclose(xy_translation[0], np.eye(3), atol=1e-6)
 
 
+# ---------------------------------------------------------------------------
+# Landmark file discovery and maxip sourcing
+# ---------------------------------------------------------------------------
+
+
+def test_session_id_drops_extension_and_preprocessed_suffix():
+    assert reg.session_id_from_path("/data/sub-01_preprocessed.h5") == "sub-01"
+    assert reg.session_id_from_path("/data/sub-01.nwb") == "sub-01"
+    # A directory containing ".h5" must not be mangled - the old str.replace did exactly that.
+    assert reg.session_id_from_path("/data.h5archive/sub-01_preprocessed.h5") == "sub-01"
+
+
+def test_landmarks_inference_finds_the_file_label_actually_writes(preproc_h5, output_dir, tmp_path):
+    """`label` names its output after the session ID, so it drops the "_preprocessed" suffix.
+
+    The previous inference looked for "<recording>_landmarks.csv", which for a preprocessed HDF5
+    could never match what `label` had written.
+    """
+    recording = tmp_path / "sub-01_preprocessed.h5"
+    shutil.copy(preproc_h5, recording)
+    # Exactly what `register label` would have written for this recording.
+    io.write_points(str(tmp_path / "sub-01_landmarks.csv"), res.get_default_landmarks())
+
+    runner = CliRunner()
+    result = runner.invoke(mesoscopy.cli, args=f"register landmarks {recording} -o {output_dir}")
+
+    assert result.exit_code == 0, result.output
+    assert "sub-01_landmarks.csv" in result.output
+
+
+def test_landmarks_inference_error_lists_where_it_looked(preproc_h5, output_dir):
+    runner = CliRunner()
+    result = runner.invoke(mesoscopy.cli, args=f"register landmarks {preproc_h5} -o {output_dir}")
+
+    assert result.exit_code != 0
+    assert isinstance(result.exception, ValueError)
+    assert "Searched" in str(result.exception)
+    assert "_landmarks.csv" in str(result.exception)
+
+
+def test_load_maxips_returns_none_when_absent(preproc_h5):
+    """preproc_h5 holds only /F and /timestamps, so there is nothing to load."""
+    assert reg.load_maxips(preproc_h5) == (None, None)
+
+
+def test_linked_preprocessed_path_resolves_the_external_link(nwbfile, preproc_h5):
+    """Preprocessing links the NWB dF/F series to the HDF5 file holding the QA projections."""
+    preproc.update_nwb(nwbfile, preproc_h5)
+
+    resolved = reg.linked_preprocessed_path(nwbfile)
+
+    assert resolved is not None
+    assert pathlib.Path(resolved).resolve() == pathlib.Path(preproc_h5).resolve()
+
+
+def test_linked_preprocessed_path_is_none_without_an_external_link(preproc_nwb):
+    """A dF/F series stored inline rather than linked resolves to nothing."""
+    assert reg.linked_preprocessed_path(preproc_nwb) is None
+
+
+def test_label_falls_back_to_a_deltaf_projection(monkeypatch, tmp_path):
+    """Without QA projections the maxip must come from the dF/F series, not the raw frames.
+
+    The raw frames are neither cropped nor binned, so projecting them yields landmarks in a
+    different pixel space to the data being registered.
+    """
+    recording = tmp_path / "sub-01_preprocessed.h5"
+    rng = np.random.default_rng(0)
+    deltaf = rng.random((10, 40, 40), dtype=np.float32)
+    with h5py.File(recording, "w") as f:
+        f.create_dataset("/F", data=deltaf)
+        f.create_dataset("/timestamps", data=np.arange(10.0))
+
+    captured = {}
+    _patch_napari(monkeypatch, captured=captured)
+
+    runner = CliRunner()
+    result = runner.invoke(mesoscopy.cli, args=f"register label {recording} -o {tmp_path}")
+
+    assert result.exit_code == 0, result.output
+    assert "∆F/F" in result.output
+    # The projection is of the dF/F series, in the dF/F pixel space.
+    np.testing.assert_allclose(captured["image"], deltaf.max(axis=0))
+
+
 def test_register_landmarks_cli_default_points_h5(preproc_h5, output_dir):
     mock_recording_landmarks = str(resources.files(res).joinpath("ccf_template_landmarks_140x142.csv"))
     runner = CliRunner()
@@ -311,7 +399,12 @@ def _patch_napari(monkeypatch, final_state=None, captured=None):
                 return _FakePointsLayer(data, kwargs["properties"]["label"])
             return _FakePointsLayer(*final_state)
 
-    monkeypatch.setattr(reg_gui.napari, "view_image", lambda *args, **kwargs: FakeViewer())
+    def view_image(image, *args, **kwargs):
+        if captured is not None:
+            captured["image"] = np.asarray(image)
+        return FakeViewer()
+
+    monkeypatch.setattr(reg_gui.napari, "view_image", view_image)
     monkeypatch.setattr(reg_gui.napari, "run", lambda *args, **kwargs: None)
     monkeypatch.setattr(reg_gui, "_create_label_menu", lambda points_layer, labels: None)
 
