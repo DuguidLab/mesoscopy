@@ -142,15 +142,25 @@ def label_cmd(path, out_dir, template_points, session_id) -> dict:
     type=click.Path(dir_okay=False),
     help="Path to template landmark points in Fiji XML points format",
 )
-@click.option("--crop-x", default=0, help="Crop recording along the x-axis.")
-@click.option("--crop-y", default=0, help="Crop recording along the y-axis.")
+@click.option(
+    "--output-width",
+    type=int,
+    default=None,
+    help="Width of the registered frames. Defaults to the width of the Allen CCF template.",
+)
+@click.option(
+    "--output-height",
+    type=int,
+    default=None,
+    help="Height of the registered frames. Defaults to the height of the Allen CCF template.",
+)
 def landmarks_cmd(
     path: str,
     out_dir: str,
     recording_points: str,
     template_points: str,
-    crop_x: int = 0,
-    crop_y: int = 0,
+    output_width: int | None = None,
+    output_height: int | None = None,
 ) -> str:
     """Register a recording to a template based on defined landmarks.
 
@@ -159,8 +169,8 @@ def landmarks_cmd(
         out_dir (str): Output directory for registered recording.
         recording_points (str, optional): Path to recording landmark points in CSV or Fiji XML points format.
         template_points (str, optional): Path to template landmark points in CSV or Fiji XML points format.
-        crop_x (int, optional): Number of pixels to crop from the x-axis of the recording. Defaults to 0.
-        crop_y (int, optional): Number of pixels to crop from the y-axis of the recording. Defaults to 0.
+        output_width (int, optional): Width of the registered frames. Defaults to the Allen CCF template width.
+        output_height (int, optional): Height of the registered frames. Defaults to the Allen CCF template height.
 
     Returns:
         str: Path to the registered recording file.
@@ -194,12 +204,17 @@ def landmarks_cmd(
             raise ValueError(msg)
     recording_landmarks = io.read_points(recording_points)
 
+    # Registered frames land in template space, so default their shape to that of the CCF atlas.
+    output_shape = None
+    if output_width or output_height:
+        atlas_height, atlas_width = res.get_atlas()[0].shape
+        output_shape = (output_height or atlas_height, output_width or atlas_width)
+
     warped, tform = trf.landmarks_affine(
         deltaf_series,
         recording_landmarks,
         template_landmarks,
-        crop_x=crop_x,
-        crop_y=crop_y,
+        output_shape=output_shape,
     )
 
     # Save warped frames and timestamps

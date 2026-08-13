@@ -27,30 +27,36 @@ import click
 import numpy as np
 from skimage import transform as trf
 
+import mesoscopy.resources as res
+
 
 def landmarks_affine(
     deltaf_series: np.ndarray,
     recording_landmarks: dict,
     template_landmarks: dict,
-    crop_x: int = 0,
-    crop_y: int = 0,
+    output_shape: tuple[int, int] | None = None,
 ) -> tuple[np.ndarray, trf.ProjectiveTransform]:
     """Warp a DeltaF/F series to match a template using anatomical landmarks.
 
     Both landmark sets must use the same (x, y) — i.e. (column, row) — coordinate convention as
     ``skimage.transform``.
 
+    The registered frames are in template space, so their shape is that of the template rather than
+    that of the recording. It defaults to the shape of the Allen CCF atlas, but can be overridden with ``output_shape``.
+
     Args:
         deltaf_series (np.ndarray): DeltaF/F series.
         recording_landmarks (dict): Recording landmarks, as {name: (x, y)}.
         template_landmarks (dict): Template landmarks, as {name: (x, y)}.
-        crop_x (int, optional): Crop x-axis. Defaults to 0.
-        crop_y (int, optional): Crop y-axis. Defaults to 0.
+        output_shape (tuple[int, int], optional): Shape of the registered frames, as (height, width).
+            Defaults to the shape of the Allen CCF atlas template.
 
     Returns:
         tuple[np.ndarray, trf.ProjectiveTransform]: Registered DeltaF/F series and affine
             transformation matrix.
     """
+    if output_shape is None:
+        output_shape = res.get_atlas()[0].shape
     if not isinstance(deltaf_series, np.ndarray):
         click.echo("Loading imaging data into memory...")
         deltaf_series = np.asarray(deltaf_series)
@@ -67,15 +73,16 @@ def landmarks_affine(
     n_frames = deltaf_series.shape[0]
 
     def _warp_frame(idx: int) -> np.ndarray:
-        if crop_x > 0 or crop_y > 0:
-            return trf.warp(deltaf_series[idx, :crop_y, :crop_x], tform, order=3)
-        return trf.warp(deltaf_series[idx], tform, order=3)
+        return trf.warp(deltaf_series[idx], tform, order=3, output_shape=output_shape)
 
     start = time.time()
     results: list[np.ndarray | None] = [None] * n_frames
     n_workers = os.cpu_count() or 1
     with (
-        click.progressbar(length=n_frames, label="Registering recording to template...") as bar,
+        click.progressbar(
+            length=n_frames,
+            label=f"Registering recording to template ({output_shape[1]}x{output_shape[0]} frames)...",
+        ) as bar,
         ThreadPoolExecutor(max_workers=n_workers) as executor,
     ):
         futures = {executor.submit(_warp_frame, i): i for i in range(n_frames)}

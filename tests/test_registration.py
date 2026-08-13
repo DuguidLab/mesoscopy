@@ -37,11 +37,17 @@ def landmark_pair():
 # Tests
 # ---------------------------------------------------------------------------
 
-def test_landmarks_affine_output_shape(small_series, landmark_pair):
-    """Warped series must have the same shape as the input."""
+def test_landmarks_affine_defaults_to_atlas_shape(small_series, landmark_pair):
+    """Registered frames are in template space, so they default to the atlas shape.
+
+    This is the shape mesoscopy.process.region requires; the shape of the recording is irrelevant.
+    """
     recording_lm, template_lm = landmark_pair
     warped, _ = landmarks_affine(small_series, recording_lm, template_lm)
-    assert warped.shape == small_series.shape
+
+    atlas_shape = res.get_atlas()[0].shape
+    assert atlas_shape != small_series.shape[1:]  # guard: the fixture must not already be atlas-shaped
+    assert warped.shape == (small_series.shape[0], *atlas_shape)
 
 
 def test_landmarks_affine_returns_projective_transform(small_series, landmark_pair):
@@ -70,52 +76,90 @@ def test_landmarks_affine_matches_sequential_reference(small_series, landmark_pa
     template  = np.array(list(template_lm.values()),  dtype=np.float32)
     recording = np.array(list(recording_lm.values()), dtype=np.float32)
     ref_tform = trf.estimate_transform("affine", template, recording)
-    reference = np.array([trf.warp(small_series[i], ref_tform, order=3) for i in range(small_series.shape[0])])
+    reference = np.array(
+        [trf.warp(small_series[i], ref_tform, order=3, output_shape=(40, 40)) for i in range(small_series.shape[0])]
+    )
 
-    warped, _ = landmarks_affine(small_series, recording_lm, template_lm)
+    warped, _ = landmarks_affine(small_series, recording_lm, template_lm, output_shape=(40, 40))
 
     np.testing.assert_array_equal(warped, reference)
 
 
-def test_landmarks_affine_crop(landmark_pair):
-    """With crop_x / crop_y the warped frames should be cropped to those dimensions."""
+def test_landmarks_affine_explicit_output_shape(landmark_pair):
+    """An explicit output_shape overrides the atlas default."""
     rng = np.random.default_rng(1)
     series = rng.random((5, 40, 40), dtype=np.float32)
     recording_lm, template_lm = landmark_pair
-    crop_x, crop_y = 30, 25
 
-    warped, _ = landmarks_affine(series, recording_lm, template_lm, crop_x=crop_x, crop_y=crop_y)
+    warped, _ = landmarks_affine(series, recording_lm, template_lm, output_shape=(25, 30))
 
-    assert warped.shape == (5, crop_y, crop_x)
+    assert warped.shape == (5, 25, 30)
 
 
-def test_landmarks_affine_crop_matches_sequential_reference(landmark_pair):
-    """Cropped parallel output must be identical to the sequential cropped loop."""
-    rng = np.random.default_rng(2)
-    series = rng.random((5, 40, 40), dtype=np.float32)
+def test_landmarks_affine_output_shape_does_not_crop_the_source(landmark_pair):
+    """Sizing the output must not discard source pixels.
+
+    The previous implementation cropped the *input* to (crop_y, crop_x), which threw away exactly
+    the source pixels the warp needs whenever the brain was not in the top-left corner.
+    """
+    series = np.zeros((1, 200, 200), dtype=np.float32)
+    series[0, 120:160, 130:170] = 1.0  # signal well outside the top-left 40x40 corner
     recording_lm, template_lm = landmark_pair
-    crop_x, crop_y = 30, 25
 
-    template  = np.array(list(template_lm.values()),  dtype=np.float32)
-    recording = np.array(list(recording_lm.values()), dtype=np.float32)
-    ref_tform = trf.estimate_transform("affine", template, recording)
-    reference = np.array([trf.warp(series[i, :crop_y, :crop_x], ref_tform, order=3) for i in range(series.shape[0])])
+    # Landmarks describing a pure translation that brings the blob into a 60x60 output window.
+    recording = {"a": (130.0, 120.0), "b": (170.0, 120.0), "c": (130.0, 160.0)}
+    template = {"a": (10.0, 10.0), "b": (50.0, 10.0), "c": (10.0, 50.0)}
 
-    warped, _ = landmarks_affine(series, recording_lm, template_lm, crop_x=crop_x, crop_y=crop_y)
+    warped, _ = landmarks_affine(series, recording, template, output_shape=(60, 60))
 
-    np.testing.assert_array_equal(warped, reference)
+    assert warped.shape == (1, 60, 60)
+    assert warped[0].sum() > 0.9 * series[0].sum()
 
 
 def test_landmarks_affine_identity_landmarks(small_series):
     """When recording and template landmarks are identical the warp is a near-identity."""
     landmarks = {"A": (5.0, 5.0), "B": (35.0, 5.0), "C": (5.0, 35.0)}
-    warped, _ = landmarks_affine(small_series, landmarks, landmarks)
+    warped, _ = landmarks_affine(small_series, landmarks, landmarks, output_shape=(40, 40))
 
     # Interior pixels should be reproduced almost exactly (boundary pixels may differ
     # due to the constant-zero padding convention of skimage warp).
     interior = small_series[:, 5:-5, 5:-5]
     warped_interior = warped[:, 5:-5, 5:-5]
     np.testing.assert_allclose(warped_interior, interior, atol=1e-5)
+
+
+def test_landmarks_affine_registers_a_known_transform_to_the_atlas():
+    """Ground truth: warp the atlas by a known affine, then register it back.
+
+    Unlike the reference tests above, the expected result here is not derived from the
+    implementation - the recording is synthesised from the atlas itself.
+    """
+    atlas = res.get_atlas()[0].astype(np.float32)
+    template_lm = res.get_default_landmarks()
+
+    # Synthesise a "recording": the atlas seen through a known rotation, scale and shift.
+    true_tform = trf.AffineTransform(scale=(1.8, 1.7), rotation=np.deg2rad(8), translation=(40, 25))
+    recording = trf.warp(atlas, true_tform.inverse, output_shape=(300, 320), order=1)
+    recording_lm = {
+        name: tuple(true_tform(np.array([point]))[0]) for name, point in template_lm.items()
+    }
+
+    warped, tform = landmarks_affine(recording[None], recording_lm, template_lm)
+
+    # Output is in atlas space...
+    assert warped.shape == (1, *atlas.shape)
+
+    # ...the recovered transform is the one we applied...
+    np.testing.assert_allclose(tform.params, true_tform.params, atol=1e-3)
+
+    # ...and every landmark lands within a pixel of its template position.
+    landed = tform.inverse(np.array(list(recording_lm.values())))
+    expected = np.array(list(template_lm.values()))
+    assert np.linalg.norm(landed - expected, axis=1).max() < 1.0
+
+    # The registered image reproduces the atlas it was synthesised from.
+    labelled = atlas > 0
+    assert np.abs(warped[0][labelled] - atlas[labelled]).mean() < 0.02 * atlas.max()
 
 
 def test_update_nwb(nwbfile, preproc_h5):
