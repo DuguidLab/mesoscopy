@@ -304,7 +304,7 @@ def regression_cmd(
 @click.option(
     "-f",
     "--decoder",
-    type=click.Choice(["logistic", "lda"], case_sensitive=False),
+    type=click.Choice(list(dec.DECODERS), case_sensitive=False),
     default="logistic",
     help="Decoder to use. Defaults to logistic regression.",
 )
@@ -357,13 +357,9 @@ def decode_cmd(
     outpath = out_dir + os.sep + session_id + f"_decoding_{decoder}.json"
 
     with timer.Timer(message="Running decoding"):
-        if decoder.lower() == "logistic":
-            results = dec.logistic_decoder(deltaf_series, labels, test_size=test_size)
-        elif decoder.lower() == "lda":
-            results = dec.lda_decoder(deltaf_series, labels, test_size=test_size)
-        else:
-            msg = f"Decoder {decoder} not recognised. Choose 'logistic' or 'lda'."
-            raise ValueError(msg)
+        # `click.Choice` is built from the same registry, so the name is always a valid key. It also
+        # normalises the case, hence the lowercase lookup and output filename.
+        results = dec.DECODERS[decoder](deltaf_series, labels, test_size=test_size)
 
         if mask_array is not None:
             # Scatter the per-pixel coefficients back onto the full frame, so masked results stay

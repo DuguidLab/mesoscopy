@@ -111,6 +111,15 @@ def lda_decoder(deltaf_series: np.ndarray, labels: np.ndarray, test_size: float 
     }
 
 
+# Registry of the available decoders, keyed by the name used to select them. Defined after the
+# decoders themselves so it can reference them, and used by the CLI to build its `--decoder` choices
+# so that the two cannot drift apart.
+DECODERS = {
+    "logistic": logistic_decoder,
+    "lda": lda_decoder,
+}
+
+
 def _d_prime(conf_matrix: npt.NDArray) -> float:
     """Sensitivity index (d') for a binary classification, from a confusion matrix of counts.
 
