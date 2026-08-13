@@ -488,9 +488,7 @@ class TestDecoders:
         for metric in ("accuracy", "balanced_accuracy", "f2_score"):
             assert 0.0 <= result[metric] <= 1.0, f"{metric} out of range: {result[metric]}"
 
-    def test_d_prime_is_higher_for_decodable_data(
-        self, decoder, decodable_series, undecodable_series, decoder_labels
-    ):
+    def test_d_prime_is_higher_for_decodable_data(self, decoder, decodable_series, undecodable_series, decoder_labels):
         decodable = decoder(decodable_series, decoder_labels)["d_prime"]
         undecodable = decoder(undecodable_series, decoder_labels)["d_prime"]
         assert np.isfinite(decodable)
@@ -723,7 +721,7 @@ def test_decode_cmd_lda(preproc_h5, decoding_labels_h5, output_dir):
     runner = CliRunner()
     result = runner.invoke(
         mesoscopy.cli,
-        args=f"process decode {preproc_h5} {decoding_labels_h5} -o {output_dir} -f lda",
+        args=f"process decode {preproc_h5} {decoding_labels_h5} -o {output_dir} -d lda",
     )
     assert result.exit_code == 0
     assert (pathlib.Path(output_dir) / "preproc_decoding_lda.json").is_file()
@@ -768,11 +766,11 @@ def test_decode_cmd_mask_shape_mismatch_raises(
 
 
 def test_decode_cmd_normalises_decoder_case(preproc_h5, decoding_labels_h5, output_dir):
-    """`click.Choice` is case-insensitive, so `-f LDA` selects lda and names the file accordingly."""
+    """`click.Choice` is case-insensitive, so `-d LDA` selects lda and names the file accordingly."""
     runner = CliRunner()
     result = runner.invoke(
         mesoscopy.cli,
-        args=f"process decode {preproc_h5} {decoding_labels_h5} -o {output_dir} -f LDA",
+        args=f"process decode {preproc_h5} {decoding_labels_h5} -o {output_dir} -d LDA",
     )
     assert result.exit_code == 0
     assert (pathlib.Path(output_dir) / "preproc_decoding_lda.json").is_file()
@@ -782,7 +780,7 @@ def test_decode_cmd_rejects_unknown_decoder(preproc_h5, decoding_labels_npz, out
     runner = CliRunner()
     result = runner.invoke(
         mesoscopy.cli,
-        args=f"process decode {preproc_h5} {decoding_labels_npz} -o {output_dir} -f svm",
+        args=f"process decode {preproc_h5} {decoding_labels_npz} -o {output_dir} -d svm",
     )
     assert result.exit_code != 0
     assert "svm" in result.output
@@ -839,8 +837,10 @@ def region_deltaf_series():
 def test_extract_region_activity_left_hemisphere_shape(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_region_activity(region_deltaf_series, "REG1", "left")
     assert result.shape == (_N_FRAMES,)
 
@@ -848,8 +848,10 @@ def test_extract_region_activity_left_hemisphere_shape(
 def test_extract_region_activity_right_hemisphere_shape(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_region_activity(region_deltaf_series, "REG1", "right")
     assert result.shape == (_N_FRAMES,)
 
@@ -857,8 +859,10 @@ def test_extract_region_activity_right_hemisphere_shape(
 def test_extract_region_activity_both_hemispheres_shape(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_region_activity(region_deltaf_series, "REG1", "both")
     assert result.shape == (_N_FRAMES,)
 
@@ -868,8 +872,10 @@ def test_extract_region_activity_left_hemisphere_values(
 ):
     # Region 1 occupies rows 0-1, cols 0-2 in the left atlas.
     expected = region_deltaf_series[:, 0:2, 0:3].mean(axis=(1, 2))
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_region_activity(region_deltaf_series, "REG1", "left")
     np.testing.assert_allclose(result, expected)
 
@@ -879,8 +885,10 @@ def test_extract_region_activity_right_hemisphere_values(
 ):
     # right_aba = flip(left_aba): region 1 lands in rows 0-1, cols 3-5.
     expected = region_deltaf_series[:, 0:2, 3:6].mean(axis=(1, 2))
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_region_activity(region_deltaf_series, "REG1", "right")
     np.testing.assert_allclose(result, expected)
 
@@ -890,8 +898,10 @@ def test_extract_region_activity_both_hemispheres_values(
 ):
     # left + right: region 1 covers rows 0-1 across all 6 columns.
     expected = region_deltaf_series[:, 0:2, :].mean(axis=(1, 2))
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_region_activity(region_deltaf_series, "REG1", "both")
     np.testing.assert_allclose(result, expected)
 
@@ -899,8 +909,10 @@ def test_extract_region_activity_both_hemispheres_values(
 def test_extract_region_activity_different_regions_produce_different_results(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         reg1 = extract_region_activity(region_deltaf_series, "REG1", "left")
         reg2 = extract_region_activity(region_deltaf_series, "REG2", "left")
     assert not np.allclose(reg1, reg2), "Different regions should produce different activity signals"
@@ -910,8 +922,10 @@ def test_extract_region_activity_unknown_acronym_raises(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
     """An unrecognised acronym must raise the documented ValueError, not an IndexError from pandas."""
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         with pytest.raises(ValueError, match="NOPE") as excinfo:
             extract_region_activity(region_deltaf_series, "NOPE", "left")
 
@@ -924,8 +938,10 @@ def test_extract_region_activity_acronym_matching_is_case_sensitive(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
     """Atlas acronyms are case-sensitive (VISp and VISpl are distinct regions)."""
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         with pytest.raises(ValueError, match="reg1"):
             extract_region_activity(region_deltaf_series, "reg1", "left")
 
@@ -933,8 +949,10 @@ def test_extract_region_activity_acronym_matching_is_case_sensitive(
 def test_extract_region_activity_invalid_hemisphere_raises(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         with pytest.raises(ValueError, match="hemisphere"):
             extract_region_activity(region_deltaf_series, "REG1", "bilateral")
 
@@ -942,8 +960,10 @@ def test_extract_region_activity_invalid_hemisphere_raises(
 def test_extract_region_activity_hemisphere_argument_case_insensitive(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         lower = extract_region_activity(region_deltaf_series, "REG1", "left")
         upper = extract_region_activity(region_deltaf_series, "REG1", "LEFT")
     np.testing.assert_allclose(lower, upper)
@@ -955,8 +975,10 @@ def test_extract_region_activity_hemisphere_argument_case_insensitive(
 
 
 def test_extract_all_regions_returns_dict(region_left_aba, region_right_aba, region_annotations, region_deltaf_series):
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_all_regions(region_deltaf_series)
     assert isinstance(result, dict)
 
@@ -964,8 +986,10 @@ def test_extract_all_regions_returns_dict(region_left_aba, region_right_aba, reg
 def test_extract_all_regions_keys_have_hemisphere_prefix(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_all_regions(region_deltaf_series)
     for key in result:
         assert key.startswith("L_") or key.startswith("R_"), f"Unexpected key format: {key}"
@@ -974,8 +998,10 @@ def test_extract_all_regions_keys_have_hemisphere_prefix(
 def test_extract_all_regions_both_hemispheres_present_for_each_region(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_all_regions(region_deltaf_series)
     for region in ("REG1", "REG2"):
         assert f"L_{region}" in result
@@ -985,8 +1011,10 @@ def test_extract_all_regions_both_hemispheres_present_for_each_region(
 def test_extract_all_regions_values_have_correct_shape(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_all_regions(region_deltaf_series)
     for key, value in result.items():
         assert value.shape == (_N_FRAMES,), f"Wrong shape for {key}: {value.shape}"
@@ -996,8 +1024,10 @@ def test_extract_all_regions_default_exclude_filters_regions(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
     # FRP1 is in DEFAULT_EXCLUDE; it should be absent from the result.
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_all_regions(region_deltaf_series)
     assert "L_FRP1" not in result
     assert "R_FRP1" not in result
@@ -1006,8 +1036,10 @@ def test_extract_all_regions_default_exclude_filters_regions(
 def test_extract_all_regions_ignore_default_exclude_includes_all_regions(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_all_regions(region_deltaf_series, ignore_default_exclude=True)
     assert "L_FRP1" in result
     assert "R_FRP1" in result
@@ -1016,8 +1048,10 @@ def test_extract_all_regions_ignore_default_exclude_includes_all_regions(
 def test_extract_all_regions_custom_exclude_removes_region(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_all_regions(region_deltaf_series, exclude=["REG1"])
     assert "L_REG1" not in result
     assert "R_REG1" not in result
@@ -1028,8 +1062,10 @@ def test_extract_all_regions_custom_exclude_removes_region(
 def test_extract_all_regions_custom_exclude_combined_with_default(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_all_regions(region_deltaf_series, exclude=["REG1"])
     assert "L_FRP1" not in result
     assert "L_REG1" not in result
@@ -1040,8 +1076,10 @@ def test_extract_all_regions_unknown_exclude_raises(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
     """A misspelled exclusion would otherwise be ignored, silently leaving the region in the results."""
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         with pytest.raises(ValueError, match="NOPE"):
             extract_all_regions(region_deltaf_series, exclude=["NOPE"])
 
@@ -1049,8 +1087,10 @@ def test_extract_all_regions_unknown_exclude_raises(
 def test_extract_all_regions_unknown_exclude_reports_every_bad_acronym(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         with pytest.raises(ValueError) as excinfo:
             extract_all_regions(region_deltaf_series, exclude=["NOPE", "REG1", "ALSO_NOPE"])
 
@@ -1063,8 +1103,10 @@ def test_extract_all_regions_excluding_everything_raises(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
     """REG1 and REG2 excluded here, FRP1 by DEFAULT_EXCLUDE, leaving nothing to average over."""
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         with pytest.raises(ValueError, match="nothing to extract") as excinfo:
             extract_all_regions(region_deltaf_series, exclude=["REG1", "REG2"])
 
@@ -1075,20 +1117,22 @@ def test_extract_all_regions_excluding_everything_raises(
 def test_extract_all_regions_excluding_everything_explicitly_raises(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         with pytest.raises(ValueError, match="nothing to extract"):
-            extract_all_regions(
-                region_deltaf_series, exclude=["REG1", "REG2", "FRP1"], ignore_default_exclude=True
-            )
+            extract_all_regions(region_deltaf_series, exclude=["REG1", "REG2", "FRP1"], ignore_default_exclude=True)
 
 
 def test_extract_all_regions_partial_exclusion_still_works(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
     """The guard must only fire when nothing is left, not whenever exclusions are applied."""
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_all_regions(region_deltaf_series, exclude=["REG1"])
 
     assert set(result) == {"L_REG2", "R_REG2"}
@@ -1099,8 +1143,10 @@ def test_extract_all_regions_default_exclude_is_not_validated(
 ):
     """DEFAULT_EXCLUDE covers the full atlas, so it must not trip validation on a partial one."""
     partial_annotations = region_annotations[region_annotations["acronym"] != "FRP1"]
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=partial_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=partial_annotations),
+    ):
         result = extract_all_regions(region_deltaf_series)
 
     assert set(result) == {"L_REG1", "R_REG1", "L_REG2", "R_REG2"}
@@ -1110,8 +1156,10 @@ def test_extract_all_regions_does_not_mutate_default_exclude(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
     original = list(DEFAULT_EXCLUDE)
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         extract_all_regions(region_deltaf_series, exclude=["REG1"])
     assert original == DEFAULT_EXCLUDE, "extract_all_regions must not mutate DEFAULT_EXCLUDE"
 
@@ -1120,8 +1168,10 @@ def test_extract_all_regions_values_match_extract_region_activity(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
     """extract_all_regions results should match extract_region_activity for each region."""
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         all_regions = extract_all_regions(region_deltaf_series, ignore_default_exclude=True)
         single_left = extract_region_activity(region_deltaf_series, "REG2", "left")
         single_right = extract_region_activity(region_deltaf_series, "REG2", "right")
@@ -1137,8 +1187,10 @@ def test_extract_all_regions_values_match_extract_region_activity(
 def test_extract_all_regions_as_dataframe_returns_dataframe(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_all_regions(region_deltaf_series, as_dataframe=True)
     assert isinstance(result, pd.DataFrame)
     assert list(result.columns) == ["region", "time_idx", "F"]
@@ -1148,8 +1200,10 @@ def test_extract_all_regions_as_dataframe_is_long_format(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
     """One row per (region, frame): REG1 and REG2 across both hemispheres, FRP1 excluded by default."""
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_all_regions(region_deltaf_series, as_dataframe=True)
 
     assert set(result["region"]) == {"L_REG1", "R_REG1", "L_REG2", "R_REG2"}
@@ -1160,8 +1214,10 @@ def test_extract_all_regions_as_dataframe_is_long_format(
 def test_extract_all_regions_as_dataframe_matches_dict_values(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         as_dict = extract_all_regions(region_deltaf_series)
         as_df = extract_all_regions(region_deltaf_series, as_dataframe=True)
 
@@ -1173,8 +1229,10 @@ def test_extract_all_regions_as_dataframe_matches_dict_values(
 def test_extract_all_regions_as_dataframe_respects_exclude(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_all_regions(
             region_deltaf_series, exclude=["REG1"], ignore_default_exclude=True, as_dataframe=True
         )
