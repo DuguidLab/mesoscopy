@@ -302,7 +302,7 @@ def regression_cmd(
     help="Output directory for regression results.",
 )
 @click.option(
-    "-f",
+    "-d",
     "--decoder",
     type=click.Choice(list(dec.DECODERS), case_sensitive=False),
     default="logistic",
