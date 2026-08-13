@@ -21,7 +21,10 @@ jobs:
       uses: astral-sh/setup-uv@v6
 
     - name: Tests & coverage
-      run: uv run --python ${{ matrix.python-version }} hatch run test-run-coverage
+      run: |
+        uv run --python ${{ matrix.python-version }} \
+          pytest --cov-config=pyproject.toml --cov=mesoscopy --cov=tests \
+          --cov-report=term --cov-report=lcov:lcov.info --cov-report=xml:coverage.xml
 
   build:
     name: "Build"
@@ -35,6 +38,6 @@ jobs:
     - name: Install uv
       uses: astral-sh/setup-uv@v6
 
-    - name: Build package with hatch
+    - name: Build package
       run: |
         uv build --python ${{ matrix.python-version }}

@@ -4,6 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mesoscopy"
+version = "0.8.0"
 description = "Analysis pipeline for rodent widefield calcium imaging data."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -45,7 +46,6 @@ dependencies = [
     "diptest",
     "scikit-learn",
 ]
-dynamic = ["version"]
 
 [project.urls]
 Issues = "https://github.com/DuguidLab/mesoscopy/issues"
@@ -59,16 +59,11 @@ packages = ["src/mesoscopy"]
 
 [tool.hatch.build.targets.sdist]
 exclude = [
+  "/.claude",
   "/.github",
   "/docs",
   "/exploratory",
 ]
-
-[tool.hatch.version]
-path = "src/mesoscopy/__about__.py"
-
-[tool.hatch.envs.default]
-path = ".venv"  # Use uv environment path
 
 [dependency-groups]
 dev = [
@@ -77,7 +72,6 @@ dev = [
   { include-group = "lint" },
   { include-group = "test" },
   { include-group = "types" },
-  "hatch"
 ]
 ci = [
   "pre-commit",
@@ -103,26 +97,6 @@ test = [
 types = [
   "mypy[install-types, faster-cache, reports]",
 ]
-
-
-[tool.hatch.envs.default.scripts]
-# Test scripts
-test-run-coverage = "pytest --cov-config=pyproject.toml --cov=mesoscopy --cov=tests --cov-report=term --cov-report=lcov:lcov.info  --cov-report=xml:coverage.xml"
-test-run = "run-coverage --no-cov"
-
-# Doc scripts
-docs-build = "mkdocs build --clean --strict"
-docs-serve = "mkdocs serve --dev-addr localhost:8000"
-docs-deploy = "mkdocs gh-deploy --force"
-
-# Type checking scripts
-types-verify = "mypy --install-types --non-interactive src/mesoscopy tests"
-types-report = "types-check --html-report mypy-report/"
-
-# Linting scripts
-lint-check = "ruff check src/mesoscopy"
-lint-fix = "lint-check --fix"
-lint-run = "lint-fix && ruff format {args:src/mesoscopy/}"
 
 
 [tool.ruff]
@@ -238,9 +212,6 @@ ignore_missing_imports = true
 source_pkgs = ["mesoscopy", "tests"]
 branch = true
 parallel = true
-omit = [
-  "src/mesoscopy/__about__.py",
-]
 
 [tool.coverage.paths]
 mesoscopy = ["src/mesoscopy", "*/mesoscopy/src/mesoscopy"]

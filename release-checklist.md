@@ -13,7 +13,7 @@
 
 * Create a new branch called `release/<version>` (e.g. `git branch release/v0.1.0`). Make sure you're doing this from the `main` branch.
 * Checkout the new release branch.
-* Bump the version using `hatch version <major|minor|micro>`.
+* Bump the version using `uv version --bump <major|minor|patch>`.
 * Commit the version change.
 * Tag the version with git using `git tag <version number>` (e.g. `git tag v0.1.0`).
 * Push everything with `git push && git push --tags`.

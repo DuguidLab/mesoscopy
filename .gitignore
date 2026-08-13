@@ -138,6 +138,6 @@ test.*
 # AI agent instruction files (not yet decided if these should be tracked)
 CLAUDE.md
 AGENTS.md
-.claude/CLAUDE.md
+.claude/
 .cursorrules
 .github/copilot-instructions.md
