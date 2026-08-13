@@ -37,10 +37,13 @@ def landmarks_affine(
 ) -> tuple[np.ndarray, trf.ProjectiveTransform]:
     """Warp a DeltaF/F series to match a template using anatomical landmarks.
 
+    Both landmark sets must use the same (x, y) — i.e. (column, row) — coordinate convention as
+    ``skimage.transform``.
+
     Args:
         deltaf_series (np.ndarray): DeltaF/F series.
-        recording_landmarks (dict): Recording landmarks.
-        template_landmarks (dict): Template landmarks.
+        recording_landmarks (dict): Recording landmarks, as {name: (x, y)}.
+        template_landmarks (dict): Template landmarks, as {name: (x, y)}.
         crop_x (int, optional): Crop x-axis. Defaults to 0.
         crop_y (int, optional): Crop y-axis. Defaults to 0.
 

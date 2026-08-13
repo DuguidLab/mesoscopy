@@ -188,11 +188,13 @@ def load_deltaf(path: str, nwb: bool = False) -> tuple[str, np.ndarray, np.ndarr
 def read_points(path: str) -> dict[str, tuple[float, float]]:
     """Read a landmark points file.
 
+    Coordinates are read as (x, y) tuples, i.e. (column, row).
+
     Args:
         path (str): Path to the points file.
 
     Returns:
-        dict[str, tuple[float, float]]: Dictionary with the landmark names as keys and their x-y coordinates
+        dict[str, tuple[float, float]]: Dictionary with the landmark names as keys and their (x, y) coordinates
 
     Raises:
         ValueError: If the file format is unsupported.
@@ -293,9 +295,11 @@ def _read_csv_points(path: str) -> dict[str, tuple[float, float]]:
 def write_points(path: str, points: dict[str, tuple[float, float]]) -> None:
     """Write a dictionary of landmark points to a CSV file.
 
+    Coordinates are written as (x, y) tuples, i.e. (column, row).
+
     Args:
         path (str): Path to output CSV file.
-        points (dict[str, tuple[float, float]]): Dictionary with the landmark names as keys and their x-y coordinates
+        points (dict[str, tuple[float, float]]): Dictionary with the landmark names as keys and their (x, y) coordinates
     """
     if not path.endswith(".csv"):
         path += ".csv"

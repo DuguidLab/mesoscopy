@@ -55,13 +55,17 @@ def mark_landmarks(
     - rpRSP: Right posterior aspect of the retrosplenial cortex.
     - aIPB: Anterior aspect of the interparietal bone.
 
+    Landmark coordinates are stored as (x, y) tuples, i.e. (column, row), matching the convention used
+    by the template landmark files and by ``skimage.transform``. Napari works in (row, column) order, so
+    coordinates are transposed on the way into and out of the viewer.
+
     Args:
         maxip_image (npt.NDArray): Maximum intensity projection image. Could be either channel.
         alt_image (npt.NDArray): Alternative image to be displayed alongside the maximum intensity projection image. Usually a second channel.
-        template_landmarks (dict, optional): Dictionary with the landmarks and their x-y coordinates. Dictionary keys are landmark names, while x-y coordinates are stored as an (y, x) tuple. Defaults to {}.
+        template_landmarks (dict, optional): Dictionary with the landmarks and their x-y coordinates, used to seed the initial point positions. Dictionary keys are landmark names, while x-y coordinates are stored as an (x, y) tuple. Defaults to {}.
 
     Returns:
-        dict: Dictionary with the landmarks and their x-y coordinates. Dictionary keys are landmark names, while x-y coordinates are stored as an (y, x) tuple.
+        dict: Dictionary with the landmarks and their x-y coordinates. Dictionary keys are landmark names, while x-y coordinates are stored as an (x, y) tuple.
 
     Raises:
         ValueError: If the maximum intensity projection and alternative image do not have the same dimensions.
@@ -85,21 +89,24 @@ def mark_landmarks(
         viewer.add_image(alt_image, name="alt_maxip")
 
     default_landmark_locations = template_landmarks or {
-        "bregma": (maxip_height / 2, maxip_width / 2),
-        "cFP": (maxip_height / 7, maxip_width / 2),
-        "rFP": (maxip_height / 7, maxip_width / 1.5),
-        "lFP": (maxip_height / 7, maxip_width / 3),
-        "rPB": (maxip_height / 4, maxip_width / 1.25),
-        "lPB": (maxip_height / 4, maxip_width / 5),
-        "lpRSP": (maxip_height / 1.25, maxip_width / 2.25),
-        "rpRSP": (maxip_height / 1.25, maxip_width / 1.75),
-        "aIPB": (maxip_height / 1.4, maxip_width / 2),
+        "bregma": (maxip_width / 2, maxip_height / 2),
+        "cFP": (maxip_width / 2, maxip_height / 7),
+        "rFP": (maxip_width / 1.5, maxip_height / 7),
+        "lFP": (maxip_width / 3, maxip_height / 7),
+        "rPB": (maxip_width / 1.25, maxip_height / 4),
+        "lPB": (maxip_width / 5, maxip_height / 4),
+        "lpRSP": (maxip_width / 2.25, maxip_height / 1.25),
+        "rpRSP": (maxip_width / 1.75, maxip_height / 1.25),
+        "aIPB": (maxip_width / 2, maxip_height / 1.4),
     }
 
     landmarks = list(default_landmark_locations.keys())
 
+    # Landmarks are stored as (x, y), napari points are (row, column) - transpose on the way in.
+    seed_points = np.array([(y, x) for x, y in default_landmark_locations.values()], dtype=float)
+
     points_layer = viewer.add_points(
-        data=np.array(list(default_landmark_locations.values())),
+        data=seed_points,
         name="landmarks",
         ndim=2,
         properties={"label": landmarks},
@@ -120,7 +127,10 @@ def mark_landmarks(
 
     napari.run()
 
-    return OrderedDict(zip(landmarks, points_layer.data, strict=True))
+    # Transpose back from napari's (row, column) to the stored (x, y) convention.
+    return OrderedDict(
+        (landmark, (float(x), float(y))) for landmark, (y, x) in zip(landmarks, points_layer.data, strict=True)
+    )
 
 
 def _create_label_menu(points_layer, labels):

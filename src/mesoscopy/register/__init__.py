@@ -77,7 +77,8 @@ def label_cmd(path, out_dir, template_points, session_id) -> dict:
 
     Returns:
         dict: Dictionary with the landmarks and their x-y coordinates.
-              Dictionary keys are landmark names, while x-y coordinates are stored as an (y, x)
+              Dictionary keys are landmark names, while x-y coordinates are stored as an (x, y)
+              tuple, i.e. (column, row).
     """
     click.echo("Loading imaging data...")
     nwb = bool(path.endswith(".nwb"))

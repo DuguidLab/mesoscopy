@@ -7,7 +7,10 @@ from skimage import transform as trf
 
 import mesoscopy
 import mesoscopy.register as reg
+import mesoscopy.register.landmarks_gui as reg_gui
+import mesoscopy.register.qa as reg_qa
 import mesoscopy.resources as res
+from mesoscopy import io
 from mesoscopy.register.transform import landmarks_affine
 
 
@@ -134,3 +137,121 @@ def test_register_landmarks_cli_default_points_h5(preproc_h5, output_dir):
 
 
 def test_mark_landmarks_gui(): ...
+
+
+# ---------------------------------------------------------------------------
+# Landmark coordinate convention
+#
+# Landmarks are stored as (x, y) == (column, row) everywhere on disk, matching
+# skimage.transform. Napari is the only (row, column) surface, and mark_landmarks
+# is responsible for transposing on the way in and out.
+# ---------------------------------------------------------------------------
+
+
+def test_template_landmarks_are_xy_not_rowcol():
+    """Paired left/right template landmarks must hit the same atlas region in each hemisphere.
+
+    This only holds when the shipped landmark file is read as (x, y); reading it as
+    (row, column) puts every pair in the wrong place.
+    """
+    landmarks = res.get_default_landmarks()
+    left_aba, right_aba = res.get_atlas()
+    midline = left_aba.shape[1] / 2
+
+    for left_name, right_name in (("lFP", "rFP"), ("lPB", "rPB"), ("lpRSP", "rpRSP")):
+        left_x, left_y = landmarks[left_name]
+        right_x, right_y = landmarks[right_name]
+
+        # Lateral landmarks sit on their own side of the midline...
+        assert left_x < midline
+        assert right_x > midline
+
+        # ...and pick out the same labelled region in the matching hemisphere map.
+        left_region = left_aba[int(left_y), int(left_x)]
+        right_region = right_aba[int(right_y), int(right_x)]
+        assert left_region != 0
+        assert left_region == right_region
+
+    # Midline landmarks sit on the midline.
+    for name in ("bregma", "cFP", "aIPB"):
+        assert landmarks[name][0] == pytest.approx(midline, abs=1.0)
+
+
+def test_points_roundtrip_preserves_xy(tmp_path):
+    """write_points -> read_points must not transpose the coordinates."""
+    points = {"bregma": (71.0, 60.0), "lFP": (51.0, 19.0)}
+    path = str(tmp_path / "points.csv")
+
+    io.write_points(path, points)
+
+    assert io.read_points(path) == points
+
+
+def test_mark_landmarks_transposes_between_napari_and_storage(monkeypatch):
+    """Seed points enter napari as (row, col); marked points come back out as (x, y)."""
+    captured = {}
+
+    class FakePointsLayer:
+        def __init__(self, data):
+            self.data = data
+            self.mode = None
+            self.face_color_mode = None
+
+    class FakeWindow:
+        def add_dock_widget(self, widget):
+            pass
+
+    class FakeViewer:
+        def __init__(self):
+            self.window = FakeWindow()
+
+        def add_image(self, *args, **kwargs):
+            pass
+
+        def add_points(self, data, **kwargs):
+            captured["seed"] = np.asarray(data, dtype=float)
+            # Simulate the user dragging the first point by +3 rows / +5 columns.
+            marked = np.asarray(data, dtype=float).copy()
+            marked[0] += (3.0, 5.0)
+            return FakePointsLayer(marked)
+
+    monkeypatch.setattr(reg_gui.napari, "view_image", lambda *args, **kwargs: FakeViewer())
+    monkeypatch.setattr(reg_gui.napari, "run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(reg_gui, "_create_label_menu", lambda points_layer, labels: None)
+
+    template = {"a": (10.0, 20.0), "b": (30.0, 40.0)}
+    marked = reg_gui.mark_landmarks(np.zeros((100, 120)), None, template)
+
+    # (x, y) seeds are handed to napari as (row, col).
+    np.testing.assert_array_equal(captured["seed"], [[20.0, 10.0], [40.0, 30.0]])
+
+    # Marked points come back as (x, y), so the +3 row / +5 col drag reads as +5 x / +3 y.
+    assert marked["a"] == (15.0, 23.0)
+    assert marked["b"] == (30.0, 40.0)
+
+
+def test_qa_plot_landmarks_uses_xy():
+    """The QA scatter must plot x on the x-axis, not the row index."""
+    source = np.array([[10.0, 20.0], [30.0, 40.0]])
+    target = np.array([[11.0, 21.0], [31.0, 41.0]])
+
+    fig = reg_qa.plot_landmarks(source, target)
+
+    np.testing.assert_array_equal(fig.data[0].x, source[:, 0])
+    np.testing.assert_array_equal(fig.data[0].y, source[:, 1])
+    np.testing.assert_array_equal(fig.data[1].x, target[:, 0])
+    np.testing.assert_array_equal(fig.data[1].y, target[:, 1])
+
+
+def test_qa_plot_frame_without_landmarks():
+    """plot_frame must be callable without landmarks."""
+    fig = reg_qa.plot_frame(np.random.default_rng(0).random((10, 12)))
+    assert len(fig.data) == 1
+
+
+def test_qa_plot_frame_landmarks_use_xy():
+    landmarks = np.array([[10.0, 20.0], [30.0, 40.0]])
+    fig = reg_qa.plot_frame(np.random.default_rng(0).random((50, 50)), landmarks=landmarks)
+
+    np.testing.assert_array_equal(fig.data[1].x, landmarks[:, 0])
+    np.testing.assert_array_equal(fig.data[1].y, landmarks[:, 1])

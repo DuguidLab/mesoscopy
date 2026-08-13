@@ -20,6 +20,7 @@
 #  SOFTWARE.
 """Module for quality assurance (QA) functions in the mesoscopy registration pipeline."""
 
+import numpy as np
 import numpy.typing as npt
 import plotly.express as px
 import plotly.graph_objects as go
@@ -30,6 +31,16 @@ def plot_landmarks(
     target_landmarks: npt.NDArray,
     as_html: bool = False,
 ) -> str | go.Figure:
+    """Plots two sets of landmark points against each other using Plotly.
+
+    Args:
+        source_landmarks (npt.NDArray): Source landmarks as an (n, 2) array of (x, y) coordinates.
+        target_landmarks (npt.NDArray): Target landmarks as an (n, 2) array of (x, y) coordinates.
+        as_html (bool, optional): If True, returns the plot as an HTML string. If False, returns a Plotly Figure object.
+
+    Returns:
+        str | go.Figure: The plot as an HTML string if `as_html` is True, otherwise a Plotly Figure object.
+    """
     fig = go.Figure(
         layout=go.Layout(
             margin={"l": 20, "r": 20, "t": 20, "b": 20},
@@ -40,10 +51,10 @@ def plot_landmarks(
     )
 
     fig.add_trace(
-        go.Scatter(x=source_landmarks[:, 1], y=source_landmarks[:, 0], mode="markers", name="Source landmarks")
+        go.Scatter(x=source_landmarks[:, 0], y=source_landmarks[:, 1], mode="markers", name="Source landmarks")
     )
     fig.add_trace(
-        go.Scatter(x=target_landmarks[:, 1], y=target_landmarks[:, 0], mode="markers", name="Target landmarks")
+        go.Scatter(x=target_landmarks[:, 0], y=target_landmarks[:, 1], mode="markers", name="Target landmarks")
     )
 
     if as_html:
@@ -51,11 +62,13 @@ def plot_landmarks(
     return fig
 
 
-def plot_frame(data: npt.NDArray, landmarks=npt.NDArray | None, as_html: bool = False) -> str | go.Figure:
+def plot_frame(data: npt.NDArray, landmarks: npt.NDArray | None = None, as_html: bool = False) -> str | go.Figure:
     """Plots a single frame of data using Plotly.
 
     Args:
         data (npt.NDArray): The frame data to plot, as a NumPy array.
+        landmarks (npt.NDArray, optional): Landmarks to overlay on the frame, as an (n, 2) array of (x, y)
+            coordinates. Defaults to None.
         as_html (bool, optional): If True, returns the plot as an HTML string. If False, returns a Plotly Figure object.
 
     Returns:
@@ -68,11 +81,12 @@ def plot_frame(data: npt.NDArray, landmarks=npt.NDArray | None, as_html: bool = 
         }
     )
 
-    if landmarks:
+    if landmarks is not None:
+        landmarks = np.asarray(landmarks)
         fig.add_trace(
             go.Scatter(
-                x=landmarks[:, 1],
-                y=landmarks[:, 0],
+                x=landmarks[:, 0],
+                y=landmarks[:, 1],
                 mode="markers",
                 name="Template landmarks",
                 marker={"color": "Green"},
