@@ -122,6 +122,44 @@ def test_landmarks_affine_output_shape_does_not_crop_the_source(landmark_pair):
     assert warped[0].sum() > 0.9 * series[0].sum()
 
 
+def test_landmarks_affine_preserves_frame_dtype(landmark_pair):
+    """Frames are written into a preallocated array, so its dtype must match what warp produces."""
+    recording_lm, template_lm = landmark_pair
+
+    for dtype in (np.float32, np.float64):
+        series = np.random.default_rng(0).random((4, 40, 40)).astype(dtype)
+        warped, _ = landmarks_affine(series, recording_lm, template_lm, output_shape=(40, 40))
+
+        expected_tform = trf.estimate_transform(
+            "affine",
+            np.array(list(template_lm.values())),
+            np.array(list(recording_lm.values())),
+        )
+        reference = trf.warp(series[0], expected_tform, order=3, output_shape=(40, 40))
+
+        assert warped.dtype == reference.dtype
+        np.testing.assert_array_equal(warped[0], reference)
+
+
+def test_landmarks_affine_writes_every_frame(landmark_pair):
+    """Each frame must land at its own index - workers complete out of order."""
+    recording_lm, template_lm = landmark_pair
+    # Each frame is a distinct constant, so a misplaced frame is immediately visible.
+    series = np.stack([np.full((40, 40), value, dtype=np.float32) for value in range(1, 21)])
+
+    warped, _ = landmarks_affine(series, recording_lm, template_lm, output_shape=(40, 40))
+
+    # The landmarks are a pure translation, so an interior pixel keeps its frame's value.
+    np.testing.assert_allclose(warped[:, 20, 20], np.arange(1, 21), atol=1e-4)
+
+
+def test_landmarks_affine_rejects_an_empty_series(landmark_pair):
+    recording_lm, template_lm = landmark_pair
+
+    with pytest.raises(ValueError, match="no frames"):
+        landmarks_affine(np.zeros((0, 40, 40), dtype=np.float32), recording_lm, template_lm)
+
+
 def test_landmarks_affine_identity_landmarks(small_series):
     """When recording and template landmarks are identical the warp is a near-identity."""
     landmarks = {"A": (5.0, 5.0), "B": (35.0, 5.0), "C": (5.0, 35.0)}

@@ -190,12 +190,22 @@ def landmarks_affine(
     click.echo(f"Transform estimated in {end - start} s")
 
     n_frames = deltaf_series.shape[0]
+    if n_frames == 0:
+        msg = "The DeltaF/F series contains no frames."
+        raise ValueError(msg)
 
     def _warp_frame(idx: int) -> np.ndarray:
         return trf.warp(deltaf_series[idx], tform, order=3, output_shape=output_shape)
 
     start = time.time()
-    results: list[np.ndarray | None] = [None] * n_frames
+
+    first_frame = _warp_frame(0)
+    registered = np.empty((n_frames, *first_frame.shape), dtype=first_frame.dtype)
+    registered[0] = first_frame
+
+    def _warp_frame_into_output(idx: int) -> None:
+        registered[idx] = _warp_frame(idx)
+
     n_workers = os.cpu_count() or 1
     with (
         click.progressbar(
@@ -204,11 +214,12 @@ def landmarks_affine(
         ) as bar,
         ThreadPoolExecutor(max_workers=n_workers) as executor,
     ):
-        futures = {executor.submit(_warp_frame, i): i for i in range(n_frames)}
+        bar.update(1)  # the first frame is already warped
+        futures = [executor.submit(_warp_frame_into_output, idx) for idx in range(1, n_frames)]
         for future in as_completed(futures):
-            results[futures[future]] = future.result()
+            future.result()  # re-raise anything a worker hit
             bar.update(1)
     end = time.time()
     click.echo(f"Recording registered in {end - start} s")
 
-    return np.stack(results), tform
+    return registered, tform
