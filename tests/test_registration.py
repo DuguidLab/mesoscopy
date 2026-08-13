@@ -1,5 +1,7 @@
 from importlib import resources
+from types import SimpleNamespace
 
+import h5py
 import numpy as np
 import pytest
 from click.testing import CliRunner
@@ -231,37 +233,49 @@ def test_points_roundtrip_preserves_xy(tmp_path):
     assert io.read_points(path) == points
 
 
-def test_mark_landmarks_transposes_between_napari_and_storage(monkeypatch):
-    """Seed points enter napari as (row, col); marked points come back out as (x, y)."""
-    captured = {}
+class _FakePointsLayer:
+    """Stands in for a napari Points layer: (row, col) data plus an aligned 'label' property."""
 
-    class FakePointsLayer:
-        def __init__(self, data):
-            self.data = data
-            self.mode = None
-            self.face_color_mode = None
+    def __init__(self, data, labels):
+        self.data = np.asarray(data, dtype=float)
+        self.properties = {"label": np.asarray(labels, dtype=str)}
+        self.mode = None
+        self.face_color_mode = None
 
-    class FakeWindow:
-        def add_dock_widget(self, widget):
-            pass
+
+def _patch_napari(monkeypatch, final_state=None, captured=None):
+    """Replace the napari viewer with a fake that records seeds and returns a scripted end state.
+
+    `final_state` is the (data, labels) pair the points layer holds when the user closes the viewer,
+    i.e. the result of whatever marking, dragging and deleting they did. Defaults to the seed points
+    untouched.
+    """
 
     class FakeViewer:
         def __init__(self):
-            self.window = FakeWindow()
+            self.window = SimpleNamespace(add_dock_widget=lambda widget: None)
 
         def add_image(self, *args, **kwargs):
             pass
 
         def add_points(self, data, **kwargs):
-            captured["seed"] = np.asarray(data, dtype=float)
-            # Simulate the user dragging the first point by +3 rows / +5 columns.
-            marked = np.asarray(data, dtype=float).copy()
-            marked[0] += (3.0, 5.0)
-            return FakePointsLayer(marked)
+            if captured is not None:
+                captured["seed"] = np.asarray(data, dtype=float)
+                captured["labels"] = list(kwargs["properties"]["label"])
+            if final_state is None:
+                return _FakePointsLayer(data, kwargs["properties"]["label"])
+            return _FakePointsLayer(*final_state)
 
     monkeypatch.setattr(reg_gui.napari, "view_image", lambda *args, **kwargs: FakeViewer())
     monkeypatch.setattr(reg_gui.napari, "run", lambda *args, **kwargs: None)
     monkeypatch.setattr(reg_gui, "_create_label_menu", lambda points_layer, labels: None)
+
+
+def test_mark_landmarks_transposes_between_napari_and_storage(monkeypatch):
+    """Seed points enter napari as (row, col); marked points come back out as (x, y)."""
+    captured = {}
+    # The user drags the first point by +3 rows / +5 columns.
+    _patch_napari(monkeypatch, final_state=([[23.0, 15.0], [40.0, 30.0]], ["a", "b"]), captured=captured)
 
     template = {"a": (10.0, 20.0), "b": (30.0, 40.0)}
     marked = reg_gui.mark_landmarks(np.zeros((100, 120)), None, template)
@@ -272,6 +286,89 @@ def test_mark_landmarks_transposes_between_napari_and_storage(monkeypatch):
     # Marked points come back as (x, y), so the +3 row / +5 col drag reads as +5 x / +3 y.
     assert marked["a"] == (15.0, 23.0)
     assert marked["b"] == (30.0, 40.0)
+
+
+def test_mark_landmarks_identifies_points_by_label_not_position(monkeypatch):
+    """Deleting and re-marking a point appends it to the layer; labels must still hold.
+
+    Zipping names against point order - as the previous implementation did - silently attaches every
+    name to the wrong coordinates as soon as the user re-marks anything.
+    """
+    template = {"bregma": (71.0, 60.0), "cFP": (71.0, 19.0), "lPB": (30.0, 35.0)}
+    # bregma was deleted and re-marked, so it sits last in the layer and the others shifted up.
+    _patch_napari(
+        monkeypatch,
+        final_state=([[19.0, 71.0], [35.0, 30.0], [63.0, 71.0]], ["cFP", "lPB", "bregma"]),
+    )
+
+    marked = reg_gui.mark_landmarks(np.zeros((140, 142)), None, template)
+
+    assert marked == {"bregma": (71.0, 63.0), "cFP": (71.0, 19.0), "lPB": (30.0, 35.0)}
+    # Returned in template order, which is the order the transform pairs the point sets in.
+    assert list(marked) == list(template)
+
+
+def test_mark_landmarks_reports_missing_duplicate_and_unknown_points(monkeypatch, capsys):
+    """Edited point sets are reported rather than silently mismapped."""
+    template = {"bregma": (71.0, 60.0), "cFP": (71.0, 19.0), "lPB": (30.0, 35.0)}
+    _patch_napari(
+        monkeypatch,
+        final_state=(
+            [[19.0, 71.0], [10.0, 10.0], [40.0, 40.0], [35.0, 30.0]],
+            ["cFP", "bregma", "bregma", "notALandmark"],
+        ),
+    )
+
+    marked = reg_gui.mark_landmarks(np.zeros((140, 142)), None, template)
+
+    assert marked["cFP"] == (71.0, 19.0)
+    assert marked["bregma"] == (40.0, 40.0)  # the most recently marked of the two
+    assert "lPB" not in marked  # never marked
+
+    output = capsys.readouterr().out
+    assert "lPB" in output
+    assert "bregma" in output
+    assert "notALandmark" in output
+
+
+def test_mark_landmarks_scales_seed_points_to_the_recording(monkeypatch):
+    """Template seeds are scaled to the recording so they don't bunch up in a corner."""
+    captured = {}
+    _patch_napari(monkeypatch, captured=captured)
+
+    # Recording is twice the size of the template in both axes.
+    reg_gui.mark_landmarks(np.zeros((280, 284)), None, {"bregma": (71.0, 60.0)}, template_shape=(140, 142))
+
+    np.testing.assert_allclose(captured["seed"], [[120.0, 142.0]])  # (row, col) of (x=142, y=120)
+
+
+def test_mark_landmarks_does_not_scale_seeds_without_a_template_shape(monkeypatch):
+    """Without a known template shape the seeds are used as-is."""
+    captured = {}
+    _patch_napari(monkeypatch, captured=captured)
+
+    reg_gui.mark_landmarks(np.zeros((280, 284)), None, {"bregma": (71.0, 60.0)})
+
+    np.testing.assert_allclose(captured["seed"], [[60.0, 71.0]])
+
+
+def test_register_label_cli_writes_landmarks(monkeypatch, tmp_path):
+    """The label command round-trips GUI points to a landmarks CSV in the (x, y) convention."""
+    preproc = tmp_path / "sub-test_preprocessed.h5"
+    with h5py.File(preproc, "w") as f:
+        f.create_dataset("/qa/gcamp_maxip_projection", data=np.random.default_rng(0).random((140, 142)))
+        f.create_dataset("/qa/isosb_maxip_projection", data=np.random.default_rng(1).random((140, 142)))
+
+    _patch_napari(monkeypatch)  # the user closes the viewer without moving anything
+
+    runner = CliRunner()
+    result = runner.invoke(mesoscopy.cli, args=f"register label {preproc} -o {tmp_path}")
+
+    assert result.exit_code == 0
+
+    # Recording is atlas-sized, so unmoved seeds must round-trip to the template landmarks exactly.
+    written = io.read_points(str(tmp_path / "sub-test_landmarks.csv"))
+    assert written == res.get_default_landmarks()
 
 
 def test_qa_plot_landmarks_uses_xy():
