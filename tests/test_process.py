@@ -14,6 +14,7 @@ from click.testing import CliRunner
 
 import mesoscopy
 from mesoscopy import io
+from mesoscopy.process import decode_cmd
 from mesoscopy.process import decoder as dec
 from mesoscopy.process import regression as regr
 from mesoscopy.process import smooth
@@ -351,6 +352,21 @@ class TestRidgeRegressionFast:
 
         assert r2[0, 0] == 1.0
         assert mse[0, 0] == pytest.approx(0.0, abs=1e-8)
+
+
+# ---------------------------------------------------------------------------
+# decoder.DECODERS
+# ---------------------------------------------------------------------------
+
+
+def test_decoder_registry_maps_names_to_the_decoders():
+    assert dec.DECODERS == {"logistic": dec.logistic_decoder, "lda": dec.lda_decoder}
+
+
+def test_decode_cmd_choices_come_from_the_registry():
+    """The CLI's choices and the dispatch table must not be able to drift apart."""
+    decoder_option = next(param for param in decode_cmd.params if param.name == "decoder")
+    assert list(decoder_option.type.choices) == list(dec.DECODERS)
 
 
 # ---------------------------------------------------------------------------
@@ -751,6 +767,17 @@ def test_decode_cmd_mask_shape_mismatch_raises(
     assert "does not match" in str(result.exception)
 
 
+def test_decode_cmd_normalises_decoder_case(preproc_h5, decoding_labels_h5, output_dir):
+    """`click.Choice` is case-insensitive, so `-f LDA` selects lda and names the file accordingly."""
+    runner = CliRunner()
+    result = runner.invoke(
+        mesoscopy.cli,
+        args=f"process decode {preproc_h5} {decoding_labels_h5} -o {output_dir} -f LDA",
+    )
+    assert result.exit_code == 0
+    assert (pathlib.Path(output_dir) / "preproc_decoding_lda.json").is_file()
+
+
 def test_decode_cmd_rejects_unknown_decoder(preproc_h5, decoding_labels_npz, output_dir):
     runner = CliRunner()
     result = runner.invoke(
@@ -879,6 +906,30 @@ def test_extract_region_activity_different_regions_produce_different_results(
     assert not np.allclose(reg1, reg2), "Different regions should produce different activity signals"
 
 
+def test_extract_region_activity_unknown_acronym_raises(
+    region_left_aba, region_right_aba, region_annotations, region_deltaf_series
+):
+    """An unrecognised acronym must raise the documented ValueError, not an IndexError from pandas."""
+    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
+         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+        with pytest.raises(ValueError, match="NOPE") as excinfo:
+            extract_region_activity(region_deltaf_series, "NOPE", "left")
+
+    # The message should point the user at what they could have asked for.
+    assert "REG1" in str(excinfo.value)
+    assert "REG2" in str(excinfo.value)
+
+
+def test_extract_region_activity_acronym_matching_is_case_sensitive(
+    region_left_aba, region_right_aba, region_annotations, region_deltaf_series
+):
+    """Atlas acronyms are case-sensitive (VISp and VISpl are distinct regions)."""
+    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
+         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+        with pytest.raises(ValueError, match="reg1"):
+            extract_region_activity(region_deltaf_series, "reg1", "left")
+
+
 def test_extract_region_activity_invalid_hemisphere_raises(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
@@ -983,6 +1034,76 @@ def test_extract_all_regions_custom_exclude_combined_with_default(
     assert "L_FRP1" not in result
     assert "L_REG1" not in result
     assert "L_REG2" in result
+
+
+def test_extract_all_regions_unknown_exclude_raises(
+    region_left_aba, region_right_aba, region_annotations, region_deltaf_series
+):
+    """A misspelled exclusion would otherwise be ignored, silently leaving the region in the results."""
+    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
+         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+        with pytest.raises(ValueError, match="NOPE"):
+            extract_all_regions(region_deltaf_series, exclude=["NOPE"])
+
+
+def test_extract_all_regions_unknown_exclude_reports_every_bad_acronym(
+    region_left_aba, region_right_aba, region_annotations, region_deltaf_series
+):
+    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
+         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+        with pytest.raises(ValueError) as excinfo:
+            extract_all_regions(region_deltaf_series, exclude=["NOPE", "REG1", "ALSO_NOPE"])
+
+    message = str(excinfo.value)
+    assert "NOPE" in message
+    assert "ALSO_NOPE" in message
+
+
+def test_extract_all_regions_excluding_everything_raises(
+    region_left_aba, region_right_aba, region_annotations, region_deltaf_series
+):
+    """REG1 and REG2 excluded here, FRP1 by DEFAULT_EXCLUDE, leaving nothing to average over."""
+    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
+         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+        with pytest.raises(ValueError, match="nothing to extract") as excinfo:
+            extract_all_regions(region_deltaf_series, exclude=["REG1", "REG2"])
+
+    # The message should name what was excluded, including the default exclusions.
+    assert "FRP1" in str(excinfo.value)
+
+
+def test_extract_all_regions_excluding_everything_explicitly_raises(
+    region_left_aba, region_right_aba, region_annotations, region_deltaf_series
+):
+    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
+         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+        with pytest.raises(ValueError, match="nothing to extract"):
+            extract_all_regions(
+                region_deltaf_series, exclude=["REG1", "REG2", "FRP1"], ignore_default_exclude=True
+            )
+
+
+def test_extract_all_regions_partial_exclusion_still_works(
+    region_left_aba, region_right_aba, region_annotations, region_deltaf_series
+):
+    """The guard must only fire when nothing is left, not whenever exclusions are applied."""
+    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
+         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+        result = extract_all_regions(region_deltaf_series, exclude=["REG1"])
+
+    assert set(result) == {"L_REG2", "R_REG2"}
+
+
+def test_extract_all_regions_default_exclude_is_not_validated(
+    region_left_aba, region_right_aba, region_annotations, region_deltaf_series
+):
+    """DEFAULT_EXCLUDE covers the full atlas, so it must not trip validation on a partial one."""
+    partial_annotations = region_annotations[region_annotations["acronym"] != "FRP1"]
+    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
+         patch("mesoscopy.resources.get_atlas_annotations", return_value=partial_annotations):
+        result = extract_all_regions(region_deltaf_series)
+
+    assert set(result) == {"L_REG1", "R_REG1", "L_REG2", "R_REG2"}
 
 
 def test_extract_all_regions_does_not_mutate_default_exclude(
