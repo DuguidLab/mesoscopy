@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from importlib import resources
 from uuid import uuid4
@@ -110,3 +111,45 @@ def test_write_points_csv(tmp_path):
     path = tmp_path / "test_points"
     data = {"testArea": [0, 200], "anotherTestArea": [250, 20]}
     io.write_points(str(path), data)
+
+
+def test_write_json(tmp_path):
+    path = tmp_path / "test.json"
+    outpath = io.write_json(str(path), {"a": 1, "b": "two", "c": [3.0, 4.0]})
+
+    assert outpath == str(path)
+    with path.open() as f:
+        assert json.load(f) == {"a": 1, "b": "two", "c": [3.0, 4.0]}
+
+
+def test_write_json_serialises_numpy_arrays(tmp_path):
+    path = tmp_path / "test.json"
+    io.write_json(str(path), {"matrix": np.arange(6).reshape(2, 3)})
+
+    with path.open() as f:
+        assert json.load(f)["matrix"] == [[0, 1, 2], [3, 4, 5]]
+
+
+def test_write_json_serialises_numpy_scalars(tmp_path):
+    path = tmp_path / "test.json"
+    io.write_json(str(path), {"score": np.float64(0.5), "count": np.int64(3), "flag": np.bool_(True)})
+
+    with path.open() as f:
+        results = json.load(f)
+    assert results == {"score": 0.5, "count": 3, "flag": True}
+
+
+def test_write_json_round_trips_an_array(tmp_path):
+    path = tmp_path / "test.json"
+    array = np.random.default_rng(0).random((4, 5))
+    io.write_json(str(path), {"array": array})
+
+    with path.open() as f:
+        np.testing.assert_allclose(np.array(json.load(f)["array"]), array)
+
+
+def test_write_json_rejects_unsupported_types(tmp_path):
+    """Non-NumPy objects should still raise rather than be silently coerced."""
+    path = tmp_path / "test.json"
+    with pytest.raises(TypeError):
+        io.write_json(str(path), {"when": datetime(2024, 1, 1, tzinfo=tzlocal())})

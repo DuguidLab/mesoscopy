@@ -1,3 +1,4 @@
+import json
 import pathlib
 from datetime import datetime
 from datetime import timedelta
@@ -13,12 +14,18 @@ from click.testing import CliRunner
 
 import mesoscopy
 from mesoscopy import io
+from mesoscopy.process import decoder as dec
 from mesoscopy.process import regression as regr
 from mesoscopy.process import smooth
 from mesoscopy.process import zscore
 from mesoscopy.process.region import DEFAULT_EXCLUDE
 from mesoscopy.process.region import extract_all_regions
 from mesoscopy.process.region import extract_region_activity
+
+# Both decoders share an identical interface and result schema, so the behavioural tests below run
+# against each of them.
+DECODERS = [dec.logistic_decoder, dec.lda_decoder]
+DECODER_IDS = ["logistic", "lda"]
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -107,6 +114,91 @@ def mock_right_aba(mock_left_aba):
 @pytest.fixture
 def mock_annotations():
     return pd.DataFrame({"id": [1], "acronym": ["REG1"]})
+
+
+# Decoder fixtures ----------------------------------------------------------
+#
+# `decodable_series` carries a label-driven signal in the central 3x3 pixel block only, at an
+# amplitude low enough that neither decoder separates the test set perfectly — a degenerate
+# confusion matrix would push d' to infinity and make the metric assertions vacuous.
+
+_DECODER_FRAMES = 200
+_DECODER_SHAPE = (6, 6)
+_SIGNAL_BLOCK = (slice(1, 4), slice(1, 4))
+
+
+@pytest.fixture
+def decoder_labels():
+    """Balanced binary labels for the decoder fixtures."""
+    return np.tile([0, 1], _DECODER_FRAMES // 2)
+
+
+@pytest.fixture
+def decodable_series(decoder_labels):
+    """A (200, 6, 6) series whose central pixel block encodes the label."""
+    rng = np.random.default_rng(0)
+    series = rng.normal(size=(_DECODER_FRAMES, *_DECODER_SHAPE))
+    series[:, *_SIGNAL_BLOCK] += decoder_labels[:, None, None] * 0.6
+    return series
+
+
+@pytest.fixture
+def signal_mask():
+    """Boolean mask marking the pixels that carry the signal in `decodable_series`."""
+    mask = np.zeros(_DECODER_SHAPE, dtype=bool)
+    mask[*_SIGNAL_BLOCK] = True
+    return mask
+
+
+@pytest.fixture
+def perfectly_decodable_series(decoder_labels):
+    """A (200, 6, 6) series separable enough that both decoders classify the test split perfectly."""
+    rng = np.random.default_rng(2)
+    series = rng.normal(size=(_DECODER_FRAMES, *_DECODER_SHAPE))
+    series[:, *_SIGNAL_BLOCK] += decoder_labels[:, None, None] * 5.0
+    return series
+
+
+@pytest.fixture
+def undecodable_series():
+    """A (200, 6, 6) series of pure noise, carrying no label information."""
+    rng = np.random.default_rng(1)
+    return rng.normal(size=(_DECODER_FRAMES, *_DECODER_SHAPE))
+
+
+@pytest.fixture
+def decoding_labels_npz(tmp_path_factory):
+    """NPZ decoding labels matching the (300, 40, 40) preproc_h5 fixture."""
+    tmpfile = tmp_path_factory.mktemp("data") / "labels.npz"
+    np.savez(tmpfile, labels=np.tile([0, 1], 150))
+    return str(tmpfile)
+
+
+@pytest.fixture
+def decoding_labels_h5(tmp_path_factory):
+    """HDF5 decoding labels matching the (300, 40, 40) preproc_h5 fixture."""
+    tmpfile = tmp_path_factory.mktemp("data") / "labels.h5"
+    with h5.File(str(tmpfile), "w") as f:
+        f.create_dataset("labels", data=np.tile([0, 1], 150))
+    return str(tmpfile)
+
+
+@pytest.fixture
+def decoding_mask_npz(tmp_path_factory):
+    """A 40x40 spatial mask matching the preproc_h5 fixture's spatial dimensions."""
+    tmpfile = tmp_path_factory.mktemp("data") / "mask.npz"
+    mask = np.zeros((40, 40), dtype=bool)
+    mask[10:30, 10:30] = True
+    np.savez(tmpfile, mask=mask)
+    return str(tmpfile)
+
+
+@pytest.fixture
+def decoding_mask_wrong_shape_npz(tmp_path_factory):
+    """A spatial mask whose shape does not match the preproc_h5 fixture."""
+    tmpfile = tmp_path_factory.mktemp("data") / "mask_wrong.npz"
+    np.savez(tmpfile, mask=np.ones((20, 20), dtype=bool))
+    return str(tmpfile)
 
 
 # ---------------------------------------------------------------------------
@@ -262,6 +354,183 @@ class TestRidgeRegressionFast:
 
 
 # ---------------------------------------------------------------------------
+# decoder._d_prime
+# ---------------------------------------------------------------------------
+
+
+class TestDPrime:
+    def test_matches_textbook_formula(self):
+        """d' = z(hit) - z(false alarm), which for row-normalised rates is z(1-miss) - z(1-CR)."""
+        conf_matrix = np.array([[45, 5], [10, 40]])
+        expected = sst.norm.ppf(0.9) - sst.norm.ppf(0.2)
+        assert dec._d_prime(conf_matrix) == pytest.approx(expected)
+
+    def test_chance_performance_gives_zero(self):
+        assert dec._d_prime(np.array([[25, 25], [25, 25]])) == pytest.approx(0.0)
+
+    def test_perfect_classification_is_finite(self):
+        """Without the 1/(2N) correction, rates of 0 and 1 would send d' to infinity."""
+        result = dec._d_prime(np.array([[50, 0], [0, 50]]))
+        assert np.isfinite(result)
+        # Rates are clipped to 1 - 1/(2*50) and 1/(2*50).
+        assert result == pytest.approx(sst.norm.ppf(0.99) - sst.norm.ppf(0.01))
+
+    def test_perfectly_inverted_classification_is_finite_and_negative(self):
+        result = dec._d_prime(np.array([[0, 50], [50, 0]]))
+        assert np.isfinite(result)
+        assert result < 0
+
+    def test_correction_scales_with_test_set_size(self):
+        """A larger test set supports a larger ceiling on d' for perfect classification."""
+        small = dec._d_prime(np.array([[50, 0], [0, 50]]))
+        large = dec._d_prime(np.array([[500, 0], [0, 500]]))
+        assert large > small
+
+    def test_correction_uses_per_class_counts(self):
+        """Each rate is corrected using the count of its own true class, not the pooled total."""
+        conf_matrix = np.array([[20, 0], [0, 100]])
+        expected = sst.norm.ppf(1 - 1 / 40) - sst.norm.ppf(1 / 200)
+        assert dec._d_prime(conf_matrix) == pytest.approx(expected)
+
+    def test_leaves_non_extreme_rates_untouched(self):
+        """Clipping must not perturb rates that are already within the corrected bounds."""
+        conf_matrix = np.array([[49, 1], [1, 49]])
+        expected = sst.norm.ppf(0.98) - sst.norm.ppf(0.02)
+        assert dec._d_prime(conf_matrix) == pytest.approx(expected)
+
+
+# ---------------------------------------------------------------------------
+# decoder.logistic_decoder / decoder.lda_decoder
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("decoder", DECODERS, ids=DECODER_IDS)
+class TestDecoders:
+    def test_returns_expected_keys(self, decoder, decodable_series, decoder_labels):
+        result = decoder(decodable_series, decoder_labels)
+        assert set(result) == {
+            "accuracy",
+            "balanced_accuracy",
+            "d_prime",
+            "confusion_matrix",
+            "test_size",
+            "f2_score",
+            "coefficients",
+        }
+
+    def test_coefficients_have_spatial_shape(self, decoder, decodable_series, decoder_labels):
+        result = decoder(decodable_series, decoder_labels)
+        assert result["coefficients"].shape == _DECODER_SHAPE
+
+    def test_coefficients_have_non_square_spatial_shape(self, decoder):
+        """Coefficients are reshaped to (height, width), not to a square."""
+        rng = np.random.default_rng(3)
+        labels = np.tile([0, 1], 30)
+        series = rng.normal(size=(60, 4, 6))
+        series[:, 1, 2] += labels * 2.0
+
+        result = decoder(series, labels)
+
+        assert result["coefficients"].shape == (4, 6)
+
+    def test_accepts_pre_flattened_series(self, decoder, decodable_series, decoder_labels, signal_mask):
+        """A masked series arrives as (time, n_pixels); coefficients come back as one per pixel."""
+        result = decoder(decodable_series[:, signal_mask], decoder_labels)
+        assert result["coefficients"].shape == (signal_mask.sum(),)
+
+    def test_pre_flattened_series_matches_masked_full_frame(
+        self, decoder, decodable_series, decoder_labels, signal_mask
+    ):
+        """Decoding a masked series should equal decoding the full frame restricted to the mask."""
+        flattened = decoder(decodable_series[:, signal_mask], decoder_labels)
+        masked_full_frame = decoder(decodable_series * signal_mask, decoder_labels)
+        assert flattened["accuracy"] == masked_full_frame["accuracy"]
+
+    def test_coefficients_are_largest_over_informative_pixels(
+        self, decoder, decodable_series, decoder_labels, signal_mask
+    ):
+        coefs = np.abs(decoder(decodable_series, decoder_labels)["coefficients"])
+        assert coefs[signal_mask].mean() > coefs[~signal_mask].mean()
+
+    def test_confusion_matrix_is_row_normalised(self, decoder, decodable_series, decoder_labels):
+        conf_matrix = decoder(decodable_series, decoder_labels)["confusion_matrix"]
+        assert conf_matrix.shape == (2, 2)
+        np.testing.assert_allclose(conf_matrix.sum(axis=1), 1.0)
+
+    def test_accuracies_are_high_for_decodable_data(self, decoder, decodable_series, decoder_labels):
+        result = decoder(decodable_series, decoder_labels)
+        assert result["accuracy"] > 0.8
+        assert result["balanced_accuracy"] > 0.8
+
+    def test_accuracies_are_near_chance_for_noise(self, decoder, undecodable_series, decoder_labels):
+        result = decoder(undecodable_series, decoder_labels)
+        assert result["accuracy"] < 0.7
+        assert result["balanced_accuracy"] < 0.7
+
+    def test_metrics_are_bounded(self, decoder, decodable_series, decoder_labels):
+        result = decoder(decodable_series, decoder_labels)
+        for metric in ("accuracy", "balanced_accuracy", "f2_score"):
+            assert 0.0 <= result[metric] <= 1.0, f"{metric} out of range: {result[metric]}"
+
+    def test_d_prime_is_higher_for_decodable_data(
+        self, decoder, decodable_series, undecodable_series, decoder_labels
+    ):
+        decodable = decoder(decodable_series, decoder_labels)["d_prime"]
+        undecodable = decoder(undecodable_series, decoder_labels)["d_prime"]
+        assert np.isfinite(decodable)
+        assert decodable > undecodable
+
+    def test_d_prime_is_finite_for_a_perfect_split(self, decoder, perfectly_decodable_series, decoder_labels):
+        """A perfectly separable test split must not produce an infinite d'."""
+        result = decoder(perfectly_decodable_series, decoder_labels)
+
+        np.testing.assert_allclose(result["confusion_matrix"], np.eye(2))
+        assert np.isfinite(result["d_prime"])
+        assert result["d_prime"] > 0
+
+    def test_d_prime_is_a_python_float(self, decoder, decodable_series, decoder_labels):
+        """Keeps the metric JSON-serialisable without relying on the encoder's scalar handling."""
+        assert type(decoder(decodable_series, decoder_labels)["d_prime"]) is float
+
+    def test_echoes_test_size(self, decoder, decodable_series, decoder_labels):
+        result = decoder(decodable_series, decoder_labels, test_size=0.3)
+        assert result["test_size"] == 0.3
+
+    def test_test_size_is_passed_to_the_split(self, decoder, decodable_series, decoder_labels, mocker):
+        spy = mocker.spy(dec, "train_test_split")
+
+        decoder(decodable_series, decoder_labels, test_size=0.4)
+
+        assert spy.call_args.kwargs["test_size"] == 0.4
+
+    def test_default_test_size_is_a_fifth(self, decoder, decodable_series, decoder_labels, mocker):
+        spy = mocker.spy(dec, "train_test_split")
+
+        result = decoder(decodable_series, decoder_labels)
+
+        assert spy.call_args.kwargs["test_size"] == 0.2
+        assert result["test_size"] == 0.2
+
+    def test_is_deterministic(self, decoder, decodable_series, decoder_labels):
+        """The fixed random_state should make repeated runs identical."""
+        first = decoder(decodable_series, decoder_labels)
+        second = decoder(decodable_series, decoder_labels)
+
+        assert first["accuracy"] == second["accuracy"]
+        np.testing.assert_allclose(first["coefficients"], second["coefficients"])
+        np.testing.assert_allclose(first["confusion_matrix"], second["confusion_matrix"])
+
+    def test_does_not_mutate_input(self, decoder, decodable_series, decoder_labels):
+        series_before = decodable_series.copy()
+        labels_before = decoder_labels.copy()
+
+        decoder(decodable_series, decoder_labels)
+
+        np.testing.assert_array_equal(decodable_series, series_before)
+        np.testing.assert_array_equal(decoder_labels, labels_before)
+
+
+# ---------------------------------------------------------------------------
 # CLI commands
 # ---------------------------------------------------------------------------
 
@@ -375,6 +644,121 @@ def test_regression_cmd_not_fast(preproc_h5, regressor_npz, output_dir):
 
     outpath = pathlib.Path(output_dir) / "preproc_regression.npz"
     assert outpath.is_file()
+
+
+@pytest.mark.parametrize(
+    ("command", "outfile"),
+    [("smooth", "preproc_smoothed.h5"), ("zscore", "preproc_zscored.h5")],
+)
+def test_cmd_creates_missing_output_dir(preproc_h5, output_dir, command, outfile):
+    out_dir = pathlib.Path(output_dir) / "nested" / command
+    runner = CliRunner()
+    result = runner.invoke(mesoscopy.cli, args=f"process {command} {preproc_h5} -o {out_dir}")
+    assert result.exit_code == 0
+    assert "Creating output directory" in result.output
+    assert (out_dir / outfile).is_file()
+
+
+def test_regions_cmd_creates_missing_output_dir(
+    preproc_h5_bytes_timestamps, output_dir, mock_left_aba, mock_right_aba, mock_annotations
+):
+    out_dir = pathlib.Path(output_dir) / "nested" / "regions"
+    runner = CliRunner()
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(mock_left_aba, mock_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=mock_annotations),
+    ):
+        result = runner.invoke(mesoscopy.cli, args=f"process regions {preproc_h5_bytes_timestamps} -o {out_dir}")
+    assert result.exit_code == 0
+    assert "Creating output directory" in result.output
+    assert (out_dir / "preproc_bytes_regions.csv").is_file()
+
+
+def test_regression_cmd_creates_missing_output_dir(preproc_h5, regressor_npz, output_dir):
+    out_dir = pathlib.Path(output_dir) / "nested" / "regression"
+    runner = CliRunner()
+    result = runner.invoke(
+        mesoscopy.cli,
+        args=f"process regression {preproc_h5} {regressor_npz} -o {out_dir} --fast",
+    )
+    assert result.exit_code == 0
+    assert "Creating output directory" in result.output
+    assert (out_dir / "preproc_regression.npz").is_file()
+
+
+def test_decode_cmd_logistic(preproc_h5, decoding_labels_npz, output_dir):
+    runner = CliRunner()
+    result = runner.invoke(
+        mesoscopy.cli,
+        args=f"process decode {preproc_h5} {decoding_labels_npz} -o {output_dir}",
+    )
+    assert result.exit_code == 0
+
+    outpath = pathlib.Path(output_dir) / "preproc_decoding_logistic.json"
+    assert outpath.is_file()
+
+    with outpath.open() as f:
+        results = json.load(f)
+    assert np.array(results["coefficients"]).shape == (40, 40)
+    assert results["test_size"] == 0.2
+
+
+def test_decode_cmd_lda(preproc_h5, decoding_labels_h5, output_dir):
+    runner = CliRunner()
+    result = runner.invoke(
+        mesoscopy.cli,
+        args=f"process decode {preproc_h5} {decoding_labels_h5} -o {output_dir} -f lda",
+    )
+    assert result.exit_code == 0
+    assert (pathlib.Path(output_dir) / "preproc_decoding_lda.json").is_file()
+
+
+def test_decode_cmd_with_mask(preproc_h5, decoding_labels_npz, decoding_mask_npz, output_dir):
+    runner = CliRunner()
+    result = runner.invoke(
+        mesoscopy.cli,
+        args=f"process decode {preproc_h5} {decoding_labels_npz} -o {output_dir} -m {decoding_mask_npz}",
+    )
+    assert result.exit_code == 0
+    assert "Loading spatial mask" in result.output
+
+    outpath = pathlib.Path(output_dir) / "preproc_decoding_logistic.json"
+    assert outpath.is_file()
+
+    with outpath.open() as f:
+        results = json.load(f)
+
+    # Coefficients are scattered back onto the full frame, zero outside the mask.
+    coefs = np.array(results["coefficients"])
+    mask = np.load(decoding_mask_npz)["mask"]
+    assert coefs.shape == (40, 40)
+    assert np.all(coefs[~mask] == 0)
+    assert np.any(coefs[mask] != 0)
+
+
+def test_decode_cmd_mask_shape_mismatch_raises(
+    preproc_h5, decoding_labels_npz, decoding_mask_wrong_shape_npz, output_dir
+):
+    out_dir = pathlib.Path(output_dir) / "nested" / "decode"
+    runner = CliRunner()
+    result = runner.invoke(
+        mesoscopy.cli,
+        args=f"process decode {preproc_h5} {decoding_labels_npz} -o {out_dir} -m {decoding_mask_wrong_shape_npz}",
+    )
+    assert result.exit_code != 0
+    assert "Creating output directory" in result.output
+    assert isinstance(result.exception, ValueError)
+    assert "does not match" in str(result.exception)
+
+
+def test_decode_cmd_rejects_unknown_decoder(preproc_h5, decoding_labels_npz, output_dir):
+    runner = CliRunner()
+    result = runner.invoke(
+        mesoscopy.cli,
+        args=f"process decode {preproc_h5} {decoding_labels_npz} -o {output_dir} -f svm",
+    )
+    assert result.exit_code != 0
+    assert "svm" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -622,3 +1006,56 @@ def test_extract_all_regions_values_match_extract_region_activity(
         single_right = extract_region_activity(region_deltaf_series, "REG2", "right")
     np.testing.assert_allclose(all_regions["L_REG2"], single_left)
     np.testing.assert_allclose(all_regions["R_REG2"], single_right)
+
+
+# ---------------------------------------------------------------------------
+# region.extract_all_regions (as_dataframe)
+# ---------------------------------------------------------------------------
+
+
+def test_extract_all_regions_as_dataframe_returns_dataframe(
+    region_left_aba, region_right_aba, region_annotations, region_deltaf_series
+):
+    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
+         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+        result = extract_all_regions(region_deltaf_series, as_dataframe=True)
+    assert isinstance(result, pd.DataFrame)
+    assert list(result.columns) == ["region", "time_idx", "F"]
+
+
+def test_extract_all_regions_as_dataframe_is_long_format(
+    region_left_aba, region_right_aba, region_annotations, region_deltaf_series
+):
+    """One row per (region, frame): REG1 and REG2 across both hemispheres, FRP1 excluded by default."""
+    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
+         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+        result = extract_all_regions(region_deltaf_series, as_dataframe=True)
+
+    assert set(result["region"]) == {"L_REG1", "R_REG1", "L_REG2", "R_REG2"}
+    assert len(result) == 4 * _N_FRAMES
+    assert sorted(result.loc[result["region"] == "L_REG1", "time_idx"]) == list(range(_N_FRAMES))
+
+
+def test_extract_all_regions_as_dataframe_matches_dict_values(
+    region_left_aba, region_right_aba, region_annotations, region_deltaf_series
+):
+    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
+         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+        as_dict = extract_all_regions(region_deltaf_series)
+        as_df = extract_all_regions(region_deltaf_series, as_dataframe=True)
+
+    for region, activity in as_dict.items():
+        rows = as_df[as_df["region"] == region].sort_values("time_idx")
+        np.testing.assert_allclose(rows["F"].to_numpy(), activity)
+
+
+def test_extract_all_regions_as_dataframe_respects_exclude(
+    region_left_aba, region_right_aba, region_annotations, region_deltaf_series
+):
+    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
+         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+        result = extract_all_regions(
+            region_deltaf_series, exclude=["REG1"], ignore_default_exclude=True, as_dataframe=True
+        )
+
+    assert set(result["region"]) == {"L_REG2", "R_REG2", "L_FRP1", "R_FRP1"}
