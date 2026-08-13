@@ -61,11 +61,12 @@ def extract_region_activity(
         ValueError: If the specified region acronym is not recognized or if the hemisphere option is invalid.
     """
     annotations = resources.get_atlas_annotations()
-    region_id = annotations.loc[annotations["acronym"] == region_acronym, "id"].values[0]
 
-    if not region_id:
-        msg = f"Region acronym {region_acronym} not recognised."
-        raise ValueError(msg)
+    unrecognised = _unrecognised_acronyms(annotations, [region_acronym])
+    if unrecognised:
+        raise ValueError(unrecognised)
+
+    region_id = annotations.loc[annotations["acronym"] == region_acronym, "id"].to_numpy()[0]
 
     left_aba, right_aba = resources.get_atlas()
 
@@ -100,28 +101,44 @@ def extract_all_regions(
     Returns:
         dict | pd.DataFrame: A dictionary with region acronyms as keys and their mean activity as values,
             or a DataFrame with columns 'region', 'time_idx', and 'F'.
+
+    Raises:
+        ValueError: If any excluded region acronym is not recognised, or if the exclusions leave no
+            regions to extract.
     """
     annotations = resources.get_atlas_annotations()
     left_aba, right_aba = resources.get_atlas()
 
     if exclude is None:
         exclude = []
+    # Silently ignoring a misspelled or wrong-case acronym here would quietly leave an unwanted
+    # region in the results, so we reject it instead.
+    unrecognised = _unrecognised_acronyms(annotations, exclude)
+    if unrecognised:
+        raise ValueError(unrecognised)
 
     excluded_regions = list(DEFAULT_EXCLUDE) if not ignore_default_exclude else []
     excluded_regions.extend(exclude)
     regions = [region for region in annotations.acronym.unique() if region not in excluded_regions]
 
+    if not regions:
+        msg = (
+            "Every region in the atlas is excluded, leaving nothing to extract. "
+            f"Excluded acronyms: {', '.join(sorted(excluded_regions))}."
+        )
+        raise ValueError(msg)
+
     region_ids = {region: annotations.loc[annotations["acronym"] == region, "id"].values[0] for region in regions}
 
     hw = left_aba.shape[0] * left_aba.shape[1]
-    left_masks = np.array([(left_aba == region_ids[r]).ravel() for r in regions])   # (n_regions, H*W)
+    left_masks = np.array([(left_aba == region_ids[r]).ravel() for r in regions])  # (n_regions, H*W)
     right_masks = np.array([(right_aba == region_ids[r]).ravel() for r in regions])
 
-    left_counts = left_masks.sum(axis=1).astype(float)   # (n_regions,)
+    left_counts = left_masks.sum(axis=1).astype(float)  # (n_regions,)
     right_counts = right_masks.sum(axis=1).astype(float)
 
     data_flat = deltaf_series.reshape(deltaf_series.shape[0], hw)  # (T, H*W)
-    left_activities = (data_flat @ left_masks.T) / left_counts     # (T, n_regions)
+    left_activities = (data_flat @ left_masks.T) / left_counts  # (T, n_regions)
     right_activities = (data_flat @ right_masks.T) / right_counts
 
     region_activity = {}
@@ -134,3 +151,23 @@ def extract_all_regions(
         return df.unstack().reset_index().rename(columns={"level_0": "region", "level_1": "time_idx", 0: "F"})
 
     return region_activity
+
+
+def _unrecognised_acronyms(annotations: pd.DataFrame, acronyms: list[str]) -> str | None:
+    """Build an error message naming any acronyms missing from the atlas annotations.
+
+    Args:
+        annotations (pd.DataFrame): Atlas annotations, containing an 'acronym' column.
+        acronyms (list[str]): Region acronyms to check. Matching is case-sensitive.
+
+    Returns:
+        str | None: A message naming the unrecognised acronyms alongside the valid ones, or None if
+            every acronym is present in the annotations.
+    """
+    known = set(annotations["acronym"])
+    unknown = [acronym for acronym in acronyms if acronym not in known]
+
+    if not unknown:
+        return None
+
+    return f"Region acronym(s) not recognised: {', '.join(unknown)}. Valid acronyms: {', '.join(sorted(known))}."
