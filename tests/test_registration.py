@@ -142,9 +142,7 @@ def test_landmarks_affine_registers_a_known_transform_to_the_atlas():
     # Synthesise a "recording": the atlas seen through a known rotation, scale and shift.
     true_tform = trf.AffineTransform(scale=(1.8, 1.7), rotation=np.deg2rad(8), translation=(40, 25))
     recording = trf.warp(atlas, true_tform.inverse, output_shape=(300, 320), order=1)
-    recording_lm = {
-        name: tuple(true_tform(np.array([point]))[0]) for name, point in template_lm.items()
-    }
+    recording_lm = {name: tuple(true_tform(np.array([point]))[0]) for name, point in template_lm.items()}
 
     warped, tform = landmarks_affine(recording[None], recording_lm, template_lm)
 
@@ -165,11 +163,58 @@ def test_landmarks_affine_registers_a_known_transform_to_the_atlas():
 
 
 def test_update_nwb(nwbfile, preproc_h5):
-    tform_mock = np.array([[(1, 2, 3), (1, 2, 4)]])
-    nwb = reg.update_nwb(nwbfile, preproc_h5, tform_mock)
-    assert nwb.processing["ophys"]["CCFRegisteredSeries"].corrected.data
+    tform_params = trf.AffineTransform(scale=(1.2, 1.1), rotation=0.05, translation=(3, -4)).params
+
+    nwb = reg.update_nwb(nwbfile, preproc_h5, tform_params)
+
     assert nwb.processing["ophys"]["CCFRegisteredSeries"].original.data
     assert nwb.processing["ophys"]["CCFRegisteredSeries"].xy_translation.data.any()
+
+
+def test_update_nwb_stores_one_transform_matrix_per_timestamp(nwbfile, preproc_h5):
+    """xy_translation must be (n_timestamps, 3, 3), not the flattened (3 * n_timestamps, 3).
+
+    pynwb only warns when data and timestamps disagree in length, so a mis-shaped array is written
+    without complaint.
+    """
+    tform_params = trf.AffineTransform(scale=(1.2, 1.1), rotation=0.05, translation=(3, -4)).params
+
+    reg.update_nwb(nwbfile, preproc_h5, tform_params)
+
+    # Read the file back rather than trusting the in-memory object.
+    with h5py.File(preproc_h5, "r") as f:
+        n_timestamps = len(f["/timestamps"])
+
+    written = io.read_nwb(nwbfile, mode="r")
+    stack = written.processing["ophys"]["CCFRegisteredSeries"]
+    xy_translation = np.asarray(stack.xy_translation.data)
+
+    assert xy_translation.shape == (n_timestamps, 3, 3)
+    assert len(xy_translation) == len(stack.xy_translation.timestamps)
+    # Every frame carries the same global transform.
+    for frame_params in xy_translation:
+        np.testing.assert_allclose(frame_params, tform_params)
+
+
+def test_register_landmarks_cli_nwb_stores_the_transform_matrix(preproc_nwb, output_dir):
+    """End-to-end NWB path: the stored transform must be the matrix, correctly shaped per frame."""
+    points = str(resources.files(res).joinpath("ccf_template_landmarks_140x142.csv"))
+    runner = CliRunner()
+
+    result = runner.invoke(
+        mesoscopy.cli,
+        args=f"register landmarks {preproc_nwb} -r {points} -o {output_dir}",
+    )
+
+    assert result.exit_code == 0, result.output
+
+    written = io.read_nwb(preproc_nwb, mode="r")
+    stack = written.processing["ophys"]["CCFRegisteredSeries"]
+    xy_translation = np.asarray(stack.xy_translation.data)
+
+    assert xy_translation.shape == (len(stack.xy_translation.timestamps), 3, 3)
+    # Recording and template landmarks are the same file here, so the transform is the identity.
+    np.testing.assert_allclose(xy_translation[0], np.eye(3), atol=1e-6)
 
 
 def test_register_landmarks_cli_default_points_h5(preproc_h5, output_dir):

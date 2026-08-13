@@ -25,6 +25,7 @@ import pathlib
 import click
 import h5py
 import numpy as np
+from pynwb import NWBFile
 from pynwb import TimeSeries
 from pynwb.image import ImageSeries
 from pynwb.ophys import CorrectedImageStack
@@ -237,7 +238,7 @@ def landmarks_cmd(
 
     if nwb:
         click.echo("Updating NWB file...")
-        update_nwb(path, outpath, tform)
+        update_nwb(path, outpath, tform.params)
         click.echo(f"Updated NWB file at {path}")
 
     return outpath
@@ -259,51 +260,60 @@ def load_maxips(path: str) -> tuple[np.ndarray, np.ndarray]:
     return gcamp_maxip_projection, isosb_maxip_projection
 
 
-def update_nwb(nwb_path: str, h5_path: str, tform_params: np.ndarray) -> None:
+def update_nwb(nwb_path: str, h5_path: str, tform_params: np.ndarray) -> NWBFile:
     """Update an NWB file with registered imaging data stored in an HDF5 file.
 
     Creates a link between the NWB file and the HDF5 file. See https://pynwb.readthedocs.io/en/stable/tutorials/advanced_io/linking_data.html.
 
+    The registration is a single global affine, so the same 3x3 matrix is stored for every frame of
+    the xy_translation series, giving it a shape of (n_timestamps, 3, 3).
+
     Args:
         nwb_path (str): Path to the NWB file.
         h5_path (str): Path to the HDF5 file containing the registered images.
-        tform_params (np.ndarray): Affine transformation parameters.
+        tform_params (np.ndarray): Affine transformation matrix, as a 3x3 array.
+
+    Returns:
+        NWBFile: The updated NWB file object. Note that its link to the HDF5 file is closed on
+            return, so the registered image data is only readable by re-opening nwb_path.
     """
     nwbfile, nwbio = io.read_nwb(nwb_path, return_io=True)
-    f = h5py.File(h5_path, "r")
 
-    try:
-        ophys_module = nwbfile.create_processing_module(name="ophys", description="optical physiology processed data")
-    except ValueError:
-        click.echo("Processing module already exists...")
-        ophys_module = nwbfile.processing["ophys"]
+    with h5py.File(h5_path, "r") as f:
+        try:
+            ophys_module = nwbfile.create_processing_module(
+                name="ophys", description="optical physiology processed data"
+            )
+        except ValueError:
+            click.echo("Processing module already exists...")
+            ophys_module = nwbfile.processing["ophys"]
 
-    registered_series = ImageSeries(
-        name="corrected",
-        data=f["/F"],
-        timestamps=f["/timestamps"],
-        unit="df/f",
-        description="dF/F widefield cortical imaging series.",
-        comments="This is the haemodynamic corrected series registered to the Allen Brain Atlas CCFv3.",
-    )
+        registered_series = ImageSeries(
+            name="corrected",
+            data=f["/F"],
+            timestamps=f["/timestamps"],
+            unit="df/f",
+            description="dF/F widefield cortical imaging series.",
+            comments="This is the haemodynamic corrected series registered to the Allen Brain Atlas CCFv3.",
+        )
 
-    xy_translation = TimeSeries(
-        name="xy_translation",
-        data=np.repeat(tform_params, len(f["/timestamps"]), axis=0),
-        unit="pixels",
-        timestamps=f["/timestamps"],
-        description="Affine transformation parameters for image registration to the ABA CCFv3.",
-    )
+        xy_translation = TimeSeries(
+            name="xy_translation",
+            data=np.tile(tform_params, (len(f["/timestamps"]), 1, 1)),
+            unit="pixels",
+            timestamps=f["/timestamps"],
+            description="Affine transformation parameters for image registration to the ABA CCFv3.",
+        )
 
-    corrected_image_stack = CorrectedImageStack(
-        name="CCFRegisteredSeries",
-        corrected=registered_series,
-        original=nwbfile.acquisition["DualChannelImagingSeries"],
-        xy_translation=xy_translation,
-    )
+        corrected_image_stack = CorrectedImageStack(
+            name="CCFRegisteredSeries",
+            corrected=registered_series,
+            original=nwbfile.acquisition["DualChannelImagingSeries"],
+            xy_translation=xy_translation,
+        )
 
-    ophys_module.add(corrected_image_stack)
+        ophys_module.add(corrected_image_stack)
 
-    io.write_nwb(nwb_path, nwbfile, io=nwbio)
+        io.write_nwb(nwb_path, nwbfile, io=nwbio)
 
     return nwbfile
