@@ -103,11 +103,14 @@ def label_cmd(path, out_dir, template_points, session_id) -> dict:
 
     click.echo("Loading template landmarks...")
     template_landmarks = res.get_default_landmarks()
+    template_shape = res.get_atlas()[0].shape
     if template_points:
         template_landmarks = io.read_points(template_points)
+        # The image a user-supplied template was marked on is unknown, so seed points can't be scaled.
+        template_shape = None
 
     click.echo("Launching landmark identification GUI...")
-    recording_landmarks = reg_gui.mark_landmarks(maxip, isosb_maxip, template_landmarks)
+    recording_landmarks = reg_gui.mark_landmarks(maxip, isosb_maxip, template_landmarks, template_shape=template_shape)
 
     click.echo("Saving recording landmarks...")
     outpath = out_dir + os.sep + session_id + "_landmarks.csv"
