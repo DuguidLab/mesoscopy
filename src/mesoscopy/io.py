@@ -19,8 +19,8 @@
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
 import csv
-import typing
 import json
+import typing
 from collections import OrderedDict
 
 import h5py
