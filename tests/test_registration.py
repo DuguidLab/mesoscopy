@@ -16,6 +16,7 @@ import mesoscopy.register.landmarks_gui as reg_gui
 import mesoscopy.register.qa as reg_qa
 import mesoscopy.resources as res
 from mesoscopy import io
+import mesoscopy.register.transform as trf_mod
 from mesoscopy.register.transform import landmarks_affine
 
 
@@ -163,6 +164,146 @@ def test_landmarks_affine_registers_a_known_transform_to_the_atlas():
     # The registered image reproduces the atlas it was synthesised from.
     labelled = atlas > 0
     assert np.abs(warped[0][labelled] - atlas[labelled]).mean() < 0.02 * atlas.max()
+
+
+# ---------------------------------------------------------------------------
+# Landmark pairing and fit quality
+# ---------------------------------------------------------------------------
+
+
+def test_align_landmarks_pairs_by_name_not_order():
+    """Point pairing is positional once the arrays are built, so names must drive the ordering."""
+    template = {"bregma": (71.0, 60.0), "cFP": (71.0, 19.0), "lPB": (30.0, 35.0)}
+    recording = {"lPB": (32.0, 36.0), "bregma": (70.0, 61.0), "cFP": (72.0, 20.0)}
+
+    names, template_points, recording_points = trf_mod.align_landmarks(recording, template)
+
+    assert names == ["bregma", "cFP", "lPB"]
+    np.testing.assert_allclose(template_points, [[71, 60], [71, 19], [30, 35]])
+    np.testing.assert_allclose(recording_points, [[70, 61], [72, 20], [32, 36]])
+
+
+def test_landmarks_affine_is_unaffected_by_landmark_ordering(small_series):
+    """Reordering a landmark file must not change the fitted transform."""
+    template = {"a": (10.0, 10.0), "b": (30.0, 10.0), "c": (10.0, 25.0)}
+    recording = {"a": (12.0, 13.0), "b": (32.0, 13.0), "c": (12.0, 28.0)}
+    shuffled = {"c": recording["c"], "a": recording["a"], "b": recording["b"]}
+
+    _, tform = landmarks_affine(small_series, recording, template)
+    _, shuffled_tform = landmarks_affine(small_series, shuffled, template)
+
+    np.testing.assert_allclose(tform.params, shuffled_tform.params, atol=1e-9)
+
+
+def test_align_landmarks_reports_unmatched_names(capsys):
+    template = {"a": (10.0, 10.0), "b": (30.0, 10.0), "c": (10.0, 25.0), "onlyInTemplate": (1.0, 1.0)}
+    recording = {"a": (12.0, 13.0), "b": (32.0, 13.0), "c": (12.0, 28.0), "onlyInRecording": (2.0, 2.0)}
+
+    names, _, _ = trf_mod.align_landmarks(recording, template)
+
+    assert names == ["a", "b", "c"]
+    output = capsys.readouterr().out
+    assert "onlyInTemplate" in output
+    assert "onlyInRecording" in output
+
+
+def test_align_landmarks_rejects_too_few_shared_landmarks():
+    template = {"a": (10.0, 10.0), "b": (30.0, 10.0), "c": (10.0, 25.0)}
+    recording = {"a": (12.0, 13.0), "b": (32.0, 13.0)}
+
+    with pytest.raises(ValueError, match="at least 3"):
+        trf_mod.align_landmarks(recording, template)
+
+
+def test_landmarks_affine_rejects_collinear_landmarks(small_series):
+    """Collinear points leave the fit underdetermined.
+
+    skimage reports no error for them - it returns a wild but non-singular matrix - so the check has
+    to be on the geometry of the points, not on the determinant of the fitted transform.
+    """
+    template = {"a": (10.0, 10.0), "b": (20.0, 20.0), "c": (30.0, 30.0), "d": (40.0, 40.0)}
+    recording = {name: (x + 1.0, y + 1.0) for name, (x, y) in template.items()}
+
+    with pytest.raises(ValueError, match="collinear"):
+        landmarks_affine(small_series, recording, template)
+
+
+def test_landmarks_affine_rejects_coincident_landmarks(small_series):
+    template = {"a": (10.0, 10.0), "b": (30.0, 10.0), "c": (10.0, 25.0)}
+    recording = dict.fromkeys(template, (5.0, 5.0))
+
+    with pytest.raises(ValueError, match="collinear or coincident"):
+        landmarks_affine(small_series, recording, template)
+
+
+def test_landmarks_affine_reports_fit_residuals(small_series, capsys):
+    """A perfect fit reports ~0 px; a displaced landmark raises the RMSE."""
+    template = {"a": (10.0, 10.0), "b": (30.0, 10.0), "c": (10.0, 25.0), "d": (30.0, 25.0)}
+    exact = {name: (x + 2.0, y + 3.0) for name, (x, y) in template.items()}
+
+    landmarks_affine(small_series, exact, template)
+    assert "RMSE 0.00 px" in capsys.readouterr().out
+
+    displaced = dict(exact)
+    displaced["d"] = (exact["d"][0] + 8.0, exact["d"][1])
+    landmarks_affine(small_series, displaced, template)
+
+    output = capsys.readouterr().out
+    assert "RMSE 0.00 px" not in output
+    assert "worst is" in output
+
+
+def test_landmarks_affine_warns_about_a_poor_fit(small_series, capsys):
+    """A fit that leaves landmarks far from their targets is called out."""
+    template = {"a": (10.0, 10.0), "b": (30.0, 10.0), "c": (10.0, 25.0), "d": (30.0, 25.0)}
+    good = {name: (x + 2.0, y + 3.0) for name, (x, y) in template.items()}
+
+    landmarks_affine(small_series, good, template)
+    assert "⚠️" not in capsys.readouterr().out
+
+    # Scramble one point far enough that no affine can fit the set.
+    poor = dict(good)
+    poor["d"] = (good["d"][0] - 40.0, good["d"][1] + 30.0)
+    landmarks_affine(small_series, poor, template)
+
+    assert "registration may be poor" in capsys.readouterr().out
+
+
+def test_landmark_residuals_measured_in_template_pixels():
+    """Residuals are distances in the registered frame, independent of the recording's scale."""
+    template_points = np.array([[10.0, 10.0], [30.0, 10.0], [10.0, 25.0]])
+    # Recording is 4x the template, so a landmark off by 4 recording px is off by 1 template px.
+    tform = trf.AffineTransform(scale=(4.0, 4.0))
+    recording_points = tform(template_points)
+    recording_points[2] += (4.0, 0.0)
+
+    residuals = trf_mod.landmark_residuals(tform, template_points, recording_points)
+
+    np.testing.assert_allclose(residuals, [0.0, 0.0, 1.0], atol=1e-9)
+
+
+def test_registered_h5_stores_aligned_landmark_qa(preproc_h5, output_dir):
+    """Every landmark QA dataset must correspond row for row."""
+    points = str(resources.files(res).joinpath("ccf_template_landmarks_140x142.csv"))
+    runner = CliRunner()
+
+    result = runner.invoke(mesoscopy.cli, args=f"register landmarks {preproc_h5} -r {points} -o {output_dir}")
+    assert result.exit_code == 0, result.output
+
+    with h5py.File(pathlib.Path(output_dir) / "preproc_registered.h5", "r") as f:
+        names = [name.decode() for name in f["/qa/landmark_names"][:]]
+        template_points = f["/qa/template_landmarks"][:]
+        recording_points = f["/qa/recording_landmarks"][:]
+        registered_points = f["/qa/registered_landmarks"][:]
+        residuals = f["/qa/landmark_residuals"][:]
+
+    assert names == list(res.get_default_landmarks())
+    for array in (template_points, recording_points, registered_points, residuals):
+        assert len(array) == len(names)
+
+    # Recording and template points are the same file here, so the fit is exact.
+    np.testing.assert_allclose(residuals, 0.0, atol=1e-9)
+    np.testing.assert_allclose(registered_points, template_points, atol=1e-9)
 
 
 def test_update_nwb(nwbfile, preproc_h5):

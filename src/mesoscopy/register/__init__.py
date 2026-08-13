@@ -230,6 +230,9 @@ def landmarks_cmd(
         output_shape=output_shape,
     )
 
+    # Store the name-matched point pairs, so every QA dataset corresponds row for row.
+    landmark_names, aligned_template, aligned_recording = trf.align_landmarks(recording_landmarks, template_landmarks)
+
     # Save warped frames and timestamps
     outpath = out_dir + os.sep + session_id + "_registered.h5"
     outpath = io.write_h5(
@@ -238,9 +241,11 @@ def landmarks_cmd(
             "/F": warped,
             "/timestamps": timestamps,
             "/tform": tform.params,
-            "/qa/recording_landmarks": np.array(list(recording_landmarks.values())),
-            "/qa/template_landmarks": np.array(list(template_landmarks.values())),
-            "/qa/registered_landmarks": tform.inverse(np.array(list(recording_landmarks.values()))),
+            "/qa/landmark_names": np.array(landmark_names, dtype="S"),
+            "/qa/recording_landmarks": aligned_recording,
+            "/qa/template_landmarks": aligned_template,
+            "/qa/registered_landmarks": tform.inverse(aligned_recording),
+            "/qa/landmark_residuals": trf.landmark_residuals(tform, aligned_template, aligned_recording),
         },
     )
     click.echo(f"Saved registered frames at {outpath}")
