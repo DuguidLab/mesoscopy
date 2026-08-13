@@ -288,6 +288,9 @@ def read_mask(path: str, key: str = "mask") -> np.ndarray:
 def write_json(path: str, data: dict) -> str:
     """Write a dictionary to a JSON file.
 
+    NumPy arrays and scalars are converted to their closest JSON equivalent, so analysis results can
+    be written out as-is.
+
     Args:
         path (str): Path to the JSON file.
         data (dict): Dictionary to write.
@@ -296,8 +299,27 @@ def write_json(path: str, data: dict) -> str:
         str: Path to the written JSON file.
     """
     with open(path, "w") as f:
-        json.dump(data, f, indent=4)
+        json.dump(data, f, indent=4, cls=_NumpyJSONEncoder)
     return path
+
+
+class _NumpyJSONEncoder(json.JSONEncoder):
+    """JSON encoder that serialises NumPy arrays and scalars."""
+
+    def default(self, o: typing.Any) -> typing.Any:
+        """Convert a NumPy array or scalar to its closest JSON-serialisable equivalent.
+
+        Args:
+            o (typing.Any): The object to serialise.
+
+        Returns:
+            typing.Any: A JSON-serialisable representation of the object.
+        """
+        if isinstance(o, np.ndarray):
+            return o.tolist()
+        if isinstance(o, np.generic):
+            return o.item()
+        return super().default(o)
 
 
 def _read_npz_decoding_labels(path: str) -> np.ndarray:
