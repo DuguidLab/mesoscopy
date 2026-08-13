@@ -4,6 +4,28 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 ## Unreleased
 
+## [0.9.0] - 2026-08-13
+
+### Changed
+
+- Build/dev tooling migrated from `hatch` to `uv` + `Make`; all `make` recipes now wrap `uv run` and no manual environment activation is needed ([#109](https://github.com/DuguidLab/mesoscopy/pull/109)).
+- `register`'s `--crop-x`/`--crop-y` options replaced with `--output-width`/`--output-height`; registered output now consistently matches the ABA template shape (or a given output shape) instead of a crop region ([#110](https://github.com/DuguidLab/mesoscopy/pull/110)).
+- Landmark identification GUI reworked to make point identification more explicit and warn when landmarks are missing ([#110](https://github.com/DuguidLab/mesoscopy/pull/110)).
+
+### Fixed
+
+- Registration coordinates read inconsistently as xy vs. yx in places, causing warped/misaligned output ([#110](https://github.com/DuguidLab/mesoscopy/pull/110)).
+- Landmark GUI could silently drop a point if it was deleted, corrupting downstream registration.
+- ABA scaling issue affecting registered output size.
+- Automagic landmark file discovery and max-intensity-projection discovery for NWB files.
+- Landmark pair name matching, plus a new QA check for registration fit quality.
+- NWB update step storing an incorrect transform value after registration.
+- Docs generation.
+
+### Performance
+
+- Registration output array is now preallocated instead of built as a Python list and stacked.
+
 ## [0.8.0] - 2026-08-06
 
 ### Added
