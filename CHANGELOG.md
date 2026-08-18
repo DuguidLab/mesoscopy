@@ -4,6 +4,12 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 ## Unreleased
 
+## [0.9.1] - 2026-08-18
+
+### Added
+
+- `-n`/`--nuisance-regressors` option to `process regression` for appending external nuisance regressors (e.g. behavioural motion energy) from an NPZ or HDF5 file, interpolated onto the recording's own timestamps and z-scored before being added to the regressor matrix; may be passed multiple times ([#113](https://github.com/DuguidLab/mesoscopy/pull/113)).
+
 ## [0.9.0] - 2026-08-13
 
 ### Changed
