@@ -62,7 +62,7 @@ def process_cmd(): ...
 )
 def smooth_cmd(path: str, out_dir: str, sigma: int = 2) -> None:
     """Generate a smoothed DeltaF/F recording using a Laplace of Gaussian filter."""
-    if not os.path.exists(out_dir):
+    if not Path(out_dir).exists():
         click.echo(f"Creating output directory {out_dir}...")
         Path(out_dir).mkdir(parents=True)
 
@@ -208,6 +208,19 @@ def regions_cmd(path: str, out_dir: str) -> None:
     help="Ridge regularisation strength. Defaults to 1.0.",
 )
 @click.option(
+    "-n",
+    "--nuisance-regressors",
+    "nuisance_regressor_paths",
+    type=click.Path(exists=True),
+    multiple=True,
+    help=(
+        "Path to an external nuisance regressor file (NPZ or HDF5), e.g. behavioural motion energy. Every"
+        " array/dataset in the file other than 'timestamps' is treated as one nuisance regressor and interpolated"
+        " onto the recording's own timestamps before being z-scored and appended to the regressor matrix. May be"
+        " passed multiple times to add nuisance regressors from several files."
+    ),
+)
+@click.option(
     "-f",
     "--fast",
     is_flag=True,
@@ -231,7 +244,13 @@ def regions_cmd(path: str, out_dir: str) -> None:
     help="Save regression results as an HDF5 file. Defaults to False.",
 )
 def regression_cmd(
-    recording_path: str, regressor_path: str, out_dir: str, alpha: float, fast: bool, file_format: str
+    recording_path: str,
+    regressor_path: str,
+    out_dir: str,
+    alpha: float,
+    nuisance_regressor_paths: tuple[str, ...],
+    fast: bool,
+    file_format: str,
 ) -> None:
     """Perform pixel-wise ridge regression on a preprocessed ∆F/F recording."""
     if not Path(out_dir).exists():
@@ -241,10 +260,26 @@ def regression_cmd(
     click.echo(f"Loading preprocessed recording from {recording_path}...")
     # Determine whether we're working with an NWB file
     nwb = bool(recording_path.endswith(".nwb"))
-    session_id, deltaf_series, _ = io.load_deltaf(recording_path, nwb=nwb)
+    session_id, deltaf_series, timestamps = io.load_deltaf(recording_path, nwb=nwb)
 
     click.echo(f"Loading regressors from {regressor_path}...")
     regressors, labels, trial_idx = io.read_regressors(regressor_path)
+    labels = list(labels)
+
+    if nuisance_regressor_paths:
+        # Nuisance regressors are recorded on their own clock (e.g. a behavioural camera), so both series are
+        # anchored to elapsed seconds since their own first sample before interpolating one onto the other -- see
+        # `regr.elapsed_seconds`.
+        target_timestamps = regr.elapsed_seconds(timestamps)
+
+    for nuisance_path in nuisance_regressor_paths:
+        click.echo(f"Loading nuisance regressors from {nuisance_path}...")
+        nuisance, nuisance_labels, nuisance_timestamps = io.read_nuisance_regressors(nuisance_path)
+        nuisance = regr.interpolate_regressors(nuisance, regr.elapsed_seconds(nuisance_timestamps), target_timestamps)
+        if trial_idx is not None:
+            nuisance = nuisance[trial_idx]
+        regressors, labels = regr.append_nuisance_regressors(regressors, labels, nuisance, nuisance_labels)
+        click.echo(f"Added nuisance regressors: {nuisance_labels}")
 
     outpath = out_dir + os.sep + session_id + f"_regression.{file_format}"
 

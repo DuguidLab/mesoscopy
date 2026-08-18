@@ -74,6 +74,39 @@ def regressor_h5(tmp_path_factory):
 
 
 @pytest.fixture
+def nuisance_regressor_h5(tmp_path_factory):
+    """Create an HDF5 nuisance regressor file on its own (coarser) timebase, spanning the same duration as the
+    (300, 40, 40) preproc_h5 fixture's timestamps (0 to 0.299 seconds)."""
+    tmpfile = tmp_path_factory.mktemp("data") / "nuisance.h5"
+    rng = np.random.default_rng(3)
+    n_samples = 50
+    timestamps = np.linspace(0, 0.3, n_samples)
+    with h5.File(str(tmpfile), "w") as f:
+        f.create_dataset("motion_a", data=rng.normal(10, 2, size=n_samples))
+        f.create_dataset("motion_b", data=rng.normal(-5, 1, size=n_samples))
+        f.create_dataset("timestamps", data=timestamps)
+    return str(tmpfile)
+
+
+@pytest.fixture
+def nuisance_regressor_npz(tmp_path_factory):
+    """Create an NPZ nuisance regressor file on its own (coarser) timebase, spanning the same duration as the
+    (300, 40, 40) preproc_h5 fixture's timestamps (0 to 0.299 seconds). Uses different labels from
+    `nuisance_regressor_h5` so both fixtures can be combined in the same regression run."""
+    tmpfile = tmp_path_factory.mktemp("data") / "nuisance.npz"
+    rng = np.random.default_rng(4)
+    n_samples = 50
+    timestamps = np.linspace(0, 0.3, n_samples)
+    np.savez(
+        tmpfile,
+        pupil_a=rng.normal(10, 2, size=n_samples),
+        pupil_b=rng.normal(-5, 1, size=n_samples),
+        timestamps=timestamps,
+    )
+    return str(tmpfile)
+
+
+@pytest.fixture
 def preproc_h5_bytes_timestamps(tmp_path_factory):
     """Preprocessed HDF5 file with byte-string timestamps, matching the real preprocessing pipeline's
     output format. `process regions` decodes timestamps as byte strings, unlike the plain-float
@@ -262,6 +295,135 @@ class TestRidgeRegressionFast:
 
 
 # ---------------------------------------------------------------------------
+# regression.elapsed_seconds
+# ---------------------------------------------------------------------------
+
+
+class TestElapsedSeconds:
+    def test_numeric_timestamps_normalized_to_start_at_zero(self):
+        timestamps = np.array([5.0, 6.0, 8.0])
+        result = regr.elapsed_seconds(timestamps)
+        np.testing.assert_allclose(result, [0.0, 1.0, 3.0])
+
+    def test_already_zero_started_numeric_timestamps_unchanged(self):
+        timestamps = np.array([0.0, 0.5, 1.0])
+        result = regr.elapsed_seconds(timestamps)
+        np.testing.assert_allclose(result, timestamps)
+
+    def test_parses_iso_byte_string_timestamps(self):
+        """Matches the /timestamps format written by the real preprocessing pipeline (dtype 'S25')."""
+        timestamps = np.array(
+            [b"2024-01-01T14:00:00.000", b"2024-01-01T14:00:00.500", b"2024-01-01T14:00:01.000"], dtype="S25"
+        )
+        result = regr.elapsed_seconds(timestamps)
+        np.testing.assert_allclose(result, [0.0, 0.5, 1.0])
+
+    def test_parses_iso_str_timestamps(self):
+        timestamps = np.array(["2024-01-01T14:00:00.000", "2024-01-01T14:00:00.500"])
+        result = regr.elapsed_seconds(timestamps)
+        np.testing.assert_allclose(result, [0.0, 0.5])
+
+
+# ---------------------------------------------------------------------------
+# regression.interpolate_regressors
+# ---------------------------------------------------------------------------
+
+
+class TestInterpolateRegressors:
+    def test_output_shape(self):
+        regressors = np.arange(20).reshape(10, 2).astype(float)
+        source_timestamps = np.linspace(0, 1, 10)
+        target_timestamps = np.linspace(0, 1, 25)
+        result = regr.interpolate_regressors(regressors, source_timestamps, target_timestamps)
+        assert result.shape == (25, 2)
+
+    def test_matches_linear_interpolation(self):
+        source_timestamps = np.array([0.0, 1.0, 2.0, 3.0])
+        regressors = np.array([[0.0], [10.0], [20.0], [30.0]])
+        target_timestamps = np.array([0.5, 1.5, 2.5])
+        result = regr.interpolate_regressors(regressors, source_timestamps, target_timestamps)
+        np.testing.assert_allclose(result, [[5.0], [15.0], [25.0]])
+
+    def test_clamps_out_of_range_targets(self):
+        source_timestamps = np.array([1.0, 2.0, 3.0])
+        regressors = np.array([[10.0], [20.0], [30.0]])
+        target_timestamps = np.array([-5.0, 10.0])
+        result = regr.interpolate_regressors(regressors, source_timestamps, target_timestamps)
+        np.testing.assert_allclose(result, [[10.0], [30.0]])
+
+
+# ---------------------------------------------------------------------------
+# regression.append_nuisance_regressors
+# ---------------------------------------------------------------------------
+
+
+class TestAppendNuisanceRegressors:
+    def test_output_shape_and_labels(self):
+        regressors = np.random.default_rng(0).normal(size=(20, 2))
+        nuisance = np.random.default_rng(1).normal(size=(20, 3))
+        combined, labels = regr.append_nuisance_regressors(regressors, ["a", "b"], nuisance, ["n1", "n2", "n3"])
+        assert combined.shape == (20, 5)
+        assert labels == ["a", "b", "n1", "n2", "n3"]
+
+    def test_zscores_nuisance_columns_by_default(self):
+        regressors = np.zeros((20, 1))
+        nuisance = np.random.default_rng(0).normal(loc=100, scale=10, size=(20, 2))
+        combined, _ = regr.append_nuisance_regressors(regressors, ["a"], nuisance, ["n1", "n2"])
+        appended = combined[:, 1:]
+        np.testing.assert_allclose(appended.mean(axis=0), 0, atol=1e-10)
+        np.testing.assert_allclose(appended.std(axis=0), 1, atol=1e-10)
+
+    def test_zscore_false_leaves_nuisance_raw(self):
+        regressors = np.zeros((20, 1))
+        nuisance = np.random.default_rng(0).normal(loc=100, scale=10, size=(20, 2))
+        combined, _ = regr.append_nuisance_regressors(regressors, ["a"], nuisance, ["n1", "n2"], zscore=False)
+        np.testing.assert_allclose(combined[:, 1:], nuisance)
+
+    def test_leaves_original_regressors_untouched(self):
+        regressors = np.random.default_rng(0).normal(size=(20, 1))
+        nuisance = np.random.default_rng(1).normal(loc=100, scale=10, size=(20, 1))
+        combined, _ = regr.append_nuisance_regressors(regressors, ["a"], nuisance, ["n1"])
+        np.testing.assert_allclose(combined[:, :1], regressors)
+
+    def test_raises_on_sample_count_mismatch(self):
+        regressors = np.zeros((20, 1))
+        nuisance = np.zeros((10, 1))
+        with pytest.raises(ValueError, match="samples"):
+            regr.append_nuisance_regressors(regressors, ["a"], nuisance, ["n1"])
+
+    def test_raises_on_duplicate_labels(self):
+        regressors = np.zeros((20, 1))
+        nuisance = np.zeros((20, 1))
+        with pytest.raises(ValueError, match="duplicate"):
+            regr.append_nuisance_regressors(regressors, ["a"], nuisance, ["a"])
+
+
+# ---------------------------------------------------------------------------
+# io.read_nuisance_regressors
+# ---------------------------------------------------------------------------
+
+
+class TestReadNuisanceRegressors:
+    def test_reads_hdf5(self, nuisance_regressor_h5):
+        regressors, labels, timestamps = io.read_nuisance_regressors(nuisance_regressor_h5)
+        assert regressors.shape == (50, 2)
+        assert labels == ["motion_a", "motion_b"]
+        assert timestamps.shape == (50,)
+
+    def test_reads_npz(self, nuisance_regressor_npz):
+        regressors, labels, timestamps = io.read_nuisance_regressors(nuisance_regressor_npz)
+        assert regressors.shape == (50, 2)
+        assert labels == ["pupil_a", "pupil_b"]
+        assert timestamps.shape == (50,)
+
+    def test_raises_on_unsupported_format(self, tmp_path):
+        path = tmp_path / "nuisance.txt"
+        path.touch()
+        with pytest.raises(ValueError, match="Unsupported"):
+            io.read_nuisance_regressors(str(path))
+
+
+# ---------------------------------------------------------------------------
 # CLI commands
 # ---------------------------------------------------------------------------
 
@@ -375,6 +537,85 @@ def test_regression_cmd_not_fast(preproc_h5, regressor_npz, output_dir):
 
     outpath = pathlib.Path(output_dir) / "preproc_regression.npz"
     assert outpath.is_file()
+
+
+def test_regression_cmd_with_nuisance_regressors(preproc_h5, regressor_npz, nuisance_regressor_h5, output_dir):
+    """Nuisance regressors from an external file should be interpolated, z-scored, and appended."""
+    runner = CliRunner()
+    result = runner.invoke(
+        mesoscopy.cli,
+        args=f"process regression {preproc_h5} {regressor_npz} -o {output_dir} --fast -n {nuisance_regressor_h5}",
+    )
+    assert result.exit_code == 0
+    assert "Added nuisance regressors: ['motion_a', 'motion_b']" in result.output
+
+    outpath = pathlib.Path(output_dir) / "preproc_regression.npz"
+    assert outpath.is_file()
+
+    with np.load(outpath, allow_pickle=True) as f:
+        # 3 task regressors (reg_a/b/c) + 2 nuisance regressors (motion_a/b).
+        assert f["coefficients"].shape == (5, 40, 40)
+        assert list(f["labels"])[-2:] == ["motion_a", "motion_b"]
+
+
+def test_regression_cmd_with_multiple_nuisance_regressor_files(
+    preproc_h5, regressor_npz, nuisance_regressor_h5, nuisance_regressor_npz, output_dir
+):
+    """Passing -n multiple times should combine nuisance regressors from every file."""
+    runner = CliRunner()
+    result = runner.invoke(
+        mesoscopy.cli,
+        args=(
+            f"process regression {preproc_h5} {regressor_npz} -o {output_dir} --fast"
+            f" -n {nuisance_regressor_h5} -n {nuisance_regressor_npz}"
+        ),
+    )
+    assert result.exit_code == 0
+
+    outpath = pathlib.Path(output_dir) / "preproc_regression.npz"
+    with np.load(outpath, allow_pickle=True) as f:
+        # 3 task regressors + 2 nuisance regressors from each of the two files.
+        assert f["coefficients"].shape == (7, 40, 40)
+
+
+def test_regression_cmd_with_nuisance_regressors_and_trial_idx(
+    preproc_h5, regressor_h5, nuisance_regressor_h5, output_dir
+):
+    """Nuisance regressors should be interpolated onto the full recording, then subset by trial_idx to match the
+    (already trial_idx-subset) task regressor matrix."""
+    runner = CliRunner()
+    result = runner.invoke(
+        mesoscopy.cli,
+        args=f"process regression {preproc_h5} {regressor_h5} -o {output_dir} --fast --h5 -n {nuisance_regressor_h5}",
+    )
+    assert result.exit_code == 0
+
+    outpath = pathlib.Path(output_dir) / "preproc_regression.h5"
+    result_h5 = io.read_h5(str(outpath))
+    assert result_h5["/coefficients"].shape == (5, 40, 40)
+    assert result_h5["/trial_idx"].shape == (300,)
+
+
+def test_regression_cmd_with_nuisance_regressors_iso_timestamps(
+    preproc_h5_bytes_timestamps, regressor_npz, nuisance_regressor_h5, output_dir
+):
+    """Real preprocessed recordings store /timestamps as ISO-8601 byte strings, not the plain floats used by the
+    `preproc_h5` fixture -- make sure nuisance regressor alignment handles that format too."""
+    runner = CliRunner()
+    result = runner.invoke(
+        mesoscopy.cli,
+        args=(
+            f"process regression {preproc_h5_bytes_timestamps} {regressor_npz} -o {output_dir} --fast"
+            f" -n {nuisance_regressor_h5}"
+        ),
+    )
+    assert result.exit_code == 0
+
+    outpath = pathlib.Path(output_dir) / "preproc_bytes_regression.npz"
+    assert outpath.is_file()
+
+    with np.load(outpath, allow_pickle=True) as f:
+        assert f["coefficients"].shape == (5, 40, 40)
 
 
 # ---------------------------------------------------------------------------

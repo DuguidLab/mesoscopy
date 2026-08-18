@@ -261,6 +261,62 @@ def _read_hdf5_regressors(path: str) -> tuple[np.ndarray, list[str], np.ndarray]
     return regressors, labels, trial_indices
 
 
+def read_nuisance_regressors(path: str) -> tuple[np.ndarray, list[str], np.ndarray]:
+    """Read an external nuisance regressor file in NPZ or HDF5 format.
+
+    Args:
+        path (str): Path to the nuisance regressor file.
+
+    Returns:
+        tuple[np.ndarray, list[str], np.ndarray]: Nuisance regressor matrix of shape (n_samples, n_regressors),
+        list of regressor labels, and the timestamps (n_samples,) the regressors were recorded at.
+
+    Raises:
+        ValueError: If the file format is unsupported.
+    """
+    if path.endswith(".npz"):
+        return _read_npz_nuisance_regressors(path)
+    if path.endswith(".h5"):
+        return _read_hdf5_nuisance_regressors(path)
+    msg = "Unsupported file format."
+    raise ValueError(msg)
+
+
+def _read_npz_nuisance_regressors(path: str) -> tuple[np.ndarray, list[str], np.ndarray]:
+    """Read a nuisance regressor file in NPZ format.
+
+    Args:
+        path (str): Path to the NPZ file. Every array other than 'timestamps' is treated as a nuisance regressor.
+
+    Returns:
+        tuple[np.ndarray, list[str], np.ndarray]: Nuisance regressor matrix, list of regressor labels, and
+        timestamps.
+    """
+    with np.load(path) as f:
+        labels = sorted(key for key in f.files if key != "timestamps")
+        regressors = np.column_stack([f[label] for label in labels])
+        timestamps = np.array(f["timestamps"])
+    return regressors, labels, timestamps
+
+
+def _read_hdf5_nuisance_regressors(path: str) -> tuple[np.ndarray, list[str], np.ndarray]:
+    """Read a nuisance regressor file in HDF5 format.
+
+    Args:
+        path (str): Path to the HDF5 file. Every dataset other than 'timestamps' is treated as a nuisance
+            regressor.
+
+    Returns:
+        tuple[np.ndarray, list[str], np.ndarray]: Nuisance regressor matrix, list of regressor labels, and
+        timestamps.
+    """
+    with h5py.File(path, "r") as f:
+        labels = sorted(key for key in f if key != "timestamps")
+        regressors = np.column_stack([f[label][:] for label in labels])
+        timestamps = np.array(f["timestamps"][:])
+    return regressors, labels, timestamps
+
+
 def _read_fiji_points(path: str) -> dict[str, tuple[float, float]]:
     """Read a FIJI landmark points file.
 

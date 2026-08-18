@@ -19,6 +19,8 @@
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
 
+from datetime import datetime
+
 import numpy as np
 from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_squared_error
@@ -110,6 +112,100 @@ def ridge_regression_fast(deltaf_series: np.ndarray, regressors: np.ndarray, alp
     mse = mse.reshape(pixel_shape)
 
     return coefficients, r2, mse
+
+
+def elapsed_seconds(timestamps: np.ndarray) -> np.ndarray:
+    """Convert a timestamps array to elapsed seconds since its own first sample.
+
+    Handles both already-numeric timestamps (e.g. from a synthetic/plain-float recording) and the ISO-8601
+    byte/string timestamps written by mesoscopy's own preprocessing stage (the ``/timestamps`` dataset in
+    ``*_preprocessed.h5`` files, which is also what ends up linked into NWB output). This lets two
+    independently-timestamped series (e.g. a dF/F recording and an external nuisance regressor file) be
+    interpolated onto a common timebase, on the assumption that both were started at roughly the same moment
+    (e.g. by a shared trigger) -- each is anchored to its own first sample rather than to any shared absolute
+    clock.
+
+    Args:
+        timestamps (np.ndarray): Timestamps, either numeric (seconds) or ISO-8601 byte/str strings.
+
+    Returns:
+        np.ndarray: Elapsed seconds since the first timestamp, as a float array.
+    """
+    timestamps = np.asarray(timestamps)
+    if timestamps.dtype.kind in "SU":
+        parsed = [datetime.fromisoformat(ts.decode("utf-8") if isinstance(ts, bytes) else ts) for ts in timestamps]
+        return np.array([(ts - parsed[0]).total_seconds() for ts in parsed])
+
+    seconds = timestamps.astype(float)
+    return seconds - seconds[0]
+
+
+def interpolate_regressors(
+    regressors: np.ndarray, source_timestamps: np.ndarray, target_timestamps: np.ndarray
+) -> np.ndarray:
+    """Interpolate a regressor matrix from its own timebase onto a target timebase.
+
+    Used to align external nuisance regressors onto  a recording's dF/F timestamps. Interpolation is linear
+    and independent per column; target timestamps outside the range of ``source_timestamps`` are clamped to the nearest
+    edge value (`numpy.interp`'s default behaviour).
+
+    Args:
+        regressors (np.ndarray): Regressor matrix of shape (n_source_samples, n_regressors).
+        source_timestamps (np.ndarray): Timestamps the regressors were recorded at, shape (n_source_samples,).
+        target_timestamps (np.ndarray): Timestamps to interpolate onto, shape (n_target_samples,).
+
+    Returns:
+        np.ndarray: Interpolated regressor matrix of shape (n_target_samples, n_regressors).
+    """
+    return np.column_stack(
+        [np.interp(target_timestamps, source_timestamps, column) for column in regressors.T],
+    )
+
+
+def append_nuisance_regressors(
+    regressors: np.ndarray,
+    labels: list[str],
+    nuisance: np.ndarray,
+    nuisance_labels: list[str],
+    zscore: bool = True,
+) -> tuple[np.ndarray, list[str]]:
+    """Append external nuisance regressors to an existing regressor matrix.
+
+    Args:
+        regressors (np.ndarray): Existing regressor matrix of shape (n_samples, n_regressors).
+        labels (list[str]): Labels of the existing regressors.
+        nuisance (np.ndarray): Nuisance regressor matrix of shape (n_samples, n_nuisance_regressors), already
+            aligned onto the same timebase as ``regressors`` (see :func:`interpolate_regressors`).
+        nuisance_labels (list[str]): Labels of the nuisance regressors.
+        zscore (bool): Whether to z-score each nuisance column (zero mean, unit variance) before appending, so
+            that ridge regularisation isn't skewed by the nuisance regressors' raw scale. Defaults to True.
+
+    Returns:
+        tuple[np.ndarray, list[str]]: Combined regressor matrix, and combined list of labels.
+
+    Raises:
+        ValueError: If the number of samples doesn't match between ``regressors`` and ``nuisance``, or if any
+            nuisance label duplicates an existing label.
+    """
+    if nuisance.shape[0] != regressors.shape[0]:
+        msg = (
+            f"Nuisance regressors have {nuisance.shape[0]} samples, but existing regressors have "
+            f"{regressors.shape[0]} samples."
+        )
+        raise ValueError(msg)
+
+    duplicate_labels = set(labels) & set(nuisance_labels)
+    if duplicate_labels:
+        msg = f"Nuisance regressor labels {sorted(duplicate_labels)} duplicate existing regressor labels."
+        raise ValueError(msg)
+
+    if zscore:
+        nuisance = (nuisance - nuisance.mean(axis=0)) / nuisance.std(axis=0)
+
+    combined_regressors = np.column_stack([regressors, nuisance])
+    combined_labels = [*labels, *nuisance_labels]
+
+    return combined_regressors, combined_labels
 
 
 def _pixel_ridge_regression(deltaf_series: np.ndarray, regressors: np.ndarray) -> np.ndarray:
