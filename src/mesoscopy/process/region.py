@@ -40,6 +40,10 @@ DEFAULT_EXCLUDE = [
     "ORBm1",
 ]
 
+# extract_all_regions works through frames in blocks, so its NaN-aware temporaries stay bounded on long
+# recordings.
+_BLOCK_FRAMES = 1024
+
 
 def extract_region_activity(
     deltaf_series: npt.NDArray, region_acronym: str, hemisphere: Literal["left", "right", "both"]
@@ -55,7 +59,8 @@ def extract_region_activity(
 
     Returns:
         npt.NDArray: A 1D array of shape (time,) representing the mean ∆F/F signal of the specified cortical
-            region over time.
+            region over time. NaN pixels are ignored, so a frame is only NaN if every pixel in the region is
+            NaN in that frame.
 
     Raises:
         ValueError: If the specified region acronym is not recognized or if the hemisphere option is invalid.
@@ -70,17 +75,16 @@ def extract_region_activity(
     left_aba, right_aba = resources.get_atlas()
 
     if hemisphere.lower() == "left":
-        region_mask = np.broadcast_to(left_aba == region_id, deltaf_series.shape)
+        region_mask = left_aba == region_id
     elif hemisphere.lower() == "right":
-        region_mask = np.broadcast_to(right_aba == region_id, deltaf_series.shape)
+        region_mask = right_aba == region_id
     elif hemisphere.lower() == "both":
-        aba = left_aba + right_aba
-        region_mask = np.broadcast_to(aba == region_id, deltaf_series.shape)
+        region_mask = (left_aba + right_aba) == region_id
     else:
         msg = f"Could not recognise hemisphere option {hemisphere}, select left, right or both."
         raise ValueError(msg)
 
-    return np.ma.array(deltaf_series, mask=~region_mask).mean(axis=(1, 2))
+    return np.nanmean(deltaf_series[:, region_mask], axis=1)
 
 
 def extract_all_regions(
@@ -99,7 +103,8 @@ def extract_all_regions(
 
     Returns:
         dict | pd.DataFrame: A dictionary with region acronyms as keys and their mean activity as values,
-            or a DataFrame with columns 'region', 'time_idx', and 'F'.
+            or a DataFrame with columns 'region', 'time_idx', and 'F'. NaN pixels are ignored, so a region is
+            only NaN in a frame if every one of its pixels is NaN there.
     """
     annotations = resources.get_atlas_annotations()
     left_aba, right_aba = resources.get_atlas()
@@ -117,12 +122,9 @@ def extract_all_regions(
     left_masks = np.array([(left_aba == region_ids[r]).ravel() for r in regions])  # (n_regions, H*W)
     right_masks = np.array([(right_aba == region_ids[r]).ravel() for r in regions])
 
-    left_counts = left_masks.sum(axis=1).astype(float)  # (n_regions,)
-    right_counts = right_masks.sum(axis=1).astype(float)
-
     data_flat = deltaf_series.reshape(deltaf_series.shape[0], hw)  # (T, H*W)
-    left_activities = (data_flat @ left_masks.T) / left_counts  # (T, n_regions)
-    right_activities = (data_flat @ right_masks.T) / right_counts
+    left_activities = _region_means(data_flat, left_masks)  # (T, n_regions)
+    right_activities = _region_means(data_flat, right_masks)
 
     region_activity = {}
     for i, region in enumerate(regions):
@@ -189,6 +191,35 @@ def extract_all_masks(
         return df.unstack().reset_index().rename(columns={"level_0": "region", "level_1": "time_idx", 0: "F"})
 
     return mask_activity
+
+
+def _region_means(data_flat: npt.NDArray, masks: npt.NDArray) -> npt.NDArray:
+    """Mean of each region mask per frame, ignoring NaN pixels.
+
+    Args:
+        data_flat (npt.NDArray): A 2D array of shape (time, height * width) of ∆F/F values.
+        masks (npt.NDArray): A 2D boolean array of shape (n_regions, height * width) selecting each region.
+
+    Returns:
+        npt.NDArray: A 2D array of shape (time, n_regions). A region is NaN in a frame if it has no non-NaN
+            pixel in that frame.
+    """
+    dtype = np.promote_types(data_flat.dtype, np.float32)
+    masks_t = masks.T.astype(dtype)  # (H*W, n_regions)
+    activities = np.empty((data_flat.shape[0], masks.shape[0]), dtype=np.float64)
+
+    for start in range(0, data_flat.shape[0], _BLOCK_FRAMES):
+        block = data_flat[start : start + _BLOCK_FRAMES]
+        valid = ~np.isnan(block)
+        # Zeroing the NaNs keeps them out of every region's dot product, not just out of their own.
+        # Some BLAS backends raise spurious FP flags on any matmul, so only the division below is left
+        # to warn, which it does when a region has no valid pixel in a frame.
+        with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
+            sums = np.where(valid, block, 0) @ masks_t
+            counts = (valid.astype(dtype) @ masks_t).astype(np.float64)
+        activities[start : start + _BLOCK_FRAMES] = sums / counts  # a zero count gives NaN
+
+    return activities
 
 
 def _validate_mask(mask: npt.NDArray, frame_shape: tuple[int, ...], name: str | None = None) -> npt.NDArray[np.bool_]:
