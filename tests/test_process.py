@@ -145,6 +145,27 @@ def mock_annotations():
     return pd.DataFrame({"id": [1], "acronym": ["REG1"]})
 
 
+@pytest.fixture
+def mask_npy(tmp_path_factory):
+    """A boolean 40x40 mask file covering the left half of the preproc_h5 fixture's frames."""
+    path = tmp_path_factory.mktemp("masks") / "roi.npy"
+    mask = np.zeros((40, 40), dtype=bool)
+    mask[:, :20] = True
+    np.save(path, mask)
+    return str(path)
+
+
+@pytest.fixture
+def labelled_mask_npy(tmp_path_factory):
+    """A 40x40 label image holding two labelled regions."""
+    path = tmp_path_factory.mktemp("masks") / "labelled.npy"
+    mask = np.zeros((40, 40), dtype=np.uint8)
+    mask[:20] = 1
+    mask[20:] = 2
+    np.save(path, mask)
+    return str(path)
+
+
 # ---------------------------------------------------------------------------
 # smooth.laplace_gaussian
 # ---------------------------------------------------------------------------
@@ -485,6 +506,116 @@ def test_regions_cmd(preproc_h5_bytes_timestamps, output_dir, mock_left_aba, moc
 
     region_activity = pd.read_csv(outpath)
     assert set(region_activity["region"]) == {"L_REG1", "R_REG1"}
+
+
+def test_regions_cmd_mask_only_skips_aba(preproc_h5_bytes_timestamps, output_dir, mask_npy):
+    """A supplied mask replaces the ABA extraction, so no atlas is needed at all."""
+    runner = CliRunner()
+    result = runner.invoke(
+        mesoscopy.cli, args=f"process regions {preproc_h5_bytes_timestamps} -o {output_dir} -m {mask_npy}"
+    )
+    assert result.exit_code == 0
+    assert "Loaded 1 region mask(s): roi" in result.output
+
+    region_activity = pd.read_csv(pathlib.Path(output_dir) / "preproc_bytes_regions.csv")
+    assert set(region_activity["region"]) == {"roi"}
+    assert len(region_activity) == 300
+
+
+def test_regions_cmd_mask_values_match_recording(preproc_h5_bytes_timestamps, output_dir, mask_npy):
+    runner = CliRunner()
+    result = runner.invoke(
+        mesoscopy.cli, args=f"process regions {preproc_h5_bytes_timestamps} -o {output_dir} -m {mask_npy}"
+    )
+    assert result.exit_code == 0
+
+    with h5.File(preproc_h5_bytes_timestamps, "r") as f:
+        expected = f["/F"][:][:, :, :20].mean(axis=(1, 2))
+
+    region_activity = pd.read_csv(pathlib.Path(output_dir) / "preproc_bytes_regions.csv")
+    np.testing.assert_allclose(region_activity["F"].to_numpy(), expected)
+
+
+def test_regions_cmd_labelled_mask_gives_one_region_per_label(
+    preproc_h5_bytes_timestamps, output_dir, labelled_mask_npy
+):
+    runner = CliRunner()
+    result = runner.invoke(
+        mesoscopy.cli, args=f"process regions {preproc_h5_bytes_timestamps} -o {output_dir} -m {labelled_mask_npy}"
+    )
+    assert result.exit_code == 0
+
+    region_activity = pd.read_csv(pathlib.Path(output_dir) / "preproc_bytes_regions.csv")
+    assert set(region_activity["region"]) == {"labelled_1", "labelled_2"}
+
+
+def test_regions_cmd_multiple_masks(preproc_h5_bytes_timestamps, output_dir, mask_npy, labelled_mask_npy):
+    runner = CliRunner()
+    result = runner.invoke(
+        mesoscopy.cli,
+        args=f"process regions {preproc_h5_bytes_timestamps} -o {output_dir} -m {mask_npy} -m {labelled_mask_npy}",
+    )
+    assert result.exit_code == 0
+
+    region_activity = pd.read_csv(pathlib.Path(output_dir) / "preproc_bytes_regions.csv")
+    assert set(region_activity["region"]) == {"roi", "labelled_1", "labelled_2"}
+
+
+def test_regions_cmd_include_aba_with_mask(
+    preproc_h5_bytes_timestamps, output_dir, mask_npy, mock_left_aba, mock_right_aba, mock_annotations
+):
+    runner = CliRunner()
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(mock_left_aba, mock_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=mock_annotations),
+    ):
+        result = runner.invoke(
+            mesoscopy.cli,
+            args=f"process regions {preproc_h5_bytes_timestamps} -o {output_dir} -m {mask_npy} --include-aba",
+        )
+    assert result.exit_code == 0
+
+    region_activity = pd.read_csv(pathlib.Path(output_dir) / "preproc_bytes_regions.csv")
+    assert set(region_activity["region"]) == {"L_REG1", "R_REG1", "roi"}
+
+
+def test_regions_cmd_duplicate_mask_names_error(preproc_h5_bytes_timestamps, output_dir, mask_npy, tmp_path):
+    # A second file with the same stem resolves to the same region name.
+    duplicate = tmp_path / "roi.npy"
+    np.save(duplicate, np.ones((40, 40), dtype=bool))
+
+    runner = CliRunner()
+    result = runner.invoke(
+        mesoscopy.cli,
+        args=f"process regions {preproc_h5_bytes_timestamps} -o {output_dir} -m {mask_npy} -m {duplicate}",
+    )
+    assert result.exit_code != 0
+    assert "already defined by an earlier mask file" in result.output
+    assert not (pathlib.Path(output_dir) / "preproc_bytes_regions.csv").is_file()
+
+
+def test_regions_cmd_mask_shape_mismatch_errors(preproc_h5_bytes_timestamps, output_dir, tmp_path):
+    path = tmp_path / "small.npy"
+    np.save(path, np.ones((20, 20), dtype=bool))
+
+    runner = CliRunner()
+    result = runner.invoke(
+        mesoscopy.cli, args=f"process regions {preproc_h5_bytes_timestamps} -o {output_dir} -m {path}"
+    )
+    assert result.exit_code != 0
+    assert "does not match the recording frame shape" in result.output
+
+
+def test_regions_cmd_unreadable_mask_errors(preproc_h5_bytes_timestamps, output_dir, tmp_path):
+    path = tmp_path / "roi.csv"
+    path.write_text("not,a,mask\n")
+
+    runner = CliRunner()
+    result = runner.invoke(
+        mesoscopy.cli, args=f"process regions {preproc_h5_bytes_timestamps} -o {output_dir} -m {path}"
+    )
+    assert result.exit_code != 0
+    assert "Could not read region masks" in result.output
 
 
 def test_regression_cmd_npz(preproc_h5, regressor_npz, output_dir):
