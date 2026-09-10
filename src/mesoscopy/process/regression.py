@@ -37,7 +37,8 @@ def ridge_regression(deltaf_series: np.ndarray, regressors: np.ndarray) -> tuple
         regressors (np.ndarray): Regressor matrix.
 
     Returns:
-
+        tuple: (coefficients, r2, mse), where coefficients has shape
+        (n_regressors, *pixel_shape), and r2/mse have shape (*pixel_shape,).
     """
     regression_results = np.apply_along_axis(_pixel_ridge_regression, 0, deltaf_series, regressors)
     r2 = regression_results[-2, :]
@@ -82,17 +83,21 @@ def ridge_regression_fast(deltaf_series: np.ndarray, regressors: np.ndarray, alp
     y_centred = y - y_mean
 
     n_regressors = x.shape[1]
-    xtx = x_centred.T @ x_centred
-    gram = xtx.copy()
-    gram.flat[:: n_regressors + 1] += alpha
-    xty = x_centred.T @ y_centred
-    coef = np.linalg.solve(gram, xty)
 
-    # Compute the residual/total sums of squares algebraically instead of forming a full
-    # (n_samples, n_pixels) predictions/residuals array.
-    ss_tot = np.einsum("tp,tp->p", y_centred, y_centred)
-    cross_term = np.einsum("fp,fp->p", coef, xty)
-    pred_sq = np.einsum("fp,fp->p", coef, xtx @ coef)
+    # Some BLAS backends raise spurious FP flags on matmul, quiet them.
+    with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
+        xtx = x_centred.T @ x_centred
+        gram = xtx.copy()
+        gram.flat[:: n_regressors + 1] += alpha
+        xty = x_centred.T @ y_centred
+        coef = np.linalg.solve(gram, xty)
+
+        # Compute the residual/total sums of squares algebraically instead of forming a full
+        # (n_samples, n_pixels) predictions/residuals array.
+        ss_tot = np.einsum("tp,tp->p", y_centred, y_centred)
+        cross_term = np.einsum("fp,fp->p", coef, xty)
+        pred_sq = np.einsum("fp,fp->p", coef, xtx @ coef)
+
     # Clip tiny negative values arising from floating point cancellation.
     ss_res = np.clip(ss_tot - 2 * cross_term + pred_sq, 0, None)
 
