@@ -887,6 +887,48 @@ def test_extract_region_activity_invalid_hemisphere_raises(
             extract_region_activity(region_deltaf_series, "REG1", "bilateral")
 
 
+def test_extract_region_activity_unknown_acronym_raises(
+    region_left_aba, region_right_aba, region_annotations, region_deltaf_series
+):
+    """An unrecognised acronym is a ValueError naming it, not an IndexError from the id lookup."""
+    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
+         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+        with pytest.raises(ValueError, match="REG3 not recognised"):
+            extract_region_activity(region_deltaf_series, "REG3", "left")
+
+
+def test_extract_region_activity_unknown_acronym_suggests_close_matches(
+    region_left_aba, region_right_aba, region_annotations, region_deltaf_series
+):
+    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
+         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+        with pytest.raises(ValueError, match="Closest matches") as excinfo:
+            extract_region_activity(region_deltaf_series, "REG3", "left")
+    assert "REG1" in str(excinfo.value)
+
+
+def test_extract_region_activity_close_match_suggestion_ignores_case(
+    region_left_aba, region_right_aba, region_annotations, region_deltaf_series
+):
+    """Lookup stays case-sensitive, but the suggestion ignores case."""
+    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
+         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+        with pytest.raises(ValueError, match="Closest matches") as excinfo:
+            extract_region_activity(region_deltaf_series, "reg1", "left")
+    assert "REG1" in str(excinfo.value)
+
+
+def test_extract_region_activity_unknown_acronym_without_close_match(
+    region_left_aba, region_right_aba, region_annotations, region_deltaf_series
+):
+    """Nothing similar in the atlas means no misleading suggestion."""
+    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
+         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+        with pytest.raises(ValueError, match="not recognised") as excinfo:
+            extract_region_activity(region_deltaf_series, "zzzz", "left")
+    assert "Closest matches" not in str(excinfo.value)
+
+
 def test_extract_region_activity_hemisphere_argument_case_insensitive(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
