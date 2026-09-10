@@ -9,6 +9,10 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 - `-m`/`--mask` option to `process regions` for extracting ΔF/F activity from custom region masks (NPY, NPZ or TIFF) drawn in registered frame coordinates; boolean masks give one region, integer-labelled masks one region per label, and masks are used as drawn rather than mirrored across hemispheres. Supplying a mask replaces the ABA extraction unless `--include-aba` is given, and may be passed multiple times ([#108](https://github.com/DuguidLab/mesoscopy/issues/108)).
 - `extract_mask_activity` and `extract_all_masks` in `process.region` for extracting mean ΔF/F from custom masks, ignoring NaN pixels, plus `io.read_mask` for loading masks from NPY, NPZ or TIFF files ([#108](https://github.com/DuguidLab/mesoscopy/issues/108)).
 
+### Fixed
+
+- ABA region extraction in `process.region` was not NaN-aware. In `extract_all_regions` a single NaN pixel nulled every region's trace for that frame, including regions not containing it, because the masks are applied by matmul and `NaN * 0` is `NaN`. `extract_region_activity` returned a fully masked array if any pixel in the region was NaN, and returned a `MaskedArray` rather than the `ndarray` it is annotated to return. Both now ignore NaN pixels, matching `extract_mask_activity`, and a region is only NaN in a frame if it has no non-NaN pixel there ([#115](https://github.com/DuguidLab/mesoscopy/issues/115)).
+
 ## [0.9.1] - 2026-08-18
 
 ### Added
