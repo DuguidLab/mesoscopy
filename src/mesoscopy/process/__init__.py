@@ -160,11 +160,54 @@ def zscore_cmd(path: str, out_dir: str) -> None:
     default="./",
     help="Output directory for smoothed recording.",
 )
-def regions_cmd(path: str, out_dir: str) -> None:
-    """Extract ∆F signal averages from ABA-defined regions."""
+@click.option(
+    "-m",
+    "--mask",
+    "mask_paths",
+    type=click.Path(exists=True),
+    multiple=True,
+    help=(
+        "Path to a custom region mask file (NPY, NPZ or TIFF), drawn in registered frame coordinates. A boolean mask"
+        " is extracted as a single region, named after the file (or, for NPZ files, after each key); an"
+        " integer-labelled mask is extracted as one region per label, named '<name>_<label>'. Masks are used as"
+        " drawn and are not mirrored across hemispheres. May be passed multiple times to combine masks from several"
+        " files. Supplying a mask replaces the ABA region extraction unless --include-aba is given."
+    ),
+)
+@click.option(
+    "--include-aba",
+    is_flag=True,
+    default=False,
+    help="Extract ABA-defined regions alongside any custom masks. Has no effect if no mask is supplied.",
+)
+# A click command's docstring doubles as its --help text, so it deliberately carries no Raises: section.
+def regions_cmd(path: str, out_dir: str, mask_paths: tuple[str, ...], include_aba: bool) -> None:
+    """Extract ∆F signal averages from ABA-defined regions, custom region masks, or both."""  # noqa: DOC501
     if not Path(out_dir).exists():
         click.echo(f"Creating output directory {out_dir}...")
         Path(out_dir).mkdir(parents=True)
+
+    masks: dict[str, np.ndarray] = {}
+    for mask_path in mask_paths:
+        click.echo(f"Loading region masks from {mask_path}...")
+        try:
+            file_masks = io.read_mask(mask_path)
+        except ValueError as err:
+            msg = f"Could not read region masks from {mask_path}: {err}"
+            raise click.ClickException(msg) from err
+
+        duplicates = [name for name in file_masks if name in masks]
+        if duplicates:
+            msg = (
+                f"Region name(s) {', '.join(duplicates)} from {mask_path} are already defined by an earlier mask"
+                " file. Rename the mask file, or its NPZ keys, so that every region name is unique."
+            )
+            raise click.ClickException(msg)
+
+        masks.update(file_masks)
+
+    if masks:
+        click.echo(f"Loaded {len(masks)} region mask(s): {', '.join(masks)}")
 
     click.echo(f"Loading preprocessed recording from {path}...")
     # Determine whether we're working with an NWB file
@@ -174,7 +217,18 @@ def regions_cmd(path: str, out_dir: str) -> None:
     outpath = out_dir + os.sep + session_id + "_regions.csv"
 
     with timer.Timer(message="Extracting region activity"):
-        region_activity = pd.DataFrame(pr.extract_all_regions(deltaf_series, as_dataframe=True))
+        activity = []
+        # Custom masks stand in for the ABA regions unless the ABA regions are explicitly asked for as well.
+        if include_aba or not masks:
+            activity.append(pd.DataFrame(pr.extract_all_regions(deltaf_series, as_dataframe=True)))
+        if masks:
+            try:
+                activity.append(pd.DataFrame(pr.extract_all_masks(deltaf_series, masks, as_dataframe=True)))
+            except ValueError as err:
+                msg = str(err)
+                raise click.ClickException(msg) from err
+
+        region_activity = pd.concat(activity, ignore_index=True)
         region_activity["time_idx"] = [
             str(timestamp, encoding="utf-8") for timestamp in timestamps[region_activity["time_idx"]]
         ]

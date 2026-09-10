@@ -21,8 +21,10 @@
 import csv
 import typing
 from collections import OrderedDict
+from pathlib import Path
 
 import h5py
+import imageio.v2 as iio
 import numpy as np
 import numpy.typing as npt
 import xmltodict
@@ -30,6 +32,9 @@ import zarr
 from dask import array as da
 from pynwb import NWBHDF5IO
 from pynwb import NWBFile
+
+# Region masks are 2D (height, width) arrays, matching a single recording frame.
+_MASK_NDIM = 2
 
 
 @typing.overload
@@ -366,3 +371,85 @@ def write_points(path: str, points: dict[str, tuple[float, float]]) -> None:
         csv_writer.writeheader()
         for landmark, (x, y) in points.items():
             csv_writer.writerow({"landmark": landmark, "x": x, "y": y})
+
+
+def read_mask(path: str) -> dict[str, npt.NDArray[np.bool_]]:
+    """Read one or more custom region masks from an NPY, NPZ or TIFF file.
+
+    Masks are 2D arrays matching the frame shape of the recording they are applied to. A boolean or integer mask is read
+    as a single region, named after the NPZ key or, for NPY and TIFF files, the file stem. An integer mask holding
+    distinct non-zero values is read as one region per label, named `<name>_<label>`.
+
+    Args:
+        path (str): Path to the mask file. NPZ files may hold several masks, one per key.
+
+    Returns:
+        dict[str, npt.NDArray[np.bool_]]: Dictionary with the region names as keys and their boolean masks as values.
+
+    Raises:
+        ValueError: If the file format is unsupported, a mask is not 2D, a non-integer mask holds values other than
+            0 and 1, or two masks in the file resolve to the same name.
+
+    Example:
+        >>> read_mask("barrel_cortex.npy")
+        {'barrel_cortex': array([[False, ...]])}
+    """
+    if path.endswith(".npy"):
+        arrays = {Path(path).stem: np.load(path)}
+    elif path.endswith(".npz"):
+        with np.load(path) as f:
+            arrays = {name: f[name] for name in f.files}
+    elif path.endswith((".tif", ".tiff")):
+        arrays = {Path(path).stem: np.asarray(iio.imread(path))}
+    else:
+        msg = "Unsupported file format."
+        raise ValueError(msg)
+
+    masks: dict[str, npt.NDArray[np.bool_]] = {}
+    for name, array in arrays.items():
+        for mask_name, mask in _split_mask_labels(array, name).items():
+            if mask_name in masks:
+                msg = f"Mask name {mask_name} occurs more than once in {path}."
+                raise ValueError(msg)
+            masks[mask_name] = mask
+
+    return masks
+
+
+def _split_mask_labels(array: npt.ArrayLike, name: str) -> dict[str, npt.NDArray[np.bool_]]:
+    """Split a mask array into one boolean mask per label.
+
+    Args:
+        array (npt.ArrayLike): 2D mask array, either boolean or holding one distinct non-zero value per region.
+        name (str): Base name of the mask. Used as-is for single-region masks, and as the `<name>_<label>` prefix
+            for masks holding several labels.
+
+    Returns:
+        dict[str, npt.NDArray[np.bool_]]: Dictionary with the region names as keys and their boolean masks as values.
+
+    Raises:
+        ValueError: If the array is not 2D, or is neither boolean nor integer while holding values other than 0 and 1.
+    """
+    array = np.asarray(array)
+
+    if array.ndim != _MASK_NDIM:
+        msg = f"Mask {name} must be a 2D array, got shape {array.shape}."
+        raise ValueError(msg)
+
+    if array.dtype == bool:
+        return {name: array}
+
+    labels = np.unique(array[array != 0])
+
+    # Only integer masks carry region labels -- anything else has to be a plain 0/1 mask to be unambiguous.
+    if not np.issubdtype(array.dtype, np.integer) and not np.all(labels == 1):
+        msg = (
+            f"Mask {name} has dtype {array.dtype} and holds values other than 0 and 1. Only boolean or"
+            " integer-labelled masks can be read."
+        )
+        raise ValueError(msg)
+
+    if labels.size <= 1:
+        return {name: array != 0}
+
+    return {f"{name}_{int(label)}": array == label for label in labels}

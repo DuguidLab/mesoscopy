@@ -1,4 +1,5 @@
 import pathlib
+import warnings
 from datetime import datetime
 from datetime import timedelta
 from unittest.mock import patch
@@ -17,7 +18,9 @@ from mesoscopy.process import regression as regr
 from mesoscopy.process import smooth
 from mesoscopy.process import zscore
 from mesoscopy.process.region import DEFAULT_EXCLUDE
+from mesoscopy.process.region import extract_all_masks
 from mesoscopy.process.region import extract_all_regions
+from mesoscopy.process.region import extract_mask_activity
 from mesoscopy.process.region import extract_region_activity
 
 # ---------------------------------------------------------------------------
@@ -140,6 +143,27 @@ def mock_right_aba(mock_left_aba):
 @pytest.fixture
 def mock_annotations():
     return pd.DataFrame({"id": [1], "acronym": ["REG1"]})
+
+
+@pytest.fixture
+def mask_npy(tmp_path_factory):
+    """A boolean 40x40 mask file covering the left half of the preproc_h5 fixture's frames."""
+    path = tmp_path_factory.mktemp("masks") / "roi.npy"
+    mask = np.zeros((40, 40), dtype=bool)
+    mask[:, :20] = True
+    np.save(path, mask)
+    return str(path)
+
+
+@pytest.fixture
+def labelled_mask_npy(tmp_path_factory):
+    """A 40x40 label image holding two labelled regions."""
+    path = tmp_path_factory.mktemp("masks") / "labelled.npy"
+    mask = np.zeros((40, 40), dtype=np.uint8)
+    mask[:20] = 1
+    mask[20:] = 2
+    np.save(path, mask)
+    return str(path)
 
 
 # ---------------------------------------------------------------------------
@@ -482,6 +506,116 @@ def test_regions_cmd(preproc_h5_bytes_timestamps, output_dir, mock_left_aba, moc
 
     region_activity = pd.read_csv(outpath)
     assert set(region_activity["region"]) == {"L_REG1", "R_REG1"}
+
+
+def test_regions_cmd_mask_only_skips_aba(preproc_h5_bytes_timestamps, output_dir, mask_npy):
+    """A supplied mask replaces the ABA extraction, so no atlas is needed at all."""
+    runner = CliRunner()
+    result = runner.invoke(
+        mesoscopy.cli, args=f"process regions {preproc_h5_bytes_timestamps} -o {output_dir} -m {mask_npy}"
+    )
+    assert result.exit_code == 0
+    assert "Loaded 1 region mask(s): roi" in result.output
+
+    region_activity = pd.read_csv(pathlib.Path(output_dir) / "preproc_bytes_regions.csv")
+    assert set(region_activity["region"]) == {"roi"}
+    assert len(region_activity) == 300
+
+
+def test_regions_cmd_mask_values_match_recording(preproc_h5_bytes_timestamps, output_dir, mask_npy):
+    runner = CliRunner()
+    result = runner.invoke(
+        mesoscopy.cli, args=f"process regions {preproc_h5_bytes_timestamps} -o {output_dir} -m {mask_npy}"
+    )
+    assert result.exit_code == 0
+
+    with h5.File(preproc_h5_bytes_timestamps, "r") as f:
+        expected = f["/F"][:][:, :, :20].mean(axis=(1, 2))
+
+    region_activity = pd.read_csv(pathlib.Path(output_dir) / "preproc_bytes_regions.csv")
+    np.testing.assert_allclose(region_activity["F"].to_numpy(), expected)
+
+
+def test_regions_cmd_labelled_mask_gives_one_region_per_label(
+    preproc_h5_bytes_timestamps, output_dir, labelled_mask_npy
+):
+    runner = CliRunner()
+    result = runner.invoke(
+        mesoscopy.cli, args=f"process regions {preproc_h5_bytes_timestamps} -o {output_dir} -m {labelled_mask_npy}"
+    )
+    assert result.exit_code == 0
+
+    region_activity = pd.read_csv(pathlib.Path(output_dir) / "preproc_bytes_regions.csv")
+    assert set(region_activity["region"]) == {"labelled_1", "labelled_2"}
+
+
+def test_regions_cmd_multiple_masks(preproc_h5_bytes_timestamps, output_dir, mask_npy, labelled_mask_npy):
+    runner = CliRunner()
+    result = runner.invoke(
+        mesoscopy.cli,
+        args=f"process regions {preproc_h5_bytes_timestamps} -o {output_dir} -m {mask_npy} -m {labelled_mask_npy}",
+    )
+    assert result.exit_code == 0
+
+    region_activity = pd.read_csv(pathlib.Path(output_dir) / "preproc_bytes_regions.csv")
+    assert set(region_activity["region"]) == {"roi", "labelled_1", "labelled_2"}
+
+
+def test_regions_cmd_include_aba_with_mask(
+    preproc_h5_bytes_timestamps, output_dir, mask_npy, mock_left_aba, mock_right_aba, mock_annotations
+):
+    runner = CliRunner()
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(mock_left_aba, mock_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=mock_annotations),
+    ):
+        result = runner.invoke(
+            mesoscopy.cli,
+            args=f"process regions {preproc_h5_bytes_timestamps} -o {output_dir} -m {mask_npy} --include-aba",
+        )
+    assert result.exit_code == 0
+
+    region_activity = pd.read_csv(pathlib.Path(output_dir) / "preproc_bytes_regions.csv")
+    assert set(region_activity["region"]) == {"L_REG1", "R_REG1", "roi"}
+
+
+def test_regions_cmd_duplicate_mask_names_error(preproc_h5_bytes_timestamps, output_dir, mask_npy, tmp_path):
+    # A second file with the same stem resolves to the same region name.
+    duplicate = tmp_path / "roi.npy"
+    np.save(duplicate, np.ones((40, 40), dtype=bool))
+
+    runner = CliRunner()
+    result = runner.invoke(
+        mesoscopy.cli,
+        args=f"process regions {preproc_h5_bytes_timestamps} -o {output_dir} -m {mask_npy} -m {duplicate}",
+    )
+    assert result.exit_code != 0
+    assert "already defined by an earlier mask file" in result.output
+    assert not (pathlib.Path(output_dir) / "preproc_bytes_regions.csv").is_file()
+
+
+def test_regions_cmd_mask_shape_mismatch_errors(preproc_h5_bytes_timestamps, output_dir, tmp_path):
+    path = tmp_path / "small.npy"
+    np.save(path, np.ones((20, 20), dtype=bool))
+
+    runner = CliRunner()
+    result = runner.invoke(
+        mesoscopy.cli, args=f"process regions {preproc_h5_bytes_timestamps} -o {output_dir} -m {path}"
+    )
+    assert result.exit_code != 0
+    assert "does not match the recording frame shape" in result.output
+
+
+def test_regions_cmd_unreadable_mask_errors(preproc_h5_bytes_timestamps, output_dir, tmp_path):
+    path = tmp_path / "roi.csv"
+    path.write_text("not,a,mask\n")
+
+    runner = CliRunner()
+    result = runner.invoke(
+        mesoscopy.cli, args=f"process regions {preproc_h5_bytes_timestamps} -o {output_dir} -m {path}"
+    )
+    assert result.exit_code != 0
+    assert "Could not read region masks" in result.output
 
 
 def test_regression_cmd_npz(preproc_h5, regressor_npz, output_dir):
@@ -863,3 +997,122 @@ def test_extract_all_regions_values_match_extract_region_activity(
         single_right = extract_region_activity(region_deltaf_series, "REG2", "right")
     np.testing.assert_allclose(all_regions["L_REG2"], single_left)
     np.testing.assert_allclose(all_regions["R_REG2"], single_right)
+
+
+# ---------------------------------------------------------------------------
+# region.extract_mask_activity / region.extract_all_masks
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def custom_mask():
+    """A 6x6 boolean mask covering rows 0-1, cols 0-2 -- the same pixels as REG1 in the left mock atlas."""
+    mask = np.zeros((_ATLAS_H, _ATLAS_W), dtype=bool)
+    mask[0:2, 0:3] = True
+    return mask
+
+
+@pytest.fixture
+def custom_masks(custom_mask):
+    """Two non-overlapping boolean masks, as returned by io.read_mask."""
+    second = np.zeros((_ATLAS_H, _ATLAS_W), dtype=bool)
+    second[4:6, 3:6] = True
+    return {"roi_1": custom_mask, "roi_2": second}
+
+
+def test_extract_mask_activity_shape(region_deltaf_series, custom_mask):
+    result = extract_mask_activity(region_deltaf_series, custom_mask)
+    assert result.shape == (_N_FRAMES,)
+
+
+def test_extract_mask_activity_values(region_deltaf_series, custom_mask):
+    expected = region_deltaf_series[:, 0:2, 0:3].mean(axis=(1, 2))
+    result = extract_mask_activity(region_deltaf_series, custom_mask)
+    np.testing.assert_allclose(result, expected)
+
+
+def test_extract_mask_activity_accepts_non_boolean_mask(region_deltaf_series, custom_mask):
+    result = extract_mask_activity(region_deltaf_series, custom_mask.astype(np.uint8))
+    np.testing.assert_allclose(result, extract_mask_activity(region_deltaf_series, custom_mask))
+
+
+def test_extract_mask_activity_is_not_mirrored_across_hemispheres(region_deltaf_series, custom_mask):
+    """Unlike the ABA path, a custom mask is used as drawn -- the mirrored pixels must not contribute."""
+    mirrored = extract_mask_activity(region_deltaf_series, np.flip(custom_mask, axis=1))
+    result = extract_mask_activity(region_deltaf_series, custom_mask)
+    assert not np.allclose(result, mirrored)
+
+
+def test_extract_mask_activity_matches_aba_extraction(
+    region_left_aba, region_right_aba, region_annotations, region_deltaf_series
+):
+    """A mask drawn over an ABA region should give the same trace as extracting that region."""
+    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
+         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+        aba = extract_region_activity(region_deltaf_series, "REG2", "left")
+    result = extract_mask_activity(region_deltaf_series, region_left_aba == 2)
+    np.testing.assert_allclose(result, aba)
+
+
+def test_extract_mask_activity_ignores_nan_pixels(region_deltaf_series, custom_mask):
+    series = region_deltaf_series.copy()
+    series[:, 0, 0] = np.nan
+    expected = np.nanmean(series[:, 0:2, 0:3].reshape(_N_FRAMES, -1), axis=1)
+
+    result = extract_mask_activity(series, custom_mask)
+
+    assert not np.isnan(result).any()
+    np.testing.assert_allclose(result, expected)
+
+
+def test_extract_mask_activity_all_nan_frame_is_nan(region_deltaf_series, custom_mask):
+    series = region_deltaf_series.copy()
+    series[0, 0:2, 0:3] = np.nan
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        result = extract_mask_activity(series, custom_mask)
+
+    assert np.isnan(result[0])
+    assert not np.isnan(result[1:]).any()
+
+
+def test_extract_mask_activity_shape_mismatch_raises(region_deltaf_series):
+    with pytest.raises(ValueError, match="does not match the recording frame shape"):
+        extract_mask_activity(region_deltaf_series, np.ones((3, 3), dtype=bool))
+
+
+def test_extract_mask_activity_empty_mask_raises(region_deltaf_series):
+    with pytest.raises(ValueError, match="does not select any pixels"):
+        extract_mask_activity(region_deltaf_series, np.zeros((_ATLAS_H, _ATLAS_W), dtype=bool))
+
+
+def test_extract_all_masks_returns_dict_keyed_by_mask_name(region_deltaf_series, custom_masks):
+    result = extract_all_masks(region_deltaf_series, custom_masks)
+    assert isinstance(result, dict)
+    assert list(result) == ["roi_1", "roi_2"]
+    assert all(trace.shape == (_N_FRAMES,) for trace in result.values())
+
+
+def test_extract_all_masks_values_match_extract_mask_activity(region_deltaf_series, custom_masks):
+    result = extract_all_masks(region_deltaf_series, custom_masks)
+    for name, mask in custom_masks.items():
+        np.testing.assert_allclose(result[name], extract_mask_activity(region_deltaf_series, mask))
+
+
+def test_extract_all_masks_as_dataframe(region_deltaf_series, custom_masks):
+    df = extract_all_masks(region_deltaf_series, custom_masks, as_dataframe=True)
+    assert isinstance(df, pd.DataFrame)
+    assert list(df.columns) == ["region", "time_idx", "F"]
+    assert set(df["region"]) == {"roi_1", "roi_2"}
+    assert len(df) == len(custom_masks) * _N_FRAMES
+
+
+def test_extract_all_masks_error_names_the_offending_mask(region_deltaf_series, custom_mask):
+    masks = {"good": custom_mask, "bad": np.zeros((_ATLAS_H, _ATLAS_W), dtype=bool)}
+    with pytest.raises(ValueError, match="Mask bad does not select any pixels"):
+        extract_all_masks(region_deltaf_series, masks)
+
+
+def test_extract_all_masks_empty_input_returns_empty_dict(region_deltaf_series):
+    assert extract_all_masks(region_deltaf_series, {}) == {}
