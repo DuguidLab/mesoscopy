@@ -114,14 +114,14 @@ def extract_all_regions(
     region_ids = {region: annotations.loc[annotations["acronym"] == region, "id"].values[0] for region in regions}
 
     hw = left_aba.shape[0] * left_aba.shape[1]
-    left_masks = np.array([(left_aba == region_ids[r]).ravel() for r in regions])   # (n_regions, H*W)
+    left_masks = np.array([(left_aba == region_ids[r]).ravel() for r in regions])  # (n_regions, H*W)
     right_masks = np.array([(right_aba == region_ids[r]).ravel() for r in regions])
 
-    left_counts = left_masks.sum(axis=1).astype(float)   # (n_regions,)
+    left_counts = left_masks.sum(axis=1).astype(float)  # (n_regions,)
     right_counts = right_masks.sum(axis=1).astype(float)
 
     data_flat = deltaf_series.reshape(deltaf_series.shape[0], hw)  # (T, H*W)
-    left_activities = (data_flat @ left_masks.T) / left_counts     # (T, n_regions)
+    left_activities = (data_flat @ left_masks.T) / left_counts  # (T, n_regions)
     right_activities = (data_flat @ right_masks.T) / right_counts
 
     region_activity = {}
@@ -134,3 +134,87 @@ def extract_all_regions(
         return df.unstack().reset_index().rename(columns={"level_0": "region", "level_1": "time_idx", 0: "F"})
 
     return region_activity
+
+
+def extract_mask_activity(deltaf_series: npt.NDArray, mask: npt.NDArray) -> npt.NDArray:
+    """Extracts the mean ∆F/F signal of a custom region mask from a registered recording.
+
+    The mask is applied to the recording as drawn, in registered frame coordinates.
+
+    A `ValueError` is raised if the mask does not match the frame shape of the recording, or if it does
+    not select any pixels.
+
+    Args:
+        deltaf_series (npt.NDArray): A 3D array of shape (time, height, width) representing the DeltaF/F signal.
+            Should be registered to the Allen Brain Atlas.
+        mask (npt.NDArray): A 2D array of shape (height, width) selecting the pixels to average over. Non-boolean
+            masks are treated as boolean, with every non-zero pixel counting as part of the region.
+
+    Returns:
+        npt.NDArray: A 1D array of shape (time,) representing the mean ∆F/F signal of the masked region over time.
+            NaN pixels are ignored, so a frame is only NaN if every masked pixel is NaN in that frame.
+    """
+    mask = _validate_mask(mask, deltaf_series.shape[1:])
+    return np.nanmean(deltaf_series[:, mask], axis=1)
+
+
+def extract_all_masks(
+    deltaf_series: npt.NDArray,
+    masks: dict[str, npt.NDArray],
+    as_dataframe: bool = False,
+) -> dict | pd.DataFrame:
+    """Extracts the mean ∆F/F signal of each of a set of custom region masks from a registered recording.
+
+    A `ValueError` is raised if a mask does not match the frame shape of the recording, or if it does not select
+    any pixels.
+
+    Args:
+        deltaf_series (npt.NDArray): A 3D array of shape (time, height, width) representing the DeltaF/F signal.
+        masks (dict[str, npt.NDArray]): A dictionary with region names as keys and their 2D masks as values, as
+            returned by `mesoscopy.io.read_mask`.
+        as_dataframe (bool, optional): If True, returns the result as a pandas DataFrame. Defaults to False.
+
+    Returns:
+        dict | pd.DataFrame: A dictionary with region names as keys and their mean activity as values,
+            or a DataFrame with columns 'region', 'time_idx', and 'F'.
+    """
+    mask_activity = {}
+    for name, mask in masks.items():
+        # Validated here as well as in extract_mask_activity, so that the error names the offending mask.
+        validated = _validate_mask(mask, deltaf_series.shape[1:], name)
+        mask_activity[name] = extract_mask_activity(deltaf_series, validated)
+
+    if as_dataframe:
+        df = pd.DataFrame(mask_activity)
+        return df.unstack().reset_index().rename(columns={"level_0": "region", "level_1": "time_idx", 0: "F"})
+
+    return mask_activity
+
+
+def _validate_mask(mask: npt.NDArray, frame_shape: tuple[int, ...], name: str | None = None) -> npt.NDArray[np.bool_]:
+    """Check a region mask against the frame shape of a recording and return it as a boolean array.
+
+    Args:
+        mask (npt.NDArray): A 2D array selecting the pixels of a region.
+        frame_shape (tuple[int, ...]): Shape of a single recording frame, i.e. (height, width).
+        name (str | None, optional): Name of the mask, used in error messages. Defaults to None.
+
+    Returns:
+        npt.NDArray[np.bool_]: The mask as a boolean array.
+
+    Raises:
+        ValueError: If the mask shape does not match the frame shape, or if the mask does not select any pixels.
+    """
+    label = f"Mask {name}" if name else "Mask"
+    mask = np.asarray(mask)
+
+    if mask.shape != tuple(frame_shape):
+        msg = f"{label} has shape {mask.shape}, which does not match the recording frame shape {tuple(frame_shape)}."
+        raise ValueError(msg)
+
+    mask = mask.astype(bool)
+    if not mask.any():
+        msg = f"{label} does not select any pixels."
+        raise ValueError(msg)
+
+    return mask
