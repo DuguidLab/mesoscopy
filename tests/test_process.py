@@ -768,6 +768,8 @@ def test_regression_cmd_with_nuisance_regressors_iso_timestamps(
 
 _ATLAS_H, _ATLAS_W = 6, 6
 _N_FRAMES = 10
+# Long enough for extract_all_regions to process it as more than one frame block.
+_LONG_N_FRAMES = 2500
 
 
 @pytest.fixture(scope="module")
@@ -787,6 +789,12 @@ def region_right_aba(region_left_aba):
 @pytest.fixture(scope="module")
 def region_annotations():
     return pd.DataFrame({"id": [1, 2, 3], "acronym": ["REG1", "REG2", "FRP1"]})
+
+
+@pytest.fixture(scope="module")
+def region_annotations_with_empty(region_annotations):
+    """Annotations with a region that has no pixels in the mock atlas, as ORBm1 has none in the real one."""
+    return pd.concat([region_annotations, pd.DataFrame({"id": [4], "acronym": ["EMPTY"]})], ignore_index=True)
 
 
 @pytest.fixture(scope="module")
@@ -887,6 +895,62 @@ def test_extract_region_activity_hemisphere_argument_case_insensitive(
         lower = extract_region_activity(region_deltaf_series, "REG1", "left")
         upper = extract_region_activity(region_deltaf_series, "REG1", "LEFT")
     np.testing.assert_allclose(lower, upper)
+
+
+def test_extract_region_activity_returns_plain_ndarray(
+    region_left_aba, region_right_aba, region_annotations, region_deltaf_series
+):
+    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
+         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+        result = extract_region_activity(region_deltaf_series, "REG1", "left")
+    assert not isinstance(result, np.ma.MaskedArray)
+
+
+def test_extract_region_activity_ignores_nan_pixels(
+    region_left_aba, region_right_aba, region_annotations, region_deltaf_series
+):
+    series = region_deltaf_series.copy()
+    series[:, 0, 0] = np.nan
+    expected = np.nanmean(series[:, 0:2, 0:3].reshape(_N_FRAMES, -1), axis=1)
+
+    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
+         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+        result = extract_region_activity(series, "REG1", "left")
+
+    # A MaskedArray result swallows both assertions below, so check the type before comparing values.
+    assert not isinstance(result, np.ma.MaskedArray)
+    assert not np.isnan(result).any()
+    np.testing.assert_allclose(result, expected)
+
+
+def test_extract_region_activity_all_nan_frame_is_nan(
+    region_left_aba, region_right_aba, region_annotations, region_deltaf_series
+):
+    series = region_deltaf_series.copy()
+    series[0, 0:2, 0:3] = np.nan
+
+    with warnings.catch_warnings(), \
+         patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
+         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+        warnings.simplefilter("ignore", RuntimeWarning)
+        result = extract_region_activity(series, "REG1", "left")
+
+    assert np.isnan(result[0])
+    assert not np.isnan(result[1:]).any()
+
+
+def test_extract_region_activity_empty_region_is_nan(
+    region_left_aba, region_right_aba, region_annotations_with_empty, region_deltaf_series
+):
+    """A region with no pixels in the atlas gives NaN rather than raising."""
+    with warnings.catch_warnings(), \
+         patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
+         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations_with_empty):
+        warnings.simplefilter("ignore", RuntimeWarning)
+        result = extract_region_activity(region_deltaf_series, "EMPTY", "left")
+
+    assert result.shape == (_N_FRAMES,)
+    assert np.isnan(result).all()
 
 
 # ---------------------------------------------------------------------------
@@ -997,6 +1061,128 @@ def test_extract_all_regions_values_match_extract_region_activity(
         single_right = extract_region_activity(region_deltaf_series, "REG2", "right")
     np.testing.assert_allclose(all_regions["L_REG2"], single_left)
     np.testing.assert_allclose(all_regions["R_REG2"], single_right)
+
+
+def test_extract_all_regions_values_match_direct_mean(
+    region_left_aba, region_right_aba, region_annotations, region_deltaf_series
+):
+    """Region 1 occupies rows 0-1, cols 0-2 in the left atlas."""
+    expected = region_deltaf_series[:, 0:2, 0:3].mean(axis=(1, 2))
+    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
+         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+        result = extract_all_regions(region_deltaf_series, ignore_default_exclude=True)
+    np.testing.assert_allclose(result["L_REG1"], expected)
+
+
+def test_extract_all_regions_ignores_nan_pixels(
+    region_left_aba, region_right_aba, region_annotations, region_deltaf_series
+):
+    series = region_deltaf_series.copy()
+    series[:, 0, 0] = np.nan
+    expected = np.nanmean(series[:, 0:2, 0:3].reshape(_N_FRAMES, -1), axis=1)
+
+    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
+         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+        result = extract_all_regions(series, ignore_default_exclude=True)
+
+    assert not np.isnan(result["L_REG1"]).any()
+    np.testing.assert_allclose(result["L_REG1"], expected)
+
+
+def test_extract_all_regions_nan_does_not_leak_into_other_regions(
+    region_left_aba, region_right_aba, region_annotations, region_deltaf_series
+):
+    """Pixel (0, 0) belongs to left REG1 only, so no other region's trace may change."""
+    series = region_deltaf_series.copy()
+    series[:, 0, 0] = np.nan
+
+    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
+         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+        clean = extract_all_regions(region_deltaf_series, ignore_default_exclude=True)
+        result = extract_all_regions(series, ignore_default_exclude=True)
+
+    for key in ("L_REG2", "L_FRP1", "R_REG1", "R_REG2", "R_FRP1"):
+        np.testing.assert_allclose(result[key], clean[key], err_msg=f"{key} was affected by a NaN outside it")
+
+
+def test_extract_all_regions_all_nan_region_frame_is_nan(
+    region_left_aba, region_right_aba, region_annotations, region_deltaf_series
+):
+    series = region_deltaf_series.copy()
+    series[0, 0:2, 0:3] = np.nan
+
+    with warnings.catch_warnings(), \
+         patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
+         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+        warnings.simplefilter("ignore", RuntimeWarning)
+        result = extract_all_regions(series, ignore_default_exclude=True)
+
+    assert np.isnan(result["L_REG1"][0])
+    assert not np.isnan(result["L_REG1"][1:]).any()
+    assert not np.isnan(result["L_REG2"]).any()
+
+
+def test_extract_all_regions_empty_region_is_nan(
+    region_left_aba, region_right_aba, region_annotations_with_empty, region_deltaf_series
+):
+    """A region with no pixels in the atlas gives NaN rather than nulling its neighbours."""
+    with warnings.catch_warnings(), \
+         patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
+         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations_with_empty):
+        warnings.simplefilter("ignore", RuntimeWarning)
+        result = extract_all_regions(region_deltaf_series, ignore_default_exclude=True)
+
+    assert np.isnan(result["L_EMPTY"]).all()
+    assert not np.isnan(result["L_REG1"]).any()
+
+
+def test_extract_all_regions_matches_extract_region_activity_with_nans(
+    region_left_aba, region_right_aba, region_annotations, region_deltaf_series
+):
+    """The two ABA paths must agree once NaNs are in play, including on an all-NaN frame."""
+    series = region_deltaf_series.copy()
+    series[:, 0, 0] = np.nan
+    series[2, 2:4, 0:3] = np.nan
+
+    with warnings.catch_warnings(), \
+         patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
+         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+        warnings.simplefilter("ignore", RuntimeWarning)
+        all_regions = extract_all_regions(series, ignore_default_exclude=True)
+        for region in ("REG1", "REG2"):
+            for hemisphere, prefix in (("left", "L"), ("right", "R")):
+                single = extract_region_activity(series, region, hemisphere)
+                np.testing.assert_allclose(all_regions[f"{prefix}_{region}"], single)
+
+
+def test_extract_all_regions_matches_extract_mask_activity_with_nans(
+    region_left_aba, region_right_aba, region_annotations, region_deltaf_series
+):
+    """The ABA and custom-mask paths must agree on what a NaN pixel means."""
+    series = region_deltaf_series.copy()
+    series[:, 0, 0] = np.nan
+
+    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
+         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+        result = extract_all_regions(series, ignore_default_exclude=True)
+
+    np.testing.assert_allclose(result["L_REG1"], extract_mask_activity(series, region_left_aba == 1))
+
+
+def test_extract_all_regions_handles_nans_across_frame_blocks(
+    region_left_aba, region_right_aba, region_annotations
+):
+    """Frames are processed in blocks, so NaN counts must stay per-frame across a block boundary."""
+    rng = np.random.default_rng(1)
+    series = rng.random((_LONG_N_FRAMES, _ATLAS_H, _ATLAS_W))
+    series[::3, 0, 0] = np.nan
+    expected = np.nanmean(series[:, 0:2, 0:3].reshape(_LONG_N_FRAMES, -1), axis=1)
+
+    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
+         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+        result = extract_all_regions(series, ignore_default_exclude=True)
+
+    np.testing.assert_allclose(result["L_REG1"], expected)
 
 
 # ---------------------------------------------------------------------------
