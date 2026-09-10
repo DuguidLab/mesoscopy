@@ -317,6 +317,16 @@ class TestRidgeRegressionFast:
         assert r2[0, 0] == 1.0
         assert mse[0, 0] == pytest.approx(0.0, abs=1e-8)
 
+    def test_emits_no_floating_point_warnings(self, linear_regression_data):
+        """BLAS raises spurious FP flags on matmul; they must not reach the caller."""
+        deltaf_series, regressors, _, _ = linear_regression_data
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            regr.ridge_regression_fast(deltaf_series, regressors)
+
+        assert [str(w.message) for w in caught if "encountered" in str(w.message)] == []
+
 
 # ---------------------------------------------------------------------------
 # regression.elapsed_seconds
