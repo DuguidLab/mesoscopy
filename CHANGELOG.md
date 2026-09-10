@@ -13,6 +13,7 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 - ABA region extraction in `process.region` was not NaN-aware. In `extract_all_regions` a single NaN pixel nulled every region's trace for that frame, including regions not containing it, because the masks are applied by matmul and `NaN * 0` is `NaN`. `extract_region_activity` returned a fully masked array if any pixel in the region was NaN, and returned a `MaskedArray` rather than the `ndarray` it is annotated to return. Both now ignore NaN pixels, matching `extract_mask_activity`, and a region is only NaN in a frame if it has no non-NaN pixel there ([#115](https://github.com/DuguidLab/mesoscopy/issues/115)).
 - `extract_region_activity` raised an opaque `IndexError` for an unrecognised region acronym instead of the documented `ValueError`. The error now names the acronym and suggests close matches ([#117](https://github.com/DuguidLab/mesoscopy/issues/117)).
+- `ridge_regression_fast` emitted spurious BLAS floating-point warnings on every call ([#120](https://github.com/DuguidLab/mesoscopy/issues/120)).
 
 ## [0.9.1] - 2026-08-18
 
