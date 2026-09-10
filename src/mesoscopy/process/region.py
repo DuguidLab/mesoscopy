@@ -19,6 +19,7 @@
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
 
+import difflib
 from typing import Literal
 
 import numpy as np
@@ -66,11 +67,17 @@ def extract_region_activity(
         ValueError: If the specified region acronym is not recognized or if the hemisphere option is invalid.
     """
     annotations = resources.get_atlas_annotations()
-    region_id = annotations.loc[annotations["acronym"] == region_acronym, "id"].values[0]
+    matches = annotations.loc[annotations["acronym"] == region_acronym, "id"]
 
-    if not region_id:
-        msg = f"Region acronym {region_acronym} not recognised."
+    if matches.empty:
+        # Acronyms are inconsistent about a trailing "1", so suggest near misses.
+        by_lower = {a.lower(): a for a in annotations["acronym"]}
+        close = [by_lower[c] for c in difflib.get_close_matches(region_acronym.lower(), by_lower, n=3)]
+        hint = f" Closest matches: {', '.join(repr(c) for c in close)}." if close else ""
+        msg = f"Region acronym {region_acronym} not recognised.{hint}"
         raise ValueError(msg)
+
+    region_id = matches.values[0]
 
     left_aba, right_aba = resources.get_atlas()
 
