@@ -74,7 +74,7 @@ def smooth_cmd(path: str, out_dir: str, sigma: int = 2) -> None:
     outpath = out_dir + os.sep + session_id + "_smoothed.h5"
 
     with timer.Timer(message="Smoothing with LoG"):
-        smoothed_deltaf = psm.laplace_gaussian(deltaf_series)
+        smoothed_deltaf = psm.laplace_gaussian(deltaf_series, sigma=sigma)
 
         outpath = io.write_h5(
             path=outpath,

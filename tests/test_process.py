@@ -480,6 +480,12 @@ def test_smooth_cmd_custom_sigma(preproc_h5, output_dir):
     outpath = pathlib.Path(output_dir) / "preproc_smoothed.h5"
     assert outpath.is_file()
 
+    # The option must reach the filter: output should match sigma=4, not the default.
+    _, deltaf_series, _ = io.load_deltaf(str(preproc_h5))
+    expected = smooth.laplace_gaussian(deltaf_series, sigma=4)
+    np.testing.assert_allclose(io.read_h5(str(outpath))["/F"][:], expected)
+    assert not np.allclose(expected, smooth.laplace_gaussian(deltaf_series))
+
 
 def test_zscore_cmd_h5(preproc_h5, output_dir):
     runner = CliRunner()
