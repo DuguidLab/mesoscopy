@@ -2,13 +2,52 @@ name: Release & Publish
 
 on:
   push:
-    tags: 
-        - v*
+    branches: [ main ]
   workflow_dispatch:
+    inputs:
+      force:
+        description: "Release even if this version is already tagged"
+        type: boolean
+        default: false
 
 jobs:
+  check:
+    name: Check for a new version
+    runs-on: ubuntu-latest
+
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      release: ${{ steps.check.outputs.release }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Compare the project version against existing tags
+        id: check
+        run: |
+          tag="v$(uv version --short --frozen)"
+          echo "version=$tag" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ inputs.force }}" = "true" ]; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "Forced release of $tag." >> "$GITHUB_STEP_SUMMARY"
+          elif git rev-parse "refs/tags/$tag" >/dev/null 2>&1; then
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "$tag is already tagged — nothing to release." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "Releasing $tag." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   build:
     name: Build package
+    needs: check
+    if: needs.check.outputs.release == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -35,7 +74,8 @@ jobs:
 
   release:
     name: Release on GitHub
-    needs: build
+    needs: [ check, build ]
+    if: needs.check.outputs.release == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -50,18 +90,20 @@ jobs:
       - name: Create release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          tag: ${{ github.ref_name }}
+          tag: ${{ needs.check.outputs.version }}
 
         run: |
           gh release create "$tag" \
             --repo="$GITHUB_REPOSITORY" \
+            --target="$GITHUB_SHA" \
             --title="${GITHUB_REPOSITORY#*/} ${tag#v}" \
             --generate-notes \
             ./dist/*
 
   publish:
     name: Publish to PyPI
-    needs: build
+    needs: [ check, build ]
+    if: needs.check.outputs.release == 'true'
     runs-on: ubuntu-latest
     environment:
       name: pypi
