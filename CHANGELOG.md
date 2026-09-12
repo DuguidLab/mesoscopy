@@ -4,6 +4,8 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 ## Unreleased
 
+## [0.10.0] - 2026-09-12
+
 ### Added
 
 - `-m`/`--mask` option to `process regions` for extracting ΔF/F activity from custom region masks (NPY, NPZ or TIFF) drawn in registered frame coordinates; boolean masks give one region, integer-labelled masks one region per label, and masks are used as drawn rather than mirrored across hemispheres. Supplying a mask replaces the ABA extraction unless `--include-aba` is given, and may be passed multiple times ([#108](https://github.com/DuguidLab/mesoscopy/issues/108)).
