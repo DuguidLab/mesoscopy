@@ -4,6 +4,10 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 ## Unreleased
 
+### Fixed
+
+- `process smooth` ignored `-s`/`--sigma` and always smoothed with the default kernel width.
+
 ## [0.10.0] - 2026-09-12
 
 ### Added
