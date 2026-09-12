@@ -15,8 +15,6 @@
 * Checkout the new release branch.
 * Bump the version using `uv version --bump <major|minor|patch>`.
 * Commit the version change.
-* Tag the version with git using `git tag <version number>` (e.g. `git tag v0.1.0`).
-* Push the release branch with `git push`. Don't push the tag yet.
+* Push the release branch with `git push`.
 * Create a pull request for the release branch and merge into main.
-* Push the tag with `git push --tags`.
-* Github Actions should handle making a release and pushing to PyPI. If so happy days! If not, go fix it.
+* Github Actions should handle tagging the version, making a release and pushing to PyPI. If so happy days! If not, go fix it.
