@@ -3,7 +3,7 @@
 ## Convert recording file to NWB format
 
 ```bash
-mesoscopy convert /path/to/example-recording.h5
+mesoscopy convert h5 /path/to/example-recording.h5
 ```
 
 !!! note
@@ -41,7 +41,7 @@ mesoscopy register landmarks /path/to/example-recording.nwb
 ```
 
 The registered frames are written in Allen CCF template space at the atlas's own dimensions, which
-is what `mesoscopy process area-responses` expects. Use `--output-width` / `--output-height` only if
+is what `mesoscopy process regions` expects. Use `--output-width` / `--output-height` only if
 you are registering onto a different template.
 
 !!! note
@@ -63,10 +63,10 @@ step above — its path is echoed as `Saved registered frames at ...`:
 mesoscopy report /path/to/example-recording_registered.h5
 ```
 
-## Extract area responses
+## Extract region activity
 
 ```bash
-mesoscopy process area-responses /path/to/example-recording.nwb
+mesoscopy process regions /path/to/example-recording.nwb
 ```
 
 ## Next steps
