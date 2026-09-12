@@ -54,7 +54,7 @@ def register_cmd() -> None:
     "--out_dir",
     type=click.Path(dir_okay=True),
     default="./",
-    help="Output directory for registered recording.",
+    help="Output directory for landmarks file.",
 )
 @click.option(
     "-t",
