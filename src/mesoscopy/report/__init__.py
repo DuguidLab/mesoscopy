@@ -44,7 +44,7 @@ env = Environment(loader=PackageLoader("mesoscopy.report", "templates"), autoesc
     "--out_dir",
     type=click.Path(dir_okay=True),
     default=".",
-    help="Output directory for preprocessed recording.",
+    help="Output directory for the report.",
 )
 def report_cmd(path: str, out_dir: str) -> str:
     """Generate a report for a mesoscopy processing step.

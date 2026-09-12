@@ -58,7 +58,7 @@ def process_cmd(): ...
     "--sigma",
     type=int,
     default=2,
-    help="Output directory for smoothed recording.",
+    help="Standard deviation of the Gaussian kernel, in pixels.",
 )
 def smooth_cmd(path: str, out_dir: str, sigma: int = 2) -> None:
     """Generate a smoothed DeltaF/F recording using a Laplace of Gaussian filter."""
@@ -96,7 +96,7 @@ def smooth_cmd(path: str, out_dir: str, sigma: int = 2) -> None:
     "--out_dir",
     type=click.Path(dir_okay=True),
     default="./",
-    help="Output directory for smoothed recording.",
+    help="Output directory for z-scored recording.",
 )
 def zscore_cmd(path: str, out_dir: str) -> None:
     """Pixel-wise z-score ∆F/F signal."""
@@ -158,7 +158,7 @@ def zscore_cmd(path: str, out_dir: str) -> None:
     "--out_dir",
     type=click.Path(dir_okay=True),
     default="./",
-    help="Output directory for smoothed recording.",
+    help="Output directory for region activity file.",
 )
 @click.option(
     "-m",

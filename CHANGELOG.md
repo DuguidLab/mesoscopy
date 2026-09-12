@@ -6,6 +6,8 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 ### Fixed
 
+- Incorrect `--help` text for `-o`/`--out_dir` on `process zscore`, `process regions`, `report` and `register label`, and for `-s`/`--sigma` on `process smooth`, which all described the wrong output.
+- Typical workflow docs referred to the nonexistent `convert` and `process area-responses` commands instead of `convert h5` and `process regions`.
 - `process smooth` ignored `-s`/`--sigma` and always smoothed with the default kernel width.
 
 ## [0.10.0] - 2026-09-12
