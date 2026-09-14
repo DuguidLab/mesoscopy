@@ -119,6 +119,7 @@ nav:
       - mesoscopy.plots: reference/api-mesoscopy-plots.md
       - mesoscopy.convert: reference/api-mesoscopy-convert.md
       - mesoscopy.preprocess: reference/api-mesoscopy-preprocess.md
+      - mesoscopy.align: reference/api-mesoscopy-align.md
       - mesoscopy.register: reference/api-mesoscopy-register.md
       - mesoscopy.process: reference/api-mesoscopy-process.md
       - mesoscopy.postprocess: reference/api-mesoscopy-postprocess.md
