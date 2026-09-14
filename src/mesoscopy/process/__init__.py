@@ -219,6 +219,7 @@ def regions_cmd(path: str, out_dir: str, mask_paths: tuple[str, ...], include_ab
     # Determine whether we're working with an NWB file
     nwb = bool(path.endswith(".nwb"))
     session_id, deltaf_series, timestamps = io.load_deltaf(path, nwb=nwb)
+    aligned = io.read_timestamps_aligned(path)
 
     outpath = out_dir + os.sep + session_id + "_regions.csv"
 
@@ -235,10 +236,13 @@ def regions_cmd(path: str, out_dir: str, mask_paths: tuple[str, ...], include_ab
                 raise click.ClickException(msg) from err
 
         region_activity = pd.concat(activity, ignore_index=True)
-        region_activity["time_idx"] = [
-            str(timestamp, encoding="utf-8") for timestamp in timestamps[region_activity["time_idx"]]
-        ]
+        time_idx = region_activity["time_idx"].to_numpy()
+        region_activity["time_idx"] = [str(timestamp, encoding="utf-8") for timestamp in timestamps[time_idx]]
         region_activity.rename(columns={"time_idx": "timestamp"}, inplace=True)
+        if aligned is not None:
+            region_activity.insert(
+                region_activity.columns.get_loc("timestamp") + 1, "time_aligned", aligned[0][time_idx]
+            )
         region_activity.to_csv(outpath, index=False)
 
     click.echo(f"Saved region activity at {outpath}")
