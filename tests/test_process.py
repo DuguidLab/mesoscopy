@@ -14,6 +14,7 @@ from click.testing import CliRunner
 
 import mesoscopy
 from mesoscopy import io
+from mesoscopy.process import perievent as pev
 from mesoscopy.process import regression as regr
 from mesoscopy.process import smooth
 from mesoscopy.process import zscore
@@ -1736,3 +1737,278 @@ def test_extract_all_masks_error_names_the_offending_mask(region_deltaf_series, 
 
 def test_extract_all_masks_empty_input_returns_empty_dict(region_deltaf_series):
     assert extract_all_masks(region_deltaf_series, {}) == {}
+
+
+# ---------------------------------------------------------------------------
+# Peri-event
+# ---------------------------------------------------------------------------
+
+PERIEVENT_FREQ_HZ = 0.5
+PERIEVENT_REGIONS = ["L_MOp", "R_MOp"]
+
+
+def _perievent_signal(t):
+    """Known sinusoid, one cycle every two seconds."""
+    return np.sin(2 * np.pi * PERIEVENT_FREQ_HZ * t)
+
+
+@pytest.fixture(scope="module")
+def perievent_time():
+    """Jittered ~25 Hz sample times from 2 s to ~42 s after behaviour start."""
+    rng = np.random.default_rng(3)
+    return 2.0 + np.cumsum(0.04 + rng.uniform(-0.005, 0.005, size=1000))
+
+
+@pytest.fixture(scope="module")
+def perievent_h5(tmp_path_factory, perievent_time):
+    """(1000, 4, 4) recording of the sinusoid offset by pixel index, with /timestamps_aligned."""
+    path = tmp_path_factory.mktemp("data") / "ses-01_zscored.h5"
+    frames = _perievent_signal(perievent_time)[:, None, None] + np.arange(16).reshape(4, 4)[None]
+    session_start = datetime(2024, 1, 1, 14, 0, 0)
+    timestamps = [(session_start + timedelta(seconds=t)).isoformat().encode("utf-8") for t in perievent_time]
+    with h5.File(str(path), "w") as f:
+        f.create_dataset("/F", data=frames)
+        f.create_dataset("/timestamps", data=timestamps, dtype="S26")
+    io.write_timestamps_aligned(
+        str(path),
+        perievent_time,
+        {"session_start_time": session_start.isoformat(), "behaviour_session": "ses-01", "offset_s": 2.0},
+    )
+    return str(path)
+
+
+@pytest.fixture(scope="module")
+def perievent_regions_csv(tmp_path_factory, perievent_time):
+    """Long-format regions CSV of the sinusoid, one region offset by 1."""
+    path = tmp_path_factory.mktemp("data") / "ses-01_regions.csv"
+    session_start = datetime(2024, 1, 1, 14, 0, 0)
+    frames = [
+        pd.DataFrame(
+            {
+                "region": region,
+                "timestamp": [(session_start + timedelta(seconds=t)).isoformat() for t in perievent_time],
+                "time_aligned": perievent_time,
+                "F": _perievent_signal(perievent_time) + offset,
+            }
+        )
+        for offset, region in enumerate(PERIEVENT_REGIONS)
+    ]
+    pd.concat(frames, ignore_index=True).to_csv(path, index=False)
+    return str(path)
+
+
+@pytest.fixture(scope="module")
+def perievent_trials_csv(tmp_path_factory):
+    """Six trials: one near each end of the recording, all four outcomes, one negative response time."""
+    path = tmp_path_factory.mktemp("data") / "ses-01_trials.csv"
+    pd.DataFrame(
+        {
+            "start_time": [0.5, 5.0, 10.0, 15.0, 20.0, 40.0],
+            "cue_onset": [1.0, 5.5, 10.5, 15.5, 20.5, 40.5],
+            "stop_time": [3.0, 8.0, 13.0, 18.0, 23.0, 41.5],
+            "response_time": [0.7, 1.2, np.nan, -1.0, 0.8, 0.5],
+            "sdt_type": ["hit", "hit", "miss", "false_alarm", "correct_rejection", "hit"],
+        }
+    ).to_csv(path, index=False)
+    return str(path)
+
+
+class TestEventTimes:
+    @pytest.mark.parametrize(
+        ("event", "expected_times", "expected_index"),
+        [
+            ("cue_onset", [1.0, 5.5, 10.5, 15.5, 20.5, 40.5], [0, 1, 2, 3, 4, 5]),
+            ("trial_start", [0.5, 5.0, 10.0, 15.0, 20.0, 40.0], [0, 1, 2, 3, 4, 5]),
+            ("response", [1.2, 6.2, 20.8, 40.5], [0, 1, 4, 5]),
+            ("reward", [3.0, 8.0, 23.0, 41.5], [0, 1, 4, 5]),
+        ],
+    )
+    def test_times_and_drops(self, perievent_trials_csv, event, expected_times, expected_index):
+        times, trial_index = pev.event_times(pd.read_csv(perievent_trials_csv), event)
+        np.testing.assert_allclose(times, expected_times)
+        np.testing.assert_array_equal(trial_index, expected_index)
+
+    def test_unknown_event_raises(self, perievent_trials_csv):
+        with pytest.raises(ValueError, match="Unknown event"):
+            pev.event_times(pd.read_csv(perievent_trials_csv), "lick")
+
+
+class TestWindowGrid:
+    def test_inclusive_of_post(self):
+        grid = pev.window_grid(1.0, 3.0, 25.0)
+        assert len(grid) == 101
+        assert grid[0] == pytest.approx(-1.0)
+        assert grid[-1] == pytest.approx(3.0)
+        np.testing.assert_allclose(np.diff(grid), 0.04)
+
+    def test_non_integer_span_stops_within_post(self):
+        grid = pev.window_grid(0.5, 1.03, 25.0)
+        assert grid[-1] <= 1.03 + 1e-9
+        assert grid[-1] > 1.03 - 0.04
+
+
+class TestExtract:
+    @pytest.fixture
+    def grid(self):
+        return pev.window_grid(1.0, 3.0, 25.0)
+
+    def test_interp_recovers_sinusoid(self, perievent_time, grid):
+        data = _perievent_signal(perievent_time)[:, None]
+        events = np.array([5.5, 20.5])
+        traces, kept = pev.extract(data, perievent_time, events, grid, method="interp", dtype=np.float64)
+        assert kept.all()
+        assert traces.shape == (2, len(grid), 1)
+        expected = _perievent_signal(events[:, None] + grid[None, :])
+        np.testing.assert_allclose(traces[:, :, 0], expected, atol=5e-3)
+
+    def test_nearest_returns_recorded_samples(self, perievent_time, grid):
+        data = _perievent_signal(perievent_time)[:, None]
+        traces, kept = pev.extract(data, perievent_time, np.array([10.5]), grid, method="nearest", dtype=np.float64)
+        assert kept.all()
+        recorded = set(data[:, 0].tolist())
+        assert all(value in recorded for value in traces[0, :, 0])
+        # Each sample is the closest frame to its grid time.
+        idx = np.abs(perievent_time[None, :] - (10.5 + grid)[:, None]).argmin(axis=1)
+        np.testing.assert_array_equal(traces[0, :, 0], data[idx, 0])
+
+    def test_edge_trials_dropped(self, perievent_time, grid):
+        data = _perievent_signal(perievent_time)[:, None]
+        events = np.array([1.0, 5.5, 40.5])
+        traces, kept = pev.extract(data, perievent_time, events, grid)
+        np.testing.assert_array_equal(kept, [False, True, False])
+        assert traces.shape == (1, len(grid), 1)
+        assert traces.dtype == np.float32
+
+    def test_preserves_frame_shape(self, perievent_time, grid):
+        data = np.broadcast_to(_perievent_signal(perievent_time)[:, None, None], (len(perievent_time), 3, 5))
+        traces, _ = pev.extract(data, perievent_time, np.array([5.5]), grid)
+        assert traces.shape == (1, len(grid), 3, 5)
+
+    def test_unknown_method_raises(self, perievent_time, grid):
+        with pytest.raises(ValueError, match="Unknown method"):
+            pev.extract(np.zeros((len(perievent_time), 1)), perievent_time, np.array([5.5]), grid, method="cubic")
+
+
+class TestApplyBaseline:
+    def test_window_mean_is_zero(self):
+        grid = pev.window_grid(1.0, 3.0, 25.0)
+        rng = np.random.default_rng(4)
+        traces = rng.normal(size=(3, len(grid), 2, 2)) + 5.0
+        corrected = pev.apply_baseline(traces, grid, -1.0, 0.0)
+        window = (grid >= -1.0) & (grid < 0.0)
+        np.testing.assert_allclose(corrected[:, window].mean(axis=1), 0.0, atol=1e-12)
+        assert corrected.shape == traces.shape
+        assert corrected.dtype == traces.dtype
+
+    def test_empty_window_raises(self):
+        grid = pev.window_grid(1.0, 3.0, 25.0)
+        with pytest.raises(ValueError, match="baseline window"):
+            pev.apply_baseline(np.zeros((1, len(grid))), grid, 5.0, 6.0)
+
+
+def test_perievent_cmd_h5(perievent_h5, perievent_trials_csv, output_dir):
+    result = CliRunner().invoke(
+        mesoscopy.cli, args=f"process peri-event {perievent_h5} {perievent_trials_csv} -o {output_dir}"
+    )
+    assert result.exit_code == 0, result.output
+    assert "Kept 4 trials, dropped 2." in result.output
+
+    outpath = pathlib.Path(output_dir) / "ses-01_zscored_event-cueonset_perievent.h5"
+    assert outpath.is_file()
+    with h5.File(str(outpath), "r") as f:
+        traces = f["/traces"]
+        assert traces.shape == (4, 101, 4, 4)
+        assert traces.dtype == np.float32
+        assert traces.chunks == (1, 101, 4, 4)
+        assert f["/time"].dtype == np.float64
+        np.testing.assert_allclose(f["/time"][:], pev.window_grid(1.0, 3.0, 25.0))
+        assert f["/trial_index"].dtype.kind == "i"
+        np.testing.assert_array_equal(f["/trial_index"][:], [1, 2, 3, 4])
+        assert f["/event_time"].dtype == np.float64
+        np.testing.assert_allclose(f["/event_time"][:], [5.5, 10.5, 15.5, 20.5])
+
+        attrs = traces.attrs
+        assert attrs["event"] == "cue_onset"
+        assert attrs["pre"] == 1.0
+        assert attrs["post"] == 3.0
+        assert attrs["fs"] == 25.0
+        assert attrs["method"] == "interp"
+        assert len(attrs["baseline"]) == 0
+        assert attrs["session_start_time"] == "2024-01-01T14:00:00"
+        assert attrs["behaviour_session"] == "ses-01"
+        assert attrs["trials_path"] == perievent_trials_csv
+
+        # Pixel offsets survive; the sinusoid is recovered at the event.
+        trace = traces[0]
+        np.testing.assert_allclose(trace[:, 0, 0] + 5, trace[:, 1, 1], atol=1e-5)
+        np.testing.assert_allclose(trace[25, 0, 0], _perievent_signal(5.5), atol=5e-3)
+
+
+def test_perievent_cmd_h5_baseline_and_nearest(perievent_h5, perievent_trials_csv, output_dir):
+    result = CliRunner().invoke(
+        mesoscopy.cli,
+        args=(
+            f"process peri-event {perievent_h5} {perievent_trials_csv} -o {output_dir} --event reward"
+            " --method nearest --baseline -0.5 0"
+        ),
+    )
+    assert result.exit_code == 0, result.output
+
+    with h5.File(str(pathlib.Path(output_dir) / "ses-01_zscored_event-reward_perievent.h5"), "r") as f:
+        np.testing.assert_array_equal(f["/trial_index"][:], [1, 4])
+        np.testing.assert_allclose(f["/traces"].attrs["baseline"], [-0.5, 0.0])
+        assert f["/traces"].attrs["method"] == "nearest"
+        grid = f["/time"][:]
+        window = (grid >= -0.5) & (grid < 0)
+        np.testing.assert_allclose(f["/traces"][:, window].mean(axis=1), 0.0, atol=1e-5)
+
+
+def test_perievent_cmd_h5_without_timestamps_aligned(preproc_h5, perievent_trials_csv, output_dir):
+    result = CliRunner().invoke(
+        mesoscopy.cli, args=f"process peri-event {preproc_h5} {perievent_trials_csv} -o {output_dir}"
+    )
+    assert result.exit_code != 0
+    assert "timestamps_aligned" in result.output
+
+
+def test_perievent_cmd_csv(perievent_regions_csv, perievent_trials_csv, output_dir):
+    result = CliRunner().invoke(
+        mesoscopy.cli, args=f"process peri-event {perievent_regions_csv} {perievent_trials_csv} -o {output_dir}"
+    )
+    assert result.exit_code == 0, result.output
+
+    outpath = pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_perievent.csv"
+    assert outpath.is_file()
+    out = pd.read_csv(outpath)
+    assert list(out.columns) == ["trial_index", "event_time", "time", "region", "F"]
+    assert len(out) == 4 * 101 * len(PERIEVENT_REGIONS)
+    assert sorted(out["trial_index"].unique()) == [1, 2, 3, 4]
+    assert list(out["region"].unique()) == PERIEVENT_REGIONS
+
+    trial = out[(out["trial_index"] == 1) & (out["region"] == "R_MOp")]
+    assert trial["event_time"].unique().tolist() == [5.5]
+    np.testing.assert_allclose(trial["time"], pev.window_grid(1.0, 3.0, 25.0))
+    np.testing.assert_allclose(trial["F"], _perievent_signal(5.5 + trial["time"].to_numpy()) + 1, atol=5e-3)
+
+
+def test_perievent_cmd_csv_without_time_aligned(perievent_regions_csv, perievent_trials_csv, output_dir, tmp_path):
+    unaligned = tmp_path / "ses-02_regions.csv"
+    pd.read_csv(perievent_regions_csv).drop(columns="time_aligned").to_csv(unaligned, index=False)
+    result = CliRunner().invoke(
+        mesoscopy.cli, args=f"process peri-event {unaligned} {perievent_trials_csv} -o {output_dir}"
+    )
+    assert result.exit_code != 0
+    assert "time_aligned" in result.output
+
+
+@pytest.mark.parametrize(
+    ("event", "name"),
+    [("cue_onset", "cueonset"), ("trial_start", "trialstart"), ("response", "response"), ("reward", "reward")],
+)
+def test_perievent_cmd_output_filename(perievent_regions_csv, perievent_trials_csv, output_dir, event, name):
+    result = CliRunner().invoke(
+        mesoscopy.cli,
+        args=f"process peri-event {perievent_regions_csv} {perievent_trials_csv} -o {output_dir} --event {event}",
+    )
+    assert result.exit_code == 0, result.output
+    assert (pathlib.Path(output_dir) / f"ses-01_regions_event-{name}_perievent.csv").is_file()
