@@ -29,6 +29,7 @@ import h5py
 from matplotlib import pyplot as plt
 
 import mesoscopy.register as reg
+from mesoscopy import align
 from mesoscopy import convert
 from mesoscopy import export
 from mesoscopy import inspect
@@ -71,6 +72,7 @@ def sample(path, out_dir, index, crop=0, vmin=0, vmax=255, key="frames"):
     click.echo(f"Saved sample at {outpath}")
 
 
+cli.add_command(align.align_cmd)
 cli.add_command(preprocess.preprocess_cmd)
 cli.add_command(process.process_cmd)
 cli.add_command(postprocess.postprocess_cmd)
