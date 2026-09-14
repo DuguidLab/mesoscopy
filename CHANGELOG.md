@@ -4,6 +4,8 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 ## Unreleased
 
+## [0.12.0] - 2026-09-14
+
 ### Added
 
 - `process peri-event` command for extracting per-trial windows around a behavioural event (`--event cue_onset|trial_start|response|reward`) from a behaviour-aligned HDF5 recording or `_regions.csv`, using the `*_trials.csv` written by `visiomode-analysis session` (or equivalent behaviour CSV). Windows are resampled onto a `--pre`/`--post`/`--fs` grid by interpolation or nearest sample, optionally baseline-subtracted with `--baseline START END`, and trials lacking the event or running past the recording are dropped. HDF5 input gives `<recording stem>_event-<name>_perievent.h5` with `/traces`, `/time`, `/trial_index` and `/event_time`; CSV input gives a long-format CSV with `trial_index`, `event_time`, `time`, `region` and `F` columns ([#133](https://github.com/DuguidLab/mesoscopy/issues/133)).
