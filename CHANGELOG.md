@@ -8,6 +8,20 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 - `process peri-event` command for extracting per-trial windows around a behavioural event (`--event cue_onset|trial_start|response|reward`) from a behaviour-aligned HDF5 recording or `_regions.csv`, using the `*_trials.csv` written by `visiomode-analysis session` (or equivalent behaviour CSV). Windows are resampled onto a `--pre`/`--post`/`--fs` grid by interpolation or nearest sample, optionally baseline-subtracted with `--baseline START END`, and trials lacking the event or running past the recording are dropped. HDF5 input gives `<recording stem>_event-<name>_perievent.h5` with `/traces`, `/time`, `/trial_index` and `/event_time`; CSV input gives a long-format CSV with `trial_index`, `event_time`, `time`, `region` and `F` columns ([#133](https://github.com/DuguidLab/mesoscopy/issues/133)).
 - `process.perievent` module with `event_times`, `window_grid`, `extract` and `apply_baseline` ([#133](https://github.com/DuguidLab/mesoscopy/issues/133)).
+- `register landmarks` registers to the Allen CCF template at any scale. `-s/--scale` sets the template scale relative to its native 140x142 pixels, and defaults to the scale at which template pixels match the recording's, so recordings keep their own resolution. The template name, shape and scale are written as attributes of the registered HDF5 file and noted in the NWB `CCFRegisteredSeries` comments ([#90](https://github.com/DuguidLab/mesoscopy/issues/90)).
+- `resources.get_atlas` and `resources.get_default_landmarks` take a target shape and resample the atlas (nearest neighbour) and scale the landmarks to it, with `resources.template_shape`, `resources.template_scale`, `resources.scale_landmarks` and `resources.resize_labels` helpers; `register.transform.auto_template_scale` picks the scale matching a recording's pixel size ([#90](https://github.com/DuguidLab/mesoscopy/issues/90)).
+
+### Changed
+
+- `process regions` resamples the atlas to the frame shape of the registered recording instead of requiring 140x142 frames ([#90](https://github.com/DuguidLab/mesoscopy/issues/90)).
+
+### Fixed
+
+- `preprocess --no-qa` crashed when writing the preprocessed file, as the skipped QA results were passed to the HDF5 writer as `None`.
+
+### Deprecated
+
+- `--output-width`/`--output-height` on `register landmarks`, in favour of `--scale`. They now scale the template to the requested frame size, with a missing dimension filled in at the atlas aspect ratio ([#90](https://github.com/DuguidLab/mesoscopy/issues/90)).
 
 ## [0.11.0] - 2026-09-14
 

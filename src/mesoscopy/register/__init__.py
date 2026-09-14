@@ -109,7 +109,7 @@ def label_cmd(path, out_dir, template_points, session_id) -> dict:
 
     click.echo("Loading template landmarks...")
     template_landmarks = res.get_default_landmarks()
-    template_shape = res.get_atlas()[0].shape
+    template_shape: tuple[int, int] | None = res.atlas_shape()
     if template_points:
         template_landmarks = io.read_points(template_points)
         # The image a user-supplied template was marked on is unknown, so seed points can't be scaled.
@@ -152,22 +152,34 @@ def label_cmd(path, out_dir, template_points, session_id) -> dict:
     help="Path to template landmark points in Fiji XML points format",
 )
 @click.option(
+    "-s",
+    "--scale",
+    type=float,
+    default=None,
+    help=(
+        "Scale of the Allen CCF template the frames are registered to, relative to its native 140x142 pixels. Defaults"
+        " to the scale at which template pixels match the recording's pixel size, so the recording keeps its own"
+        " resolution. Ignored with -t."
+    ),
+)
+@click.option(
     "--output-width",
     type=int,
     default=None,
-    help="Width of the registered frames. Defaults to the width of the Allen CCF template.",
+    help="Deprecated, use --scale. Width of the registered frames.",
 )
 @click.option(
     "--output-height",
     type=int,
     default=None,
-    help="Height of the registered frames. Defaults to the height of the Allen CCF template.",
+    help="Deprecated, use --scale. Height of the registered frames.",
 )
 def landmarks_cmd(
     path: str,
     out_dir: str,
     recording_points: str,
     template_points: str,
+    scale: float | None = None,
     output_width: int | None = None,
     output_height: int | None = None,
 ) -> str:
@@ -178,16 +190,26 @@ def landmarks_cmd(
         out_dir (str): Output directory for registered recording.
         recording_points (str, optional): Path to recording landmark points in CSV or Fiji XML points format.
         template_points (str, optional): Path to template landmark points in CSV or Fiji XML points format.
-        output_width (int, optional): Width of the registered frames. Defaults to the Allen CCF template width.
-        output_height (int, optional): Height of the registered frames. Defaults to the Allen CCF template height.
+        scale (float, optional): Scale of the Allen CCF template, relative to its native size. Defaults to the
+            scale matching the recording's pixel size.
+        output_width (int, optional): Deprecated, use ``scale``. Width of the registered frames.
+        output_height (int, optional): Deprecated, use ``scale``. Height of the registered frames.
 
     Returns:
         str: Path to the registered recording file.
 
     Raises:
-        ValueError: If the path to recording landmarks cannot be inferred.
+        ValueError: If the path to recording landmarks cannot be inferred, or the options conflict.
     """
     click.echo(f"Registering recording {path} to template.")
+
+    if scale is not None and (output_width or output_height):
+        msg = "--scale cannot be combined with --output-width/--output-height."
+        raise ValueError(msg)
+    if output_width or output_height:
+        click.echo("⚠️ --output-width/--output-height are deprecated, use --scale instead.")
+    if template_points and scale is not None:
+        click.echo("⚠️ --scale only applies to the Allen CCF template, ignoring it for -t.")
 
     os.makedirs(out_dir, exist_ok=True)
 
@@ -199,9 +221,7 @@ def landmarks_cmd(
     session_id, deltaf_series, timestamps = io.load_deltaf(path, nwb)
 
     click.echo("Loading landmarks...")
-    template_landmarks = res.get_default_landmarks()
-    if template_points:
-        template_landmarks = io.read_points(template_points)
+    template_landmarks = io.read_points(template_points) if template_points else res.get_default_landmarks()
 
     if not recording_points:
         candidates = landmarks_path_candidates(path, out_dir)
@@ -217,11 +237,30 @@ def landmarks_cmd(
         click.echo(f"Using recording landmarks at {recording_points}")
     recording_landmarks = io.read_points(recording_points)
 
-    # Registered frames land in template space, so default their shape to that of the CCF atlas.
-    output_shape = None
-    if output_width or output_height:
-        atlas_height, atlas_width = res.get_atlas()[0].shape
-        output_shape = (output_height or atlas_height, output_width or atlas_width)
+    # Registered frames land in template space, so their shape is the template's, scaled.
+    attributes: dict = {}
+    requested_shape = _deprecated_output_shape(output_width, output_height)
+    if template_points:
+        # A custom template's image size is unknown, so it is used as given.
+        output_shape = requested_shape or res.atlas_shape()
+    else:
+        if requested_shape is None:
+            if scale is None:
+                scale = trf.auto_template_scale(recording_landmarks, template_landmarks)
+                click.echo(f"Template scale matching the recording's pixel size: {scale:.3f}")
+            requested_shape = res.template_shape(scale)
+        output_shape = requested_shape
+        template_landmarks = res.get_default_landmarks(output_shape)
+        scale_x, scale_y = res.template_scale(output_shape)
+        attributes = {
+            "template": res.TEMPLATE_NAME,
+            "template_shape": np.array(output_shape),
+            "template_scale": np.array([scale_x, scale_y]),
+        }
+        click.echo(
+            f"Registering to the {res.TEMPLATE_NAME} template at {output_shape[1]}x{output_shape[0]} pixels "
+            f"(scale {scale_x:.3f} x, {scale_y:.3f} y)."
+        )
 
     warped, tform = trf.landmarks_affine(
         deltaf_series,
@@ -247,6 +286,7 @@ def landmarks_cmd(
             "/qa/registered_landmarks": tform.inverse(aligned_recording),
             "/qa/landmark_residuals": trf.landmark_residuals(tform, aligned_template, aligned_recording),
         },
+        attributes=attributes,
     )
     click.echo(f"Saved registered frames at {outpath}")
 
@@ -256,6 +296,29 @@ def landmarks_cmd(
         click.echo(f"Updated NWB file at {path}")
 
     return outpath
+
+
+def _deprecated_output_shape(width: int | None, height: int | None) -> tuple[int, int] | None:
+    """Resolve the deprecated --output-width/--output-height options to a frame shape.
+
+    A missing dimension is filled in at the atlas aspect ratio.
+
+    Args:
+        width (int | None): Requested frame width.
+        height (int | None): Requested frame height.
+
+    Returns:
+        tuple[int, int] | None: The frame shape as (height, width), or None if neither was given.
+    """
+    frame_width, frame_height = int(width or 0), int(height or 0)
+    if not frame_width and not frame_height:
+        return None
+    atlas_height, atlas_width = res.atlas_shape()
+    if not frame_height:
+        frame_height = round(atlas_height * frame_width / atlas_width)
+    if not frame_width:
+        frame_width = round(atlas_width * frame_height / atlas_height)
+    return frame_height, frame_width
 
 
 def session_id_from_path(path: str) -> str:
@@ -365,13 +428,21 @@ def update_nwb(nwb_path: str, h5_path: str, tform_params: np.ndarray) -> NWBFile
             click.echo("Processing module already exists...")
             ophys_module = nwbfile.processing["ophys"]
 
+        comments = "This is the haemodynamic corrected series registered to the Allen Brain Atlas CCFv3."
+        if "template" in f.attrs:
+            height, width = f.attrs["template_shape"]
+            scale_x, scale_y = f.attrs["template_scale"]
+            comments += (
+                f" Template: {f.attrs['template']} at {width}x{height} pixels (scale {scale_x:.3f} x, {scale_y:.3f} y)."
+            )
+
         registered_series = ImageSeries(
             name="corrected",
             data=f["/F"],
             timestamps=f["/timestamps"],
             unit="df/f",
             description="dF/F widefield cortical imaging series.",
-            comments="This is the haemodynamic corrected series registered to the Allen Brain Atlas CCFv3.",
+            comments=comments,
         )
 
         xy_translation = TimeSeries(

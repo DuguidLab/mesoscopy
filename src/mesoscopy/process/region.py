@@ -53,7 +53,7 @@ def extract_region_activity(
 
     Args:
         deltaf_series (npt.NDArray): A 3D array of shape (time, height, width) representing the DeltaF/F signal.
-            Should be registered to the Allen Brain Atlas.
+            Should be registered to the Allen Brain Atlas, at any scale: the atlas is resampled to the frame shape.
         region_acronym (str): The acronym of the cortical region to extract (e.g., 'VISp', 'MOp etc.).
         hemisphere (Literal["left", "right", "both"]): The hemisphere to extract the activity from.
             Options are 'left', 'right', or 'both'.
@@ -79,7 +79,8 @@ def extract_region_activity(
 
     region_id = matches.values[0]
 
-    left_aba, right_aba = resources.get_atlas()
+    # The atlas is resampled to the registered frame shape, which fixes the template scale.
+    left_aba, right_aba = resources.get_atlas(_frame_shape(deltaf_series))
 
     if hemisphere.lower() == "left":
         region_mask = left_aba == region_id
@@ -104,6 +105,7 @@ def extract_all_regions(
 
     Args:
         deltaf_series (npt.NDArray): A 3D array of shape (time, height, width) representing the DeltaF/F signal.
+            Should be registered to the Allen Brain Atlas, at any scale: the atlas is resampled to the frame shape.
         exclude (list, optional): A list of region acronyms to exclude from the extraction. Defaults to None.
         ignore_default_exclude (bool, optional): If True, ignores the default excluded regions. Defaults to False.
         as_dataframe (bool, optional): If True, returns the result as a pandas DataFrame. Defaults to False.
@@ -114,7 +116,7 @@ def extract_all_regions(
             only NaN in a frame if every one of its pixels is NaN there.
     """
     annotations = resources.get_atlas_annotations()
-    left_aba, right_aba = resources.get_atlas()
+    left_aba, right_aba = resources.get_atlas(_frame_shape(deltaf_series))
 
     if exclude is None:
         exclude = []
@@ -198,6 +200,19 @@ def extract_all_masks(
         return df.unstack().reset_index().rename(columns={"level_0": "region", "level_1": "time_idx", 0: "F"})
 
     return mask_activity
+
+
+def _frame_shape(deltaf_series: npt.NDArray) -> tuple[int, int]:
+    """Get the (height, width) of the frames of a ∆F/F series.
+
+    Args:
+        deltaf_series (npt.NDArray): A 3D array of shape (time, height, width).
+
+    Returns:
+        tuple[int, int]: The frame shape.
+    """
+    _, height, width = deltaf_series.shape
+    return int(height), int(width)
 
 
 def _region_means(data_flat: npt.NDArray, masks: npt.NDArray) -> npt.NDArray:

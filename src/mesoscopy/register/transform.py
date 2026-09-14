@@ -33,7 +33,7 @@ import mesoscopy.resources as res
 MIN_LANDMARKS = 3
 
 # Warn when the fit leaves landmarks further than this fraction of the template's extent from their
-# target positions. 0.05 is roughly 6 px on the Allen CCF template.
+# target positions. 0.05 is roughly 6 px on the Allen CCF template at its native scale.
 RESIDUAL_WARN_FRACTION = 0.05
 
 
@@ -115,6 +115,37 @@ def landmark_residuals(
         np.ndarray: Residual distance per landmark, in template pixels.
     """
     return np.linalg.norm(tform.inverse(recording_points) - template_points, axis=1)
+
+
+def auto_template_scale(recording_landmarks: dict, template_landmarks: dict) -> float:
+    """Pick the template scale at which template pixels match the size of recording pixels.
+
+    The affine fitted between the two landmark sets maps template to recording coordinates, so the
+    square root of its determinant is the recording-to-template pixel size ratio. Registering at that
+    scale keeps the recording's own resolution instead of resampling it to the template's.
+
+    Args:
+        recording_landmarks (dict): Recording landmarks, as {name: (x, y)}.
+        template_landmarks (dict): Template landmarks at native scale, as {name: (x, y)}.
+
+    Returns:
+        float: Scale factor to apply to the template.
+
+    Raises:
+        ValueError: If the landmarks do not define a usable affine transform.
+    """
+    _, template, recording = align_landmarks(recording_landmarks, template_landmarks)
+    for name, points in (("template", template), ("recording", recording)):
+        if _is_collinear(points):
+            msg = f"The {name} landmarks are collinear or coincident, so they do not define an affine transform."
+            raise ValueError(msg)
+
+    tform = trf.estimate_transform("affine", template, recording)
+    scale = float(np.sqrt(abs(np.linalg.det(tform.params[:2, :2]))))
+    if not np.isfinite(scale) or scale <= 0:
+        msg = "Could not estimate a template scale from these landmarks, the fit did not converge."
+        raise ValueError(msg)
+    return scale
 
 
 def landmarks_affine(
