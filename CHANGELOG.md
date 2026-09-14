@@ -8,6 +8,11 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 - `align` command for writing behaviour-aligned frame timestamps to a preprocessed or registered HDF5 recording, as seconds from a behaviour session start given either as an ISO 8601 `--session-start` or read from a visiomode `--behaviour-json` file. Writes a `/timestamps_aligned` dataset carrying `session_start_time`, `behaviour_session` and `offset_s` attributes, and refuses offsets beyond `--max-offset` ([#128](https://github.com/DuguidLab/mesoscopy/issues/128)).
 - `align.align_recording` and `align.read_session_start`, plus `io.read_timestamps_aligned` and `io.write_timestamps_aligned` ([#128](https://github.com/DuguidLab/mesoscopy/issues/128)).
+- `process regression` checks the recording's `/timestamps_aligned` against the regressor file's `session_start_time` and `timestamps`: it warns and applies `trial_idx` positionally if either side is unaligned, fails on a session start or length mismatch, warns if aligned timestamps differ by more than 5 ms, and copies `session_start_time` and `behaviour_session` into the regression output ([#128](https://github.com/DuguidLab/mesoscopy/issues/128)).
+
+### Changed
+
+- `io.read_regressors` returns a fourth element, the regressor file's behaviour alignment (`session_start_time`, `behaviour_session`, `timestamps`) or `None` ([#128](https://github.com/DuguidLab/mesoscopy/issues/128)).
 
 ### Fixed
 
