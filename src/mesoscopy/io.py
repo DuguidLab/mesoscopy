@@ -259,14 +259,16 @@ def read_points(path: str) -> dict[str, tuple[float, float]]:
     raise ValueError(msg)
 
 
-def read_regressors(path: str) -> tuple[np.ndarray, list[str], np.ndarray]:
+def read_regressors(path: str) -> tuple[np.ndarray, list[str], np.ndarray, dict[str, typing.Any] | None]:
     """Read a regressor file in NPZ or HDF5 format.
 
     Args:
         path (str): Path to the regressor file.
 
     Returns:
-        tuple[np.ndarray, list[str], np.ndarray]: Regressor matrix, list of regressor labels, and trial indexes.
+        tuple[np.ndarray, list[str], np.ndarray, dict[str, typing.Any] | None]: Regressor matrix, list of regressor
+        labels, trial indexes, and behaviour alignment (`session_start_time`, `behaviour_session`, `timestamps`) or
+        None if the file has no `session_start_time`.
 
     Raises:
         ValueError: If the file format is unsupported.
@@ -279,36 +281,66 @@ def read_regressors(path: str) -> tuple[np.ndarray, list[str], np.ndarray]:
     raise ValueError(msg)
 
 
-def _read_npz_regressors(path: str) -> tuple[np.ndarray, list[str], np.ndarray]:
+def _read_npz_regressors(path: str) -> tuple[np.ndarray, list[str], np.ndarray, dict[str, typing.Any] | None]:
     """Read a regressor file in NPZ format.
 
     Args:
-        path (str): Path to the NPZ file. File should contain 'regressors', 'labels', and 'trial_idx' arrays.
+        path (str): Path to the NPZ file. File should contain 'regressors', 'labels', and 'trial_idx' arrays, and
+            optionally 'session_start_time', 'behaviour_session' and 'timestamps'.
 
     Returns:
-        tuple[np.ndarray, list[str], np.ndarray]: Regressor matrix, list of regressor labels, and trial indexes.
+        tuple[np.ndarray, list[str], np.ndarray, dict[str, typing.Any] | None]: Regressor matrix, list of regressor
+        labels, trial indexes, and behaviour alignment or None.
     """
     with np.load(path) as f:
         regressors = f.get("regressors")
         labels = f.get("labels", [])
         trial_indices = f.get("trial_idx", None)
-    return regressors, labels, trial_indices
+        alignment = None
+        if "session_start_time" in f:
+            alignment = {
+                "session_start_time": str(f["session_start_time"]),
+                "behaviour_session": str(f["behaviour_session"]) if "behaviour_session" in f else None,
+                "timestamps": np.asarray(f["timestamps"], dtype=np.float64) if "timestamps" in f else None,
+            }
+    return regressors, labels, trial_indices, alignment
 
 
-def _read_hdf5_regressors(path: str) -> tuple[np.ndarray, list[str], np.ndarray]:
+def _read_hdf5_regressors(path: str) -> tuple[np.ndarray, list[str], np.ndarray, dict[str, typing.Any] | None]:
     """Read a regressor file in HDF5 format.
 
     Args:
-        path (str): Path to the HDF5 file. File should contain 'regressors', 'labels', and 'trial_idx' datasets.
+        path (str): Path to the HDF5 file. File should contain 'regressors', 'labels', and 'trial_idx' datasets, and
+            optionally 'session_start_time', 'behaviour_session' and 'timestamps'.
 
     Returns:
-        tuple[np.ndarray, list[str], np.ndarray]: Regressor matrix, list of regressor labels, and trial indexes.
+        tuple[np.ndarray, list[str], np.ndarray, dict[str, typing.Any] | None]: Regressor matrix, list of regressor
+        labels, trial indexes, and behaviour alignment or None.
     """
     with h5py.File(path, "r") as f:
         regressors = np.array(f.get("regressors")[:])  # type: ignore
         labels = list(f.get("labels", None))  # type: ignore
         trial_indices = np.array(f.get("trial_idx", None))
-    return regressors, labels, trial_indices
+        alignment = None
+        if "session_start_time" in f:
+            alignment = {
+                "session_start_time": _decode(f["session_start_time"][()]),
+                "behaviour_session": _decode(f["behaviour_session"][()]) if "behaviour_session" in f else None,
+                "timestamps": np.asarray(f["timestamps"][:], dtype=np.float64) if "timestamps" in f else None,
+            }
+    return regressors, labels, trial_indices, alignment
+
+
+def _decode(value: typing.Any) -> str:
+    """Decode an HDF5 scalar string, bytes or str, to str.
+
+    Args:
+        value (typing.Any): Scalar read from an HDF5 dataset.
+
+    Returns:
+        str: Decoded string.
+    """
+    return value.decode("utf-8") if isinstance(value, bytes) else str(value)
 
 
 def read_nuisance_regressors(path: str) -> tuple[np.ndarray, list[str], np.ndarray]:
