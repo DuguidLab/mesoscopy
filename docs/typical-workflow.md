@@ -40,9 +40,11 @@ the recording or in the output directory; pass `-r/--recording-points` to point 
 mesoscopy register landmarks /path/to/example-recording.nwb
 ```
 
-The registered frames are written in Allen CCF template space at the atlas's own dimensions, which
-is what `mesoscopy process regions` expects. Use `--output-width` / `--output-height` only if
-you are registering onto a different template.
+The registered frames are written in Allen CCF template space. By default the template is scaled
+so that its pixels match the size of the recording's, so a recording keeps its own resolution rather
+than being resampled to the atlas's native 140x142 pixels. Pass `-s/--scale` to pick the template
+scale yourself (`--scale 1` gives the native atlas size). `mesoscopy process regions` resamples the
+atlas to whatever frame size the registration produced.
 
 !!! note
     `-t/--template-points` supplies the *template* landmarks being registered onto, not your
