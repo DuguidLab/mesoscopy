@@ -306,7 +306,7 @@ def regression_cmd(
     fast: bool,
     file_format: str,
 ) -> None:
-    """Perform pixel-wise ridge regression on a preprocessed ∆F/F recording."""
+    """Perform pixel-wise ridge regression on a preprocessed ∆F/F recording."""  # noqa: DOC501
     if not Path(out_dir).exists():
         click.echo(f"Creating output directory {out_dir}...")
         Path(out_dir).mkdir(parents=True)
@@ -317,8 +317,22 @@ def regression_cmd(
     session_id, deltaf_series, timestamps = io.load_deltaf(recording_path, nwb=nwb)
 
     click.echo(f"Loading regressors from {regressor_path}...")
-    regressors, labels, trial_idx = io.read_regressors(regressor_path)
+    regressors, labels, trial_idx, regressor_alignment = io.read_regressors(regressor_path)
     labels = list(labels)
+
+    recording_alignment = io.read_timestamps_aligned(recording_path)
+    try:
+        for warning in regr.check_alignment(recording_alignment, regressor_alignment):
+            click.echo(f"WARNING: {warning}")
+    except ValueError as err:
+        raise click.ClickException(str(err)) from err
+
+    alignment_attrs: dict[str, str] = {}
+    if recording_alignment is not None and regressor_alignment is not None:
+        alignment_attrs = {
+            "session_start_time": recording_alignment[1]["session_start_time"],
+            "behaviour_session": recording_alignment[1]["behaviour_session"],
+        }
 
     if nuisance_regressor_paths:
         # Nuisance regressors are recorded on their own clock (e.g. a behavioural camera), so both series are
@@ -357,6 +371,7 @@ def regression_cmd(
                     "mse": mse,
                     "labels": labels,
                     "trial_idx": trial_idx if trial_idx_used else [],
+                    **alignment_attrs,
                 },
             )
         elif file_format == "h5":
@@ -369,5 +384,6 @@ def regression_cmd(
                     "/labels": np.array(labels).astype("S"),
                     "/trial_idx": trial_idx if trial_idx_used else [],
                 },
+                attributes=alignment_attrs,
             )
     click.echo(f"Saved regression results at {outpath}")
