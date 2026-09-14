@@ -17,6 +17,7 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 ### Fixed
 
+- `register label` and the `inspect` viewers failed to launch with `AttributeError: No napari attribute view_image` on napari >= 0.6, which removed `napari.view_image`. The viewers are now created with `napari.Viewer().add_image`. The napari lower bound is now `>=0.6`, and Dependabot keeps `uv.lock` current so CI runs on new upstream releases.
 - `preprocess --no-qa` crashed when writing the preprocessed file, as the skipped QA results were passed to the HDF5 writer as `None`.
 
 ### Deprecated

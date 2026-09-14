@@ -85,7 +85,8 @@ def mark_landmarks(
     else:
         maxip_height, maxip_width = maxip_image.shape
 
-    viewer = napari.view_image(maxip_image)
+    viewer = napari.Viewer()
+    viewer.add_image(maxip_image, name="maxip")
 
     if alt_image is not None:
         if len(alt_image.shape) == 3:

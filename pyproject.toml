@@ -36,7 +36,7 @@ dependencies = [
     "scikit-video",
     "pandas", 
     "pynwb>=2.3.1, <3",
-    "napari>=0.4.19",
+    "napari>=0.6",
     "av>=14.4.0",
     "pims>=0.7",
     "pyqt5",
