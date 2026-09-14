@@ -1,15 +1,19 @@
+import ast
+import inspect
 import pathlib
 import shutil
 from importlib import resources
 from types import SimpleNamespace
 
 import h5py
+import napari
 import numpy as np
 import pytest
 from click.testing import CliRunner
 from skimage import transform as trf
 
 import mesoscopy
+import mesoscopy.inspect.data_viewers as data_viewers
 import mesoscopy.preprocess as preproc
 import mesoscopy.register as reg
 import mesoscopy.register.landmarks_gui as reg_gui
@@ -496,7 +500,27 @@ def test_register_landmarks_cli_default_points_h5(preproc_h5, output_dir):
     assert result.exit_code == 0
 
 
-def test_mark_landmarks_gui(): ...
+def _napari_attributes_used(module) -> set[str]:
+    """Names accessed as ``napari.<name>`` in the module source."""
+    tree = ast.parse(inspect.getsource(module))
+    return {
+        node.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "napari"
+    }
+
+
+@pytest.mark.parametrize("module", [reg_gui, data_viewers])
+def test_napari_api_used_exists(module):
+    """Every napari attribute the GUI modules touch exists in the installed napari.
+
+    The viewers are only ever exercised through a fake in the test suite, so a removed napari
+    entry point (``napari.view_image`` went in 0.6) would otherwise only surface at launch.
+    """
+    used = _napari_attributes_used(module)
+    assert used, "expected the module to use napari"
+    missing = sorted(name for name in used if not hasattr(napari, name))
+    assert not missing, f"{module.__name__} uses napari attributes missing in napari {napari.__version__}: {missing}"
 
 
 # ---------------------------------------------------------------------------
@@ -566,11 +590,13 @@ def _patch_napari(monkeypatch, final_state=None, captured=None):
     """
 
     class FakeViewer:
-        def __init__(self):
+        def __init__(self, *args, **kwargs):
             self.window = SimpleNamespace(add_dock_widget=lambda widget: None)
 
-        def add_image(self, *args, **kwargs):
-            pass
+        def add_image(self, image, *args, **kwargs):
+            # Record the first image added: the projection the landmarks are marked on.
+            if captured is not None and "image" not in captured:
+                captured["image"] = np.asarray(image)
 
         def add_points(self, data, **kwargs):
             if captured is not None:
@@ -580,12 +606,7 @@ def _patch_napari(monkeypatch, final_state=None, captured=None):
                 return _FakePointsLayer(data, kwargs["properties"]["label"])
             return _FakePointsLayer(*final_state)
 
-    def view_image(image, *args, **kwargs):
-        if captured is not None:
-            captured["image"] = np.asarray(image)
-        return FakeViewer()
-
-    monkeypatch.setattr(reg_gui.napari, "view_image", view_image)
+    monkeypatch.setattr(reg_gui.napari, "Viewer", FakeViewer)
     monkeypatch.setattr(reg_gui.napari, "run", lambda *args, **kwargs: None)
     monkeypatch.setattr(reg_gui, "_create_label_menu", lambda points_layer, labels: None)
 
