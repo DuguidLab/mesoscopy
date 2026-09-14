@@ -2012,3 +2012,45 @@ def test_perievent_cmd_output_filename(perievent_regions_csv, perievent_trials_c
     )
     assert result.exit_code == 0, result.output
     assert (pathlib.Path(output_dir) / f"ses-01_regions_event-{name}_perievent.csv").is_file()
+
+
+# ---------------------------------------------------------------------------
+# region extraction at template scale
+# ---------------------------------------------------------------------------
+
+
+def _upsampled_series(series, factor):
+    return np.repeat(np.repeat(series, factor, axis=1), factor, axis=2)
+
+
+def test_extract_all_regions_matches_at_template_scale():
+    """A 2x registered series has every pixel duplicated, so region means are identical to 1x."""
+    rng = np.random.default_rng(0)
+    series = rng.random((5, *mesoscopy.resources.atlas_shape()), dtype=np.float32)
+
+    native = extract_all_regions(series)
+    scaled = extract_all_regions(_upsampled_series(series, 2))
+
+    assert native.keys() == scaled.keys()
+    for region in native:
+        np.testing.assert_allclose(scaled[region], native[region], rtol=1e-5)
+
+
+def test_extract_region_activity_matches_at_template_scale():
+    rng = np.random.default_rng(1)
+    series = rng.random((5, *mesoscopy.resources.atlas_shape()), dtype=np.float32)
+
+    for hemisphere in ("left", "right", "both"):
+        native = extract_region_activity(series, "MOp1", hemisphere)
+        scaled = extract_region_activity(_upsampled_series(series, 3), "MOp1", hemisphere)
+        np.testing.assert_allclose(scaled, native, rtol=1e-5)
+
+
+def test_extract_all_regions_at_non_integer_template_scale():
+    """The atlas is resampled to whatever frame shape the registration produced."""
+    shape = mesoscopy.resources.template_shape(1.5)
+    series = np.ones((3, *shape), dtype=np.float32)
+
+    activity = extract_all_regions(series)
+
+    assert all(np.allclose(trace, 1.0) for trace in activity.values())

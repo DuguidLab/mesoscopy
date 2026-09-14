@@ -1,5 +1,6 @@
 import pathlib
 
+import h5py
 import numpy as np
 import pytest
 import zarr
@@ -269,3 +270,20 @@ def test_cmd_parity(raw_h5, output_dir):
         args=f"preprocess --out_dir {output_dir} --interim_dir {output_dir} {raw_h5}",
     )
     assert result.exit_code == 0
+
+
+def test_cmd_no_qa_writes_the_output(raw_h5, output_dir, tmp_path):
+    """Skipped QA checks leave None results, which must not reach the HDF5 writer."""
+    runner = CliRunner()
+    # The interim directory is removed on completion, so it must not be the output directory.
+    result = runner.invoke(
+        mesoscopy.cli,
+        args=f"preprocess --no-qa --out_dir {output_dir} --interim_dir {tmp_path / 'interim'} {raw_h5}",
+    )
+    assert result.exit_code == 0, result.output
+
+    outpath = next(pathlib.Path(output_dir).glob("*_preprocessed.h5"))
+    with h5py.File(outpath, "r") as f:
+        assert "/F" in f
+        assert "/qa/noise_levels" not in f
+        assert "/qa/checks/snr" not in f.attrs

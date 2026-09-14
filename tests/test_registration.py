@@ -24,6 +24,7 @@ from mesoscopy.register.transform import landmarks_affine
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def small_series():
     """A small (10, 40, 40) float32 DeltaF/F series with a fixed seed."""
@@ -35,13 +36,14 @@ def small_series():
 def landmark_pair():
     """Matching recording / template landmark dicts (pure translation: +2 col, +3 row)."""
     recording = {"bregma": (10.0, 10.0), "lambda": (30.0, 10.0), "midline": (10.0, 25.0)}
-    template  = {"bregma": (12.0, 13.0), "lambda": (32.0, 13.0), "midline": (12.0, 28.0)}
+    template = {"bregma": (12.0, 13.0), "lambda": (32.0, 13.0), "midline": (12.0, 28.0)}
     return recording, template
 
 
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 def test_landmarks_affine_defaults_to_atlas_shape(small_series, landmark_pair):
     """Registered frames are in template space, so they default to the atlas shape.
@@ -68,7 +70,7 @@ def test_landmarks_affine_transform_params(small_series, landmark_pair):
     recording_lm, template_lm = landmark_pair
     _, tform = landmarks_affine(small_series, recording_lm, template_lm)
 
-    template  = np.array(list(template_lm.values()),  dtype=np.float32)
+    template = np.array(list(template_lm.values()), dtype=np.float32)
     recording = np.array(list(recording_lm.values()), dtype=np.float32)
     expected_tform = trf.estimate_transform("affine", template, recording)
 
@@ -79,7 +81,7 @@ def test_landmarks_affine_matches_sequential_reference(small_series, landmark_pa
     """Parallel output must be numerically identical to the sequential per-frame loop."""
     recording_lm, template_lm = landmark_pair
 
-    template  = np.array(list(template_lm.values()),  dtype=np.float32)
+    template = np.array(list(template_lm.values()), dtype=np.float32)
     recording = np.array(list(recording_lm.values()), dtype=np.float32)
     ref_tform = trf.estimate_transform("affine", template, recording)
     reference = np.array(
@@ -713,3 +715,153 @@ def test_qa_plot_frame_landmarks_use_xy():
 
     np.testing.assert_array_equal(fig.data[1].x, landmarks[:, 0])
     np.testing.assert_array_equal(fig.data[1].y, landmarks[:, 1])
+
+
+# ---------------------------------------------------------------------------
+# Template scale
+# ---------------------------------------------------------------------------
+
+
+def test_auto_template_scale_recovers_the_recording_pixel_size():
+    template_lm = res.get_default_landmarks()
+    true_tform = trf.AffineTransform(scale=(2.0, 2.0), rotation=np.deg2rad(5), translation=(30, 20))
+    recording_lm = {name: tuple(true_tform(np.array([point]))[0]) for name, point in template_lm.items()}
+
+    assert trf_mod.auto_template_scale(recording_lm, template_lm) == pytest.approx(2.0)
+
+
+def test_auto_template_scale_uses_the_geometric_mean_of_anisotropic_scales():
+    template_lm = res.get_default_landmarks()
+    true_tform = trf.AffineTransform(scale=(2.0, 0.5))
+    recording_lm = {name: tuple(true_tform(np.array([point]))[0]) for name, point in template_lm.items()}
+
+    assert trf_mod.auto_template_scale(recording_lm, template_lm) == pytest.approx(1.0)
+
+
+def test_auto_template_scale_rejects_collinear_landmarks():
+    template = {"a": (0.0, 0.0), "b": (1.0, 1.0), "c": (2.0, 2.0)}
+    with pytest.raises(ValueError, match="collinear"):
+        trf_mod.auto_template_scale(template, template)
+
+
+def test_registration_at_scale_keeps_the_recording_resolution():
+    """Ground truth at scale: a recording at twice the atlas resolution registers back at 2x."""
+    atlas = res.get_atlas()[0].astype(np.float32)
+    template_lm = res.get_default_landmarks()
+
+    true_tform = trf.AffineTransform(scale=(2.0, 2.0), rotation=np.deg2rad(8), translation=(40, 25))
+    recording = trf.warp(atlas, true_tform.inverse, output_shape=(360, 380), order=0)
+    recording_lm = {name: tuple(true_tform(np.array([point]))[0]) for name, point in template_lm.items()}
+
+    scale = trf_mod.auto_template_scale(recording_lm, template_lm)
+    shape = res.template_shape(scale)
+    assert shape == (280, 284)
+
+    warped, tform = landmarks_affine(
+        recording[None], recording_lm, res.get_default_landmarks(shape), output_shape=shape
+    )
+    assert warped.shape == (1, 280, 284)
+
+    # Every landmark lands within a pixel of its scaled template position...
+    landed = tform.inverse(np.array(list(recording_lm.values())))
+    expected = np.array(list(res.get_default_landmarks(shape).values()))
+    assert np.linalg.norm(landed - expected, axis=1).max() < 1.0
+
+    # ...and the registered frame is the scaled atlas, so its region labels line up with the resampled atlas.
+    # Warped nearest-neighbour here: the cubic interpolation of the pipeline rings at label boundaries.
+    scaled_atlas = res.get_atlas(shape)[0]
+    labels = trf.warp(recording, tform, order=0, output_shape=shape)
+    inside = scaled_atlas > 0
+    assert np.mean(labels[inside] == scaled_atlas[inside]) > 0.99
+
+
+def _registered_attrs(path):
+    with h5py.File(path, "r") as f:
+        return {key: f.attrs[key] for key in f.attrs}
+
+
+def test_register_landmarks_cli_scale_option(preproc_h5, output_dir):
+    points = str(resources.files(res).joinpath("ccf_template_landmarks_140x142.csv"))
+    runner = CliRunner()
+    result = runner.invoke(mesoscopy.cli, args=f"register landmarks {preproc_h5} -r {points} -o {output_dir} -s 2")
+
+    assert result.exit_code == 0, result.output
+    outpath = pathlib.Path(output_dir) / "preproc_registered.h5"
+    with h5py.File(outpath, "r") as f:
+        assert f["/F"].shape[1:] == (280, 284)
+        expected = np.array(list(res.get_default_landmarks((280, 284)).values()))
+        np.testing.assert_allclose(f["/qa/template_landmarks"][...], expected)
+    attrs = _registered_attrs(outpath)
+    assert attrs["template"] == res.TEMPLATE_NAME
+    np.testing.assert_array_equal(attrs["template_shape"], [280, 284])
+    np.testing.assert_array_equal(attrs["template_scale"], [2.0, 2.0])
+
+
+def test_register_landmarks_cli_defaults_to_the_recording_pixel_size(preproc_h5, output_dir, tmp_path):
+    """Recording landmarks at twice the template's spacing give a 2x template by default."""
+    landmarks = res.scale_landmarks(res.get_default_landmarks(), (2.0, 2.0))
+    points = str(tmp_path / "landmarks.csv")
+    io.write_points(points, landmarks)
+
+    runner = CliRunner()
+    result = runner.invoke(mesoscopy.cli, args=f"register landmarks {preproc_h5} -r {points} -o {output_dir}")
+
+    assert result.exit_code == 0, result.output
+    assert "Template scale matching the recording's pixel size: 2.000" in result.output
+    outpath = pathlib.Path(output_dir) / "preproc_registered.h5"
+    with h5py.File(outpath, "r") as f:
+        assert f["/F"].shape[1:] == (280, 284)
+
+
+def test_register_landmarks_cli_deprecated_output_width_fills_height_at_atlas_aspect(preproc_h5, output_dir):
+    points = str(resources.files(res).joinpath("ccf_template_landmarks_140x142.csv"))
+    runner = CliRunner()
+    result = runner.invoke(
+        mesoscopy.cli, args=f"register landmarks {preproc_h5} -r {points} -o {output_dir} --output-width 284"
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "deprecated" in result.output
+    outpath = pathlib.Path(output_dir) / "preproc_registered.h5"
+    with h5py.File(outpath, "r") as f:
+        assert f["/F"].shape[1:] == (280, 284)
+    np.testing.assert_array_equal(_registered_attrs(outpath)["template_scale"], [2.0, 2.0])
+
+
+def test_register_landmarks_cli_rejects_scale_with_deprecated_options(preproc_h5, output_dir):
+    points = str(resources.files(res).joinpath("ccf_template_landmarks_140x142.csv"))
+    runner = CliRunner()
+    result = runner.invoke(
+        mesoscopy.cli, args=f"register landmarks {preproc_h5} -r {points} -o {output_dir} -s 2 --output-height 280"
+    )
+
+    assert result.exit_code != 0
+    assert isinstance(result.exception, ValueError)
+    assert "--scale cannot be combined" in str(result.exception)
+
+
+def test_register_landmarks_cli_custom_template_ignores_scale(preproc_h5, output_dir):
+    """A custom template's image size is unknown, so it is used as given and no atlas attrs are written."""
+    points = str(resources.files(res).joinpath("ccf_template_landmarks_140x142.csv"))
+    runner = CliRunner()
+    result = runner.invoke(
+        mesoscopy.cli, args=f"register landmarks {preproc_h5} -r {points} -t {points} -o {output_dir} -s 2"
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "ignoring it for -t" in result.output
+    outpath = pathlib.Path(output_dir) / "preproc_registered.h5"
+    with h5py.File(outpath, "r") as f:
+        assert f["/F"].shape[1:] == res.atlas_shape()
+    assert "template" not in _registered_attrs(outpath)
+
+
+def test_register_landmarks_cli_nwb_records_the_template(preproc_nwb, output_dir):
+    points = str(resources.files(res).joinpath("ccf_template_landmarks_140x142.csv"))
+    runner = CliRunner()
+    result = runner.invoke(mesoscopy.cli, args=f"register landmarks {preproc_nwb} -r {points} -o {output_dir} -s 2")
+
+    assert result.exit_code == 0, result.output
+    written = io.read_nwb(preproc_nwb, mode="r")
+    stack = written.processing["ophys"]["CCFRegisteredSeries"]
+    assert f"Template: {res.TEMPLATE_NAME} at 284x280 pixels (scale 2.000 x, 2.000 y)" in stack.corrected.comments
