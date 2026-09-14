@@ -77,6 +77,50 @@ def regressor_h5(tmp_path_factory):
 
 
 @pytest.fixture
+def aligned_preproc_h5(preproc_h5):
+    """Copy of the (300, 40, 40) preproc_h5 fixture carrying behaviour-aligned timestamps."""
+    path = pathlib.Path(preproc_h5).with_name("preproc_aligned.h5")
+    path.write_bytes(pathlib.Path(preproc_h5).read_bytes())
+    io.write_timestamps_aligned(
+        str(path),
+        np.arange(300) * 0.04 + 2.0,
+        {"session_start_time": "2024-01-01T14:00:00", "behaviour_session": "ses-aligned", "offset_s": 2.0},
+    )
+    return str(path)
+
+
+@pytest.fixture
+def aligned_preproc_h5_bytes_timestamps(preproc_h5_bytes_timestamps):
+    """Copy of `preproc_h5_bytes_timestamps` carrying behaviour-aligned timestamps."""
+    source = pathlib.Path(preproc_h5_bytes_timestamps)
+    path = source.with_name("preproc_bytes_aligned.h5")
+    path.write_bytes(source.read_bytes())
+    io.write_timestamps_aligned(
+        str(path),
+        np.arange(300) * 0.001 + 2.0,
+        {"session_start_time": "2024-01-01T14:00:00", "behaviour_session": "ses-aligned", "offset_s": 2.0},
+    )
+    return str(path)
+
+
+@pytest.fixture
+def aligned_regressor_npz(tmp_path_factory):
+    """NPZ regressor file matching `aligned_preproc_h5`, carrying the behaviour alignment keys."""
+    tmpfile = tmp_path_factory.mktemp("data") / "regressors_aligned.npz"
+    rng = np.random.default_rng(5)
+    np.savez(
+        tmpfile,
+        regressors=rng.normal(size=(300, 3)),
+        labels=np.array(["reg_a", "reg_b", "reg_c"]),
+        timestamps=np.arange(300) * 0.04 + 2.0,
+        trial_idx=np.arange(300),
+        session_start_time="2024-01-01T14:00:00",
+        behaviour_session="ses-aligned",
+    )
+    return str(tmpfile)
+
+
+@pytest.fixture
 def nuisance_regressor_h5(tmp_path_factory):
     """Create an HDF5 nuisance regressor file on its own (coarser) timebase, spanning the same duration as the
     (300, 40, 40) preproc_h5 fixture's timestamps (0 to 0.299 seconds)."""
@@ -433,6 +477,61 @@ class TestAppendNuisanceRegressors:
 
 
 # ---------------------------------------------------------------------------
+# regression.check_alignment
+# ---------------------------------------------------------------------------
+
+
+ALIGNED = np.arange(300) * 0.04 + 2.0
+RECORDING_ATTRS = {"session_start_time": "2024-01-01T14:00:00", "behaviour_session": "ses", "offset_s": 2.0}
+REGRESSOR_ALIGNMENT = {
+    "session_start_time": "2024-01-01T14:00:00",
+    "behaviour_session": "ses",
+    "timestamps": ALIGNED.copy(),
+}
+
+
+class TestCheckAlignment:
+    def test_agreeing_inputs_give_no_warnings(self):
+        assert regr.check_alignment((ALIGNED, RECORDING_ATTRS), REGRESSOR_ALIGNMENT) == []
+
+    def test_recording_without_alignment_warns(self):
+        warnings = regr.check_alignment(None, REGRESSOR_ALIGNMENT)
+        assert len(warnings) == 1
+        assert "positionally" in warnings[0]
+
+    def test_regressors_without_alignment_warns(self):
+        warnings = regr.check_alignment((ALIGNED, RECORDING_ATTRS), None)
+        assert len(warnings) == 1
+        assert "positionally" in warnings[0]
+
+    def test_session_start_mismatch_raises(self):
+        regressors = {**REGRESSOR_ALIGNMENT, "session_start_time": "2024-01-01T15:00:00"}
+        with pytest.raises(ValueError, match="session start time"):
+            regr.check_alignment((ALIGNED, RECORDING_ATTRS), regressors)
+
+    def test_length_mismatch_raises(self):
+        regressors = {**REGRESSOR_ALIGNMENT, "timestamps": ALIGNED[:-1]}
+        with pytest.raises(ValueError, match="299 timestamps"):
+            regr.check_alignment((ALIGNED, RECORDING_ATTRS), regressors)
+
+    def test_missing_regressor_timestamps_warns(self):
+        regressors = {**REGRESSOR_ALIGNMENT, "timestamps": None}
+        warnings = regr.check_alignment((ALIGNED, RECORDING_ATTRS), regressors)
+        assert len(warnings) == 1
+        assert "no timestamps" in warnings[0]
+
+    def test_timestamp_difference_above_tolerance_warns_with_value(self):
+        regressors = {**REGRESSOR_ALIGNMENT, "timestamps": ALIGNED + 0.01}
+        warnings = regr.check_alignment((ALIGNED, RECORDING_ATTRS), regressors)
+        assert len(warnings) == 1
+        assert "0.0100 s" in warnings[0]
+
+    def test_timestamp_difference_within_tolerance_is_silent(self):
+        regressors = {**REGRESSOR_ALIGNMENT, "timestamps": ALIGNED + 0.004}
+        assert regr.check_alignment((ALIGNED, RECORDING_ATTRS), regressors) == []
+
+
+# ---------------------------------------------------------------------------
 # io.read_nuisance_regressors
 # ---------------------------------------------------------------------------
 
@@ -455,6 +554,45 @@ class TestReadNuisanceRegressors:
         path.touch()
         with pytest.raises(ValueError, match="Unsupported"):
             io.read_nuisance_regressors(str(path))
+
+
+class TestReadRegressors:
+    def test_npz_without_alignment(self, regressor_npz):
+        regressors, labels, trial_idx, alignment = io.read_regressors(regressor_npz)
+        assert regressors.shape == (300, 3)
+        assert list(labels) == ["reg_a", "reg_b", "reg_c"]
+        assert trial_idx is None
+        assert alignment is None
+
+    def test_npz_with_alignment(self, aligned_regressor_npz):
+        _, _, trial_idx, alignment = io.read_regressors(aligned_regressor_npz)
+        assert trial_idx.shape == (300,)
+        assert alignment is not None
+        assert alignment["session_start_time"] == "2024-01-01T14:00:00"
+        assert alignment["behaviour_session"] == "ses-aligned"
+        assert alignment["timestamps"].shape == (300,)
+        assert alignment["timestamps"].dtype == np.float64
+
+    def test_h5_without_alignment(self, regressor_h5):
+        regressors, labels, trial_idx, alignment = io.read_regressors(regressor_h5)
+        assert regressors.shape == (300, 3)
+        assert trial_idx.shape == (300,)
+        assert alignment is None
+
+    def test_h5_with_alignment(self, tmp_path):
+        path = tmp_path / "regressors_aligned.h5"
+        with h5.File(str(path), "w") as f:
+            f.create_dataset("regressors", data=np.zeros((10, 2)))
+            f.create_dataset("labels", data=np.array(["a", "b"], dtype="S"))
+            f.create_dataset("timestamps", data=np.arange(10, dtype=float))
+            f.create_dataset("session_start_time", data="2024-01-01T14:00:00")
+            f.create_dataset("behaviour_session", data="ses")
+        _, _, _, alignment = io.read_regressors(str(path))
+        assert alignment == {
+            "session_start_time": "2024-01-01T14:00:00",
+            "behaviour_session": "ses",
+            "timestamps": pytest.approx(np.arange(10, dtype=float)),
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -497,6 +635,40 @@ def test_zscore_cmd_h5(preproc_h5, output_dir):
     assert io.read_h5(str(outpath))["/F"].shape == (300, 40, 40)
 
 
+def test_smooth_cmd_propagates_timestamps_aligned(aligned_preproc_h5, output_dir):
+    result = CliRunner().invoke(mesoscopy.cli, args=f"process smooth {aligned_preproc_h5} -o {output_dir}")
+    assert result.exit_code == 0, result.output
+
+    source = io.read_timestamps_aligned(aligned_preproc_h5)
+    copied = io.read_timestamps_aligned(str(pathlib.Path(output_dir) / "preproc_aligned_smoothed.h5"))
+    assert copied is not None
+    np.testing.assert_array_equal(copied[0], source[0])
+    assert copied[1] == source[1]
+
+
+def test_smooth_cmd_without_timestamps_aligned(preproc_h5, output_dir):
+    result = CliRunner().invoke(mesoscopy.cli, args=f"process smooth {preproc_h5} -o {output_dir}")
+    assert result.exit_code == 0, result.output
+    assert io.read_timestamps_aligned(str(pathlib.Path(output_dir) / "preproc_smoothed.h5")) is None
+
+
+def test_zscore_cmd_propagates_timestamps_aligned(aligned_preproc_h5, output_dir):
+    result = CliRunner().invoke(mesoscopy.cli, args=f"process zscore {aligned_preproc_h5} -o {output_dir}")
+    assert result.exit_code == 0, result.output
+
+    source = io.read_timestamps_aligned(aligned_preproc_h5)
+    copied = io.read_timestamps_aligned(str(pathlib.Path(output_dir) / "preproc_aligned_zscored.h5"))
+    assert copied is not None
+    np.testing.assert_array_equal(copied[0], source[0])
+    assert copied[1] == source[1]
+
+
+def test_zscore_cmd_without_timestamps_aligned(preproc_h5, output_dir):
+    result = CliRunner().invoke(mesoscopy.cli, args=f"process zscore {preproc_h5} -o {output_dir}")
+    assert result.exit_code == 0, result.output
+    assert io.read_timestamps_aligned(str(pathlib.Path(output_dir) / "preproc_zscored.h5")) is None
+
+
 def test_zscore_cmd_nwb(preproc_nwb, output_dir):
     runner = CliRunner()
     result = runner.invoke(mesoscopy.cli, args=f"process zscore {preproc_nwb} -o {output_dir}")
@@ -522,6 +694,33 @@ def test_regions_cmd(preproc_h5_bytes_timestamps, output_dir, mock_left_aba, moc
 
     region_activity = pd.read_csv(outpath)
     assert set(region_activity["region"]) == {"L_REG1", "R_REG1"}
+
+
+def test_regions_cmd_adds_time_aligned_column(aligned_preproc_h5_bytes_timestamps, output_dir, mask_npy):
+    result = CliRunner().invoke(
+        mesoscopy.cli, args=f"process regions {aligned_preproc_h5_bytes_timestamps} -o {output_dir} -m {mask_npy}"
+    )
+    assert result.exit_code == 0, result.output
+
+    region_activity = pd.read_csv(pathlib.Path(output_dir) / "preproc_bytes_aligned_regions.csv")
+    columns = list(region_activity.columns)
+    assert columns.index("time_aligned") == columns.index("timestamp") + 1
+    assert region_activity["time_aligned"].dtype == np.float64
+
+    # Each row's aligned time matches its frame, whichever region it belongs to.
+    session_start = datetime(2024, 1, 1, 14, 0, 0)
+    elapsed = [(datetime.fromisoformat(ts) - session_start).total_seconds() for ts in region_activity["timestamp"]]
+    np.testing.assert_allclose(region_activity["time_aligned"], np.array(elapsed) + 2.0, atol=1e-9)
+
+
+def test_regions_cmd_without_timestamps_aligned_has_no_column(preproc_h5_bytes_timestamps, output_dir, mask_npy):
+    result = CliRunner().invoke(
+        mesoscopy.cli, args=f"process regions {preproc_h5_bytes_timestamps} -o {output_dir} -m {mask_npy}"
+    )
+    assert result.exit_code == 0, result.output
+
+    region_activity = pd.read_csv(pathlib.Path(output_dir) / "preproc_bytes_regions.csv")
+    assert "time_aligned" not in region_activity.columns
 
 
 def test_regions_cmd_mask_only_skips_aba(preproc_h5_bytes_timestamps, output_dir, mask_npy):
@@ -689,6 +888,113 @@ def test_regression_cmd_not_fast(preproc_h5, regressor_npz, output_dir):
     assert outpath.is_file()
 
 
+def test_regression_cmd_aligned_copies_alignment_to_npz(aligned_preproc_h5, aligned_regressor_npz, output_dir):
+    result = CliRunner().invoke(
+        mesoscopy.cli,
+        args=f"process regression {aligned_preproc_h5} {aligned_regressor_npz} -o {output_dir} --fast",
+    )
+    assert result.exit_code == 0, result.output
+    assert "WARNING" not in result.output
+
+    with np.load(pathlib.Path(output_dir) / "preproc_aligned_regression.npz") as f:
+        assert str(f["session_start_time"]) == "2024-01-01T14:00:00"
+        assert str(f["behaviour_session"]) == "ses-aligned"
+        assert f["trial_idx"].shape == (300,)
+
+
+def test_regression_cmd_aligned_copies_alignment_to_h5(aligned_preproc_h5, aligned_regressor_npz, output_dir):
+    result = CliRunner().invoke(
+        mesoscopy.cli,
+        args=f"process regression {aligned_preproc_h5} {aligned_regressor_npz} -o {output_dir} --fast --h5",
+    )
+    assert result.exit_code == 0, result.output
+
+    with h5.File(pathlib.Path(output_dir) / "preproc_aligned_regression.h5", "r") as f:
+        assert f.attrs["session_start_time"] == "2024-01-01T14:00:00"
+        assert f.attrs["behaviour_session"] == "ses-aligned"
+
+
+def test_regression_cmd_unaligned_recording_warns_and_continues(preproc_h5, aligned_regressor_npz, output_dir):
+    result = CliRunner().invoke(
+        mesoscopy.cli,
+        args=f"process regression {preproc_h5} {aligned_regressor_npz} -o {output_dir} --fast",
+    )
+    assert result.exit_code == 0, result.output
+    assert "WARNING" in result.output
+    assert "positionally" in result.output
+
+    with np.load(pathlib.Path(output_dir) / "preproc_regression.npz") as f:
+        assert "session_start_time" not in f
+        assert f["trial_idx"].shape == (300,)
+
+
+def test_regression_cmd_unaligned_regressors_warns_and_continues(aligned_preproc_h5, regressor_npz, output_dir):
+    result = CliRunner().invoke(
+        mesoscopy.cli,
+        args=f"process regression {aligned_preproc_h5} {regressor_npz} -o {output_dir} --fast",
+    )
+    assert result.exit_code == 0, result.output
+    assert "positionally" in result.output
+
+    with np.load(pathlib.Path(output_dir) / "preproc_aligned_regression.npz") as f:
+        assert "session_start_time" not in f
+
+
+def test_regression_cmd_session_start_mismatch_fails(aligned_preproc_h5, tmp_path, output_dir):
+    regressor_path = tmp_path / "regressors.npz"
+    np.savez(
+        regressor_path,
+        regressors=np.zeros((300, 2)),
+        labels=np.array(["a", "b"]),
+        timestamps=np.arange(300) * 0.04 + 2.0,
+        session_start_time="2024-01-01T15:00:00",
+        behaviour_session="ses-aligned",
+    )
+    result = CliRunner().invoke(
+        mesoscopy.cli,
+        args=f"process regression {aligned_preproc_h5} {regressor_path} -o {output_dir} --fast",
+    )
+    assert result.exit_code != 0
+    assert "session start time" in result.output
+    assert not (pathlib.Path(output_dir) / "preproc_aligned_regression.npz").is_file()
+
+
+def test_regression_cmd_length_mismatch_fails(aligned_preproc_h5, tmp_path, output_dir):
+    regressor_path = tmp_path / "regressors.npz"
+    np.savez(
+        regressor_path,
+        regressors=np.zeros((299, 2)),
+        labels=np.array(["a", "b"]),
+        timestamps=np.arange(299) * 0.04 + 2.0,
+        session_start_time="2024-01-01T14:00:00",
+        behaviour_session="ses-aligned",
+    )
+    result = CliRunner().invoke(
+        mesoscopy.cli,
+        args=f"process regression {aligned_preproc_h5} {regressor_path} -o {output_dir} --fast",
+    )
+    assert result.exit_code != 0
+    assert "299 timestamps" in result.output
+
+
+def test_regression_cmd_timestamp_drift_warns(aligned_preproc_h5, tmp_path, output_dir):
+    regressor_path = tmp_path / "regressors.npz"
+    np.savez(
+        regressor_path,
+        regressors=np.random.default_rng(6).normal(size=(300, 2)),
+        labels=np.array(["a", "b"]),
+        timestamps=np.arange(300) * 0.04 + 2.02,
+        session_start_time="2024-01-01T14:00:00",
+        behaviour_session="ses-aligned",
+    )
+    result = CliRunner().invoke(
+        mesoscopy.cli,
+        args=f"process regression {aligned_preproc_h5} {regressor_path} -o {output_dir} --fast",
+    )
+    assert result.exit_code == 0, result.output
+    assert "differ by up to 0.0200 s" in result.output
+
+
 def test_regression_cmd_with_nuisance_regressors(preproc_h5, regressor_npz, nuisance_regressor_h5, output_dir):
     """Nuisance regressors from an external file should be interpolated, z-scored, and appended."""
     runner = CliRunner()
@@ -827,8 +1133,10 @@ def region_deltaf_series():
 def test_extract_region_activity_left_hemisphere_shape(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_region_activity(region_deltaf_series, "REG1", "left")
     assert result.shape == (_N_FRAMES,)
 
@@ -836,8 +1144,10 @@ def test_extract_region_activity_left_hemisphere_shape(
 def test_extract_region_activity_right_hemisphere_shape(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_region_activity(region_deltaf_series, "REG1", "right")
     assert result.shape == (_N_FRAMES,)
 
@@ -845,8 +1155,10 @@ def test_extract_region_activity_right_hemisphere_shape(
 def test_extract_region_activity_both_hemispheres_shape(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_region_activity(region_deltaf_series, "REG1", "both")
     assert result.shape == (_N_FRAMES,)
 
@@ -856,8 +1168,10 @@ def test_extract_region_activity_left_hemisphere_values(
 ):
     # Region 1 occupies rows 0-1, cols 0-2 in the left atlas.
     expected = region_deltaf_series[:, 0:2, 0:3].mean(axis=(1, 2))
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_region_activity(region_deltaf_series, "REG1", "left")
     np.testing.assert_allclose(result, expected)
 
@@ -867,8 +1181,10 @@ def test_extract_region_activity_right_hemisphere_values(
 ):
     # right_aba = flip(left_aba): region 1 lands in rows 0-1, cols 3-5.
     expected = region_deltaf_series[:, 0:2, 3:6].mean(axis=(1, 2))
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_region_activity(region_deltaf_series, "REG1", "right")
     np.testing.assert_allclose(result, expected)
 
@@ -878,8 +1194,10 @@ def test_extract_region_activity_both_hemispheres_values(
 ):
     # left + right: region 1 covers rows 0-1 across all 6 columns.
     expected = region_deltaf_series[:, 0:2, :].mean(axis=(1, 2))
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_region_activity(region_deltaf_series, "REG1", "both")
     np.testing.assert_allclose(result, expected)
 
@@ -887,8 +1205,10 @@ def test_extract_region_activity_both_hemispheres_values(
 def test_extract_region_activity_different_regions_produce_different_results(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         reg1 = extract_region_activity(region_deltaf_series, "REG1", "left")
         reg2 = extract_region_activity(region_deltaf_series, "REG2", "left")
     assert not np.allclose(reg1, reg2), "Different regions should produce different activity signals"
@@ -897,8 +1217,10 @@ def test_extract_region_activity_different_regions_produce_different_results(
 def test_extract_region_activity_invalid_hemisphere_raises(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         with pytest.raises(ValueError, match="hemisphere"):
             extract_region_activity(region_deltaf_series, "REG1", "bilateral")
 
@@ -907,8 +1229,10 @@ def test_extract_region_activity_unknown_acronym_raises(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
     """An unrecognised acronym is a ValueError naming it, not an IndexError from the id lookup."""
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         with pytest.raises(ValueError, match="REG3 not recognised"):
             extract_region_activity(region_deltaf_series, "REG3", "left")
 
@@ -916,8 +1240,10 @@ def test_extract_region_activity_unknown_acronym_raises(
 def test_extract_region_activity_unknown_acronym_suggests_close_matches(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         with pytest.raises(ValueError, match="Closest matches") as excinfo:
             extract_region_activity(region_deltaf_series, "REG3", "left")
     assert "REG1" in str(excinfo.value)
@@ -927,8 +1253,10 @@ def test_extract_region_activity_close_match_suggestion_ignores_case(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
     """Lookup stays case-sensitive, but the suggestion ignores case."""
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         with pytest.raises(ValueError, match="Closest matches") as excinfo:
             extract_region_activity(region_deltaf_series, "reg1", "left")
     assert "REG1" in str(excinfo.value)
@@ -938,8 +1266,10 @@ def test_extract_region_activity_unknown_acronym_without_close_match(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
     """Nothing similar in the atlas means no misleading suggestion."""
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         with pytest.raises(ValueError, match="not recognised") as excinfo:
             extract_region_activity(region_deltaf_series, "zzzz", "left")
     assert "Closest matches" not in str(excinfo.value)
@@ -948,8 +1278,10 @@ def test_extract_region_activity_unknown_acronym_without_close_match(
 def test_extract_region_activity_hemisphere_argument_case_insensitive(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         lower = extract_region_activity(region_deltaf_series, "REG1", "left")
         upper = extract_region_activity(region_deltaf_series, "REG1", "LEFT")
     np.testing.assert_allclose(lower, upper)
@@ -958,8 +1290,10 @@ def test_extract_region_activity_hemisphere_argument_case_insensitive(
 def test_extract_region_activity_returns_plain_ndarray(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_region_activity(region_deltaf_series, "REG1", "left")
     assert not isinstance(result, np.ma.MaskedArray)
 
@@ -971,8 +1305,10 @@ def test_extract_region_activity_ignores_nan_pixels(
     series[:, 0, 0] = np.nan
     expected = np.nanmean(series[:, 0:2, 0:3].reshape(_N_FRAMES, -1), axis=1)
 
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_region_activity(series, "REG1", "left")
 
     # A MaskedArray result swallows both assertions below, so check the type before comparing values.
@@ -987,9 +1323,11 @@ def test_extract_region_activity_all_nan_frame_is_nan(
     series = region_deltaf_series.copy()
     series[0, 0:2, 0:3] = np.nan
 
-    with warnings.catch_warnings(), \
-         patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        warnings.catch_warnings(),
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         warnings.simplefilter("ignore", RuntimeWarning)
         result = extract_region_activity(series, "REG1", "left")
 
@@ -1001,9 +1339,11 @@ def test_extract_region_activity_empty_region_is_nan(
     region_left_aba, region_right_aba, region_annotations_with_empty, region_deltaf_series
 ):
     """A region with no pixels in the atlas gives NaN rather than raising."""
-    with warnings.catch_warnings(), \
-         patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations_with_empty):
+    with (
+        warnings.catch_warnings(),
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations_with_empty),
+    ):
         warnings.simplefilter("ignore", RuntimeWarning)
         result = extract_region_activity(region_deltaf_series, "EMPTY", "left")
 
@@ -1017,8 +1357,10 @@ def test_extract_region_activity_empty_region_is_nan(
 
 
 def test_extract_all_regions_returns_dict(region_left_aba, region_right_aba, region_annotations, region_deltaf_series):
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_all_regions(region_deltaf_series)
     assert isinstance(result, dict)
 
@@ -1026,8 +1368,10 @@ def test_extract_all_regions_returns_dict(region_left_aba, region_right_aba, reg
 def test_extract_all_regions_keys_have_hemisphere_prefix(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_all_regions(region_deltaf_series)
     for key in result:
         assert key.startswith("L_") or key.startswith("R_"), f"Unexpected key format: {key}"
@@ -1036,8 +1380,10 @@ def test_extract_all_regions_keys_have_hemisphere_prefix(
 def test_extract_all_regions_both_hemispheres_present_for_each_region(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_all_regions(region_deltaf_series)
     for region in ("REG1", "REG2"):
         assert f"L_{region}" in result
@@ -1047,8 +1393,10 @@ def test_extract_all_regions_both_hemispheres_present_for_each_region(
 def test_extract_all_regions_values_have_correct_shape(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_all_regions(region_deltaf_series)
     for key, value in result.items():
         assert value.shape == (_N_FRAMES,), f"Wrong shape for {key}: {value.shape}"
@@ -1058,8 +1406,10 @@ def test_extract_all_regions_default_exclude_filters_regions(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
     # FRP1 is in DEFAULT_EXCLUDE; it should be absent from the result.
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_all_regions(region_deltaf_series)
     assert "L_FRP1" not in result
     assert "R_FRP1" not in result
@@ -1068,8 +1418,10 @@ def test_extract_all_regions_default_exclude_filters_regions(
 def test_extract_all_regions_ignore_default_exclude_includes_all_regions(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_all_regions(region_deltaf_series, ignore_default_exclude=True)
     assert "L_FRP1" in result
     assert "R_FRP1" in result
@@ -1078,8 +1430,10 @@ def test_extract_all_regions_ignore_default_exclude_includes_all_regions(
 def test_extract_all_regions_custom_exclude_removes_region(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_all_regions(region_deltaf_series, exclude=["REG1"])
     assert "L_REG1" not in result
     assert "R_REG1" not in result
@@ -1090,8 +1444,10 @@ def test_extract_all_regions_custom_exclude_removes_region(
 def test_extract_all_regions_custom_exclude_combined_with_default(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_all_regions(region_deltaf_series, exclude=["REG1"])
     assert "L_FRP1" not in result
     assert "L_REG1" not in result
@@ -1102,8 +1458,10 @@ def test_extract_all_regions_does_not_mutate_default_exclude(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
     original = list(DEFAULT_EXCLUDE)
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         extract_all_regions(region_deltaf_series, exclude=["REG1"])
     assert original == DEFAULT_EXCLUDE, "extract_all_regions must not mutate DEFAULT_EXCLUDE"
 
@@ -1112,8 +1470,10 @@ def test_extract_all_regions_values_match_extract_region_activity(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
     """extract_all_regions results should match extract_region_activity for each region."""
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         all_regions = extract_all_regions(region_deltaf_series, ignore_default_exclude=True)
         single_left = extract_region_activity(region_deltaf_series, "REG2", "left")
         single_right = extract_region_activity(region_deltaf_series, "REG2", "right")
@@ -1126,8 +1486,10 @@ def test_extract_all_regions_values_match_direct_mean(
 ):
     """Region 1 occupies rows 0-1, cols 0-2 in the left atlas."""
     expected = region_deltaf_series[:, 0:2, 0:3].mean(axis=(1, 2))
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_all_regions(region_deltaf_series, ignore_default_exclude=True)
     np.testing.assert_allclose(result["L_REG1"], expected)
 
@@ -1139,8 +1501,10 @@ def test_extract_all_regions_ignores_nan_pixels(
     series[:, 0, 0] = np.nan
     expected = np.nanmean(series[:, 0:2, 0:3].reshape(_N_FRAMES, -1), axis=1)
 
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_all_regions(series, ignore_default_exclude=True)
 
     assert not np.isnan(result["L_REG1"]).any()
@@ -1154,8 +1518,10 @@ def test_extract_all_regions_nan_does_not_leak_into_other_regions(
     series = region_deltaf_series.copy()
     series[:, 0, 0] = np.nan
 
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         clean = extract_all_regions(region_deltaf_series, ignore_default_exclude=True)
         result = extract_all_regions(series, ignore_default_exclude=True)
 
@@ -1169,9 +1535,11 @@ def test_extract_all_regions_all_nan_region_frame_is_nan(
     series = region_deltaf_series.copy()
     series[0, 0:2, 0:3] = np.nan
 
-    with warnings.catch_warnings(), \
-         patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        warnings.catch_warnings(),
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         warnings.simplefilter("ignore", RuntimeWarning)
         result = extract_all_regions(series, ignore_default_exclude=True)
 
@@ -1184,9 +1552,11 @@ def test_extract_all_regions_empty_region_is_nan(
     region_left_aba, region_right_aba, region_annotations_with_empty, region_deltaf_series
 ):
     """A region with no pixels in the atlas gives NaN rather than nulling its neighbours."""
-    with warnings.catch_warnings(), \
-         patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations_with_empty):
+    with (
+        warnings.catch_warnings(),
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations_with_empty),
+    ):
         warnings.simplefilter("ignore", RuntimeWarning)
         result = extract_all_regions(region_deltaf_series, ignore_default_exclude=True)
 
@@ -1202,9 +1572,11 @@ def test_extract_all_regions_matches_extract_region_activity_with_nans(
     series[:, 0, 0] = np.nan
     series[2, 2:4, 0:3] = np.nan
 
-    with warnings.catch_warnings(), \
-         patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        warnings.catch_warnings(),
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         warnings.simplefilter("ignore", RuntimeWarning)
         all_regions = extract_all_regions(series, ignore_default_exclude=True)
         for region in ("REG1", "REG2"):
@@ -1220,24 +1592,26 @@ def test_extract_all_regions_matches_extract_mask_activity_with_nans(
     series = region_deltaf_series.copy()
     series[:, 0, 0] = np.nan
 
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_all_regions(series, ignore_default_exclude=True)
 
     np.testing.assert_allclose(result["L_REG1"], extract_mask_activity(series, region_left_aba == 1))
 
 
-def test_extract_all_regions_handles_nans_across_frame_blocks(
-    region_left_aba, region_right_aba, region_annotations
-):
+def test_extract_all_regions_handles_nans_across_frame_blocks(region_left_aba, region_right_aba, region_annotations):
     """Frames are processed in blocks, so NaN counts must stay per-frame across a block boundary."""
     rng = np.random.default_rng(1)
     series = rng.random((_LONG_N_FRAMES, _ATLAS_H, _ATLAS_W))
     series[::3, 0, 0] = np.nan
     expected = np.nanmean(series[:, 0:2, 0:3].reshape(_LONG_N_FRAMES, -1), axis=1)
 
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         result = extract_all_regions(series, ignore_default_exclude=True)
 
     np.testing.assert_allclose(result["L_REG1"], expected)
@@ -1291,8 +1665,10 @@ def test_extract_mask_activity_matches_aba_extraction(
     region_left_aba, region_right_aba, region_annotations, region_deltaf_series
 ):
     """A mask drawn over an ABA region should give the same trace as extracting that region."""
-    with patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)), \
-         patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations):
+    with (
+        patch("mesoscopy.resources.get_atlas", return_value=(region_left_aba, region_right_aba)),
+        patch("mesoscopy.resources.get_atlas_annotations", return_value=region_annotations),
+    ):
         aba = extract_region_activity(region_deltaf_series, "REG2", "left")
     result = extract_mask_activity(region_deltaf_series, region_left_aba == 2)
     np.testing.assert_allclose(result, aba)

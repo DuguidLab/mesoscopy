@@ -19,12 +19,16 @@
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
 
+import typing
 from datetime import datetime
 
 import numpy as np
 from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_squared_error
 from sklearn.metrics import r2_score
+
+# Largest tolerated difference between recording and regressor aligned timestamps before warning, in seconds.
+ALIGNED_TIMESTAMP_TOLERANCE_S = 0.005
 
 
 def ridge_regression(deltaf_series: np.ndarray, regressors: np.ndarray) -> tuple:
@@ -211,6 +215,53 @@ def append_nuisance_regressors(
     combined_labels = [*labels, *nuisance_labels]
 
     return combined_regressors, combined_labels
+
+
+def check_alignment(
+    recording: tuple[np.ndarray, dict[str, typing.Any]] | None,
+    regressors: dict[str, typing.Any] | None,
+) -> list[str]:
+    """Check that a recording's behaviour-aligned timestamps agree with a regressor file's.
+
+    Args:
+        recording (tuple[np.ndarray, dict[str, typing.Any]] | None): The recording's `/timestamps_aligned` dataset
+            and attributes, as returned by `io.read_timestamps_aligned`, or None if absent.
+        regressors (dict[str, typing.Any] | None): The regressor file's alignment (`session_start_time`,
+            `behaviour_session`, `timestamps`), as returned by `io.read_regressors`, or None if absent.
+
+    Returns:
+        list[str]: Warnings. Empty if both sides are aligned and agree.
+
+    Raises:
+        ValueError: If the session start times differ or the timestamp counts differ.
+    """
+    if recording is None or regressors is None:
+        return ["Recording or regressors carry no behaviour alignment; trial indexes are applied positionally."]
+
+    aligned, attrs = recording
+
+    if regressors["session_start_time"] != attrs["session_start_time"]:
+        msg = (
+            f"Regressor session start time {regressors['session_start_time']} does not match the recording's"
+            f" {attrs['session_start_time']}."
+        )
+        raise ValueError(msg)
+
+    if regressors["timestamps"] is None:
+        return ["Regressor file carries no timestamps; skipping the timestamp comparison."]
+
+    if len(regressors["timestamps"]) != len(aligned):
+        msg = (
+            f"Regressor file has {len(regressors['timestamps'])} timestamps, but the recording has {len(aligned)}"
+            " aligned timestamps."
+        )
+        raise ValueError(msg)
+
+    max_diff = float(np.max(np.abs(regressors["timestamps"] - aligned))) if len(aligned) else 0.0
+    if max_diff > ALIGNED_TIMESTAMP_TOLERANCE_S:
+        return [f"Regressor and recording aligned timestamps differ by up to {max_diff:.4f} s."]
+
+    return []
 
 
 def _pixel_ridge_regression(deltaf_series: np.ndarray, regressors: np.ndarray) -> np.ndarray:

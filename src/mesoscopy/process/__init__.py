@@ -70,6 +70,7 @@ def smooth_cmd(path: str, out_dir: str, sigma: int = 2) -> None:
     # Determine whether we're working with an NWB file
     nwb = bool(path.endswith(".nwb"))
     session_id, deltaf_series, timestamps = io.load_deltaf(path, nwb=nwb)
+    aligned = io.read_timestamps_aligned(path)
 
     outpath = out_dir + os.sep + session_id + "_smoothed.h5"
 
@@ -83,6 +84,8 @@ def smooth_cmd(path: str, out_dir: str, sigma: int = 2) -> None:
                 "/timestamps": timestamps,
             },
         )
+        if aligned is not None:
+            io.write_timestamps_aligned(outpath, *aligned)
     click.echo(f"Saved smoothed recording at {outpath}")
 
 
@@ -108,6 +111,7 @@ def zscore_cmd(path: str, out_dir: str) -> None:
     # Determine whether we're working with an NWB file
     nwb = bool(path.endswith(".nwb"))
     session_id, deltaf_series, timestamps = io.load_deltaf(path, nwb=nwb)
+    aligned = io.read_timestamps_aligned(path)
 
     h5_outpath = out_dir + os.sep + session_id + "_zscored.h5"
     with timer.Timer(message="Z-scoring DeltaF/F"):
@@ -119,6 +123,8 @@ def zscore_cmd(path: str, out_dir: str) -> None:
                 "/timestamps": timestamps,
             },
         )
+        if aligned is not None:
+            io.write_timestamps_aligned(h5_outpath, *aligned)
 
     click.echo(f"Saved z-scored recording at {h5_outpath}")
 
@@ -213,6 +219,7 @@ def regions_cmd(path: str, out_dir: str, mask_paths: tuple[str, ...], include_ab
     # Determine whether we're working with an NWB file
     nwb = bool(path.endswith(".nwb"))
     session_id, deltaf_series, timestamps = io.load_deltaf(path, nwb=nwb)
+    aligned = io.read_timestamps_aligned(path)
 
     outpath = out_dir + os.sep + session_id + "_regions.csv"
 
@@ -229,10 +236,13 @@ def regions_cmd(path: str, out_dir: str, mask_paths: tuple[str, ...], include_ab
                 raise click.ClickException(msg) from err
 
         region_activity = pd.concat(activity, ignore_index=True)
-        region_activity["time_idx"] = [
-            str(timestamp, encoding="utf-8") for timestamp in timestamps[region_activity["time_idx"]]
-        ]
+        time_idx = region_activity["time_idx"].to_numpy()
+        region_activity["time_idx"] = [str(timestamp, encoding="utf-8") for timestamp in timestamps[time_idx]]
         region_activity.rename(columns={"time_idx": "timestamp"}, inplace=True)
+        if aligned is not None:
+            region_activity.insert(
+                region_activity.columns.get_loc("timestamp") + 1, "time_aligned", aligned[0][time_idx]
+            )
         region_activity.to_csv(outpath, index=False)
 
     click.echo(f"Saved region activity at {outpath}")
@@ -306,7 +316,7 @@ def regression_cmd(
     fast: bool,
     file_format: str,
 ) -> None:
-    """Perform pixel-wise ridge regression on a preprocessed ∆F/F recording."""
+    """Perform pixel-wise ridge regression on a preprocessed ∆F/F recording."""  # noqa: DOC501
     if not Path(out_dir).exists():
         click.echo(f"Creating output directory {out_dir}...")
         Path(out_dir).mkdir(parents=True)
@@ -317,8 +327,22 @@ def regression_cmd(
     session_id, deltaf_series, timestamps = io.load_deltaf(recording_path, nwb=nwb)
 
     click.echo(f"Loading regressors from {regressor_path}...")
-    regressors, labels, trial_idx = io.read_regressors(regressor_path)
+    regressors, labels, trial_idx, regressor_alignment = io.read_regressors(regressor_path)
     labels = list(labels)
+
+    recording_alignment = io.read_timestamps_aligned(recording_path)
+    try:
+        for warning in regr.check_alignment(recording_alignment, regressor_alignment):
+            click.echo(f"WARNING: {warning}")
+    except ValueError as err:
+        raise click.ClickException(str(err)) from err
+
+    alignment_attrs: dict[str, str] = {}
+    if recording_alignment is not None and regressor_alignment is not None:
+        alignment_attrs = {
+            "session_start_time": recording_alignment[1]["session_start_time"],
+            "behaviour_session": recording_alignment[1]["behaviour_session"],
+        }
 
     if nuisance_regressor_paths:
         # Nuisance regressors are recorded on their own clock (e.g. a behavioural camera), so both series are
@@ -357,6 +381,7 @@ def regression_cmd(
                     "mse": mse,
                     "labels": labels,
                     "trial_idx": trial_idx if trial_idx_used else [],
+                    **alignment_attrs,
                 },
             )
         elif file_format == "h5":
@@ -369,5 +394,6 @@ def regression_cmd(
                     "/labels": np.array(labels).astype("S"),
                     "/trial_idx": trial_idx if trial_idx_used else [],
                 },
+                attributes=alignment_attrs,
             )
     click.echo(f"Saved regression results at {outpath}")
