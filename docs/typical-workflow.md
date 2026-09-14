@@ -69,4 +69,17 @@ mesoscopy report /path/to/example-recording_registered.h5
 mesoscopy process regions /path/to/example-recording.nwb
 ```
 
+## Extract peri-event window activity
+
+Given a recording aligned with `mesoscopy align` and the `*_trials.csv` from `visiomode-analysis session`:
+
+```bash
+mesoscopy process peri-event /path/to/example-recording_regions.csv /path/to/example-recording_trials.csv --event cue_onset --pre 1 --post 3
+```
+
+will extract trial-by-trial activity aligned to behaviour.
+
+An HDF5 recording (e.g. `_zscored.h5`) gives an HDF5 file of `(n_trials, n_samples, height, width)` traces; a
+`_regions.csv` gives a long-format CSV. Add `--baseline START END` to subtract a per-trial baseline.
+
 ## Next steps
