@@ -621,6 +621,40 @@ def test_zscore_cmd_h5(preproc_h5, output_dir):
     assert io.read_h5(str(outpath))["/F"].shape == (300, 40, 40)
 
 
+def test_smooth_cmd_propagates_timestamps_aligned(aligned_preproc_h5, output_dir):
+    result = CliRunner().invoke(mesoscopy.cli, args=f"process smooth {aligned_preproc_h5} -o {output_dir}")
+    assert result.exit_code == 0, result.output
+
+    source = io.read_timestamps_aligned(aligned_preproc_h5)
+    copied = io.read_timestamps_aligned(str(pathlib.Path(output_dir) / "preproc_aligned_smoothed.h5"))
+    assert copied is not None
+    np.testing.assert_array_equal(copied[0], source[0])
+    assert copied[1] == source[1]
+
+
+def test_smooth_cmd_without_timestamps_aligned(preproc_h5, output_dir):
+    result = CliRunner().invoke(mesoscopy.cli, args=f"process smooth {preproc_h5} -o {output_dir}")
+    assert result.exit_code == 0, result.output
+    assert io.read_timestamps_aligned(str(pathlib.Path(output_dir) / "preproc_smoothed.h5")) is None
+
+
+def test_zscore_cmd_propagates_timestamps_aligned(aligned_preproc_h5, output_dir):
+    result = CliRunner().invoke(mesoscopy.cli, args=f"process zscore {aligned_preproc_h5} -o {output_dir}")
+    assert result.exit_code == 0, result.output
+
+    source = io.read_timestamps_aligned(aligned_preproc_h5)
+    copied = io.read_timestamps_aligned(str(pathlib.Path(output_dir) / "preproc_aligned_zscored.h5"))
+    assert copied is not None
+    np.testing.assert_array_equal(copied[0], source[0])
+    assert copied[1] == source[1]
+
+
+def test_zscore_cmd_without_timestamps_aligned(preproc_h5, output_dir):
+    result = CliRunner().invoke(mesoscopy.cli, args=f"process zscore {preproc_h5} -o {output_dir}")
+    assert result.exit_code == 0, result.output
+    assert io.read_timestamps_aligned(str(pathlib.Path(output_dir) / "preproc_zscored.h5")) is None
+
+
 def test_zscore_cmd_nwb(preproc_nwb, output_dir):
     runner = CliRunner()
     result = runner.invoke(mesoscopy.cli, args=f"process zscore {preproc_nwb} -o {output_dir}")
