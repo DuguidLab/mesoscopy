@@ -70,6 +70,7 @@ def smooth_cmd(path: str, out_dir: str, sigma: int = 2) -> None:
     # Determine whether we're working with an NWB file
     nwb = bool(path.endswith(".nwb"))
     session_id, deltaf_series, timestamps = io.load_deltaf(path, nwb=nwb)
+    aligned = io.read_timestamps_aligned(path)
 
     outpath = out_dir + os.sep + session_id + "_smoothed.h5"
 
@@ -83,6 +84,8 @@ def smooth_cmd(path: str, out_dir: str, sigma: int = 2) -> None:
                 "/timestamps": timestamps,
             },
         )
+        if aligned is not None:
+            io.write_timestamps_aligned(outpath, *aligned)
     click.echo(f"Saved smoothed recording at {outpath}")
 
 
@@ -108,6 +111,7 @@ def zscore_cmd(path: str, out_dir: str) -> None:
     # Determine whether we're working with an NWB file
     nwb = bool(path.endswith(".nwb"))
     session_id, deltaf_series, timestamps = io.load_deltaf(path, nwb=nwb)
+    aligned = io.read_timestamps_aligned(path)
 
     h5_outpath = out_dir + os.sep + session_id + "_zscored.h5"
     with timer.Timer(message="Z-scoring DeltaF/F"):
@@ -119,6 +123,8 @@ def zscore_cmd(path: str, out_dir: str) -> None:
                 "/timestamps": timestamps,
             },
         )
+        if aligned is not None:
+            io.write_timestamps_aligned(h5_outpath, *aligned)
 
     click.echo(f"Saved z-scored recording at {h5_outpath}")
 
