@@ -25,7 +25,7 @@ jobs:
           fetch-depth: 0
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
 
       - name: Compare the project version against existing tags
         id: check
@@ -61,7 +61,7 @@ jobs:
           python-version-file: pyproject.toml
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
 
       - name: Build package
         run: uv build
@@ -119,7 +119,7 @@ jobs:
           path: dist/
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: false
 
