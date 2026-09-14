@@ -25,10 +25,12 @@ import os
 from pathlib import Path
 
 import click
+import h5py
 import numpy as np
 import pandas as pd
 from pynwb.image import ImageSeries
 
+import mesoscopy.process.perievent as pev
 import mesoscopy.process.region as pr
 import mesoscopy.process.regression as regr
 import mesoscopy.process.smooth as psm
@@ -397,3 +399,242 @@ def regression_cmd(
                 attributes=alignment_attrs,
             )
     click.echo(f"Saved regression results at {outpath}")
+
+
+@process_cmd.command("peri-event")
+@click.argument(
+    "recording_path",
+    type=click.Path(exists=True, dir_okay=False),
+)
+@click.argument(
+    "trials_path",
+    type=click.Path(exists=True, dir_okay=False),
+)
+@click.option(
+    "-o",
+    "--out_dir",
+    type=click.Path(dir_okay=True),
+    default="./",
+    help="Output directory for peri-event windows.",
+)
+@click.option(
+    "--event",
+    type=click.Choice(pev.EVENTS),
+    default="cue_onset",
+    show_default=True,
+    help="Behavioural event to align windows to.",
+)
+@click.option(
+    "--pre",
+    type=float,
+    default=1.0,
+    show_default=True,
+    help="Seconds before the event.",
+)
+@click.option(
+    "--post",
+    type=float,
+    default=3.0,
+    show_default=True,
+    help="Seconds after the event.",
+)
+@click.option(
+    "--fs",
+    type=float,
+    default=25.0,
+    show_default=True,
+    help="Sampling rate of the output windows, in Hz.",
+)
+@click.option(
+    "--method",
+    type=click.Choice(["interp", "nearest"]),
+    default="interp",
+    show_default=True,
+    help="Linear interpolation, or the nearest recorded sample.",
+)
+@click.option(
+    "--baseline",
+    type=(float, float),
+    default=None,
+    help="Baseline window START END, seconds relative to the event; its mean is subtracted per trial.",
+)
+def perievent_cmd(
+    recording_path: str,
+    trials_path: str,
+    out_dir: str,
+    event: str,
+    pre: float,
+    post: float,
+    fs: float,
+    method: str,
+    baseline: tuple[float, float] | None,
+) -> None:
+    """Extract per-trial windows around a behavioural event from a behaviour-aligned recording.
+
+    RECORDING_PATH is an HDF5 recording with /F and /timestamps_aligned, or a _regions.csv with a time_aligned
+    column. TRIALS_PATH is the *_trials.csv written by visiomode-analysis session. HDF5 input gives HDF5 output;
+    CSV input gives long-format CSV output.
+    """
+    if not Path(out_dir).exists():
+        click.echo(f"Creating output directory {out_dir}...")
+        Path(out_dir).mkdir(parents=True)
+
+    click.echo(f"Loading trials from {trials_path}...")
+    trials = pd.read_csv(trials_path)
+    events, trial_index = pev.event_times(trials, event)
+    grid = pev.window_grid(pre, post, fs)
+
+    click.echo(f"Loading recording from {recording_path}...")
+    is_csv = recording_path.endswith(".csv")
+    session_id = Path(recording_path).stem
+    outpath = out_dir + os.sep + session_id + f"_event-{pev.event_name(event)}_perievent." + ("csv" if is_csv else "h5")
+
+    with timer.Timer(message="Extracting peri-event windows"):
+        if is_csv:
+            kept = _perievent_csv(recording_path, outpath, events, trial_index, grid, method, baseline)
+        else:
+            attrs = {
+                "event": event,
+                "pre": pre,
+                "post": post,
+                "fs": fs,
+                "method": method,
+                "baseline": np.array(baseline if baseline is not None else [], dtype=np.float64),
+                "trials_path": str(trials_path),
+            }
+            kept = _perievent_h5(recording_path, outpath, events, trial_index, grid, method, baseline, attrs)
+
+    n_kept = int(kept.sum())
+    click.echo(f"Kept {n_kept} trials, dropped {len(trials) - n_kept}.")
+    click.echo(f"Saved peri-event windows at {outpath}")
+
+
+def _perievent_h5(
+    recording_path: str,
+    outpath: str,
+    events: np.ndarray,
+    trial_index: np.ndarray,
+    grid: np.ndarray,
+    method: str,
+    baseline: tuple[float, float] | None,
+    attrs: dict,
+) -> np.ndarray:
+    """Write peri-event windows from an HDF5 recording, one trial at a time.
+
+    Args:
+        recording_path (str): HDF5 recording with `/F` and `/timestamps_aligned`.
+        outpath (str): Output HDF5 path.
+        events (np.ndarray): Event times, seconds from behaviour start.
+        trial_index (np.ndarray): Trials CSV row index per event.
+        grid (np.ndarray): Sample times relative to the event.
+        method (str): `interp` or `nearest`.
+        baseline (tuple[float, float] | None): Baseline window, or None.
+        attrs (dict): Attributes to write on `/traces`.
+
+    Returns:
+        np.ndarray: Boolean mask over `events` marking the kept trials.
+
+    Raises:
+        click.ClickException: If the recording lacks `/F` or `/timestamps_aligned`, or their lengths differ.
+    """
+    aligned = io.read_timestamps_aligned(recording_path)
+    if aligned is None:
+        msg = f"{recording_path} has no /timestamps_aligned dataset; run `mesoscopy align` first."
+        raise click.ClickException(msg)
+    time_aligned, aligned_attrs = aligned
+
+    with h5py.File(recording_path, "r") as f:
+        if "/F" not in f:
+            msg = f"{recording_path} has no /F dataset."
+            raise click.ClickException(msg)
+        deltaf_series = f["/F"][:]
+
+    if len(time_aligned) != deltaf_series.shape[0]:
+        msg = f"{recording_path} has {len(time_aligned)} aligned timestamps but {deltaf_series.shape[0]} frames."
+        raise click.ClickException(msg)
+
+    kept = (events + grid[0] >= time_aligned[0]) & (events + grid[-1] <= time_aligned[-1])
+    frame_shape = deltaf_series.shape[1:]
+    n_kept = int(kept.sum())
+
+    with h5py.File(outpath, "w") as f:
+        traces = f.create_dataset(
+            "/traces",
+            shape=(n_kept, len(grid), *frame_shape),
+            chunks=(1, len(grid), *frame_shape),
+            dtype=np.float32,
+            compression="lzf",
+        )
+        for i, event_time in enumerate(events[kept]):
+            trace, _ = pev.extract(deltaf_series, time_aligned, np.array([event_time]), grid, method=method)
+            if baseline is not None:
+                trace = pev.apply_baseline(trace, grid, *baseline)
+            traces[i] = trace[0]
+
+        f.create_dataset("/time", data=grid.astype(np.float64))
+        f.create_dataset("/trial_index", data=trial_index[kept])
+        f.create_dataset("/event_time", data=events[kept].astype(np.float64))
+        traces.attrs.update(
+            {
+                **attrs,
+                "session_start_time": aligned_attrs["session_start_time"],
+                "behaviour_session": aligned_attrs["behaviour_session"],
+            }
+        )
+
+    return kept
+
+
+def _perievent_csv(
+    recording_path: str,
+    outpath: str,
+    events: np.ndarray,
+    trial_index: np.ndarray,
+    grid: np.ndarray,
+    method: str,
+    baseline: tuple[float, float] | None,
+) -> np.ndarray:
+    """Write peri-event windows from a long-format regions CSV.
+
+    Args:
+        recording_path (str): Regions CSV with a `time_aligned` column.
+        outpath (str): Output CSV path.
+        events (np.ndarray): Event times, seconds from behaviour start.
+        trial_index (np.ndarray): Trials CSV row index per event.
+        grid (np.ndarray): Sample times relative to the event.
+        method (str): `interp` or `nearest`.
+        baseline (tuple[float, float] | None): Baseline window, or None.
+
+    Returns:
+        np.ndarray: Boolean mask over `events` marking the kept trials.
+
+    Raises:
+        click.ClickException: If the CSV has no `time_aligned` column.
+    """
+    regions = pd.read_csv(recording_path)
+    if "time_aligned" not in regions.columns:
+        msg = f"{recording_path} has no time_aligned column; run `mesoscopy align` before `process regions`."
+        raise click.ClickException(msg)
+
+    # Long to (n_frames, n_regions), keeping the input's region order.
+    wide = regions.pivot(index="time_aligned", columns="region", values="F").sort_index()
+    wide = wide[regions["region"].unique()]
+    time_aligned = wide.index.to_numpy(dtype=np.float64)
+
+    traces, kept = pev.extract(wide.to_numpy(), time_aligned, events, grid, method=method, dtype=np.float64)
+    if baseline is not None:
+        traces = pev.apply_baseline(traces, grid, *baseline)
+
+    n_kept, n_samples, n_regions = traces.shape
+    out = pd.DataFrame(
+        {
+            "trial_index": np.repeat(trial_index[kept], n_samples * n_regions),
+            "event_time": np.repeat(events[kept], n_samples * n_regions),
+            "time": np.tile(np.repeat(grid, n_regions), n_kept),
+            "region": np.tile(wide.columns.to_numpy(), n_kept * n_samples),
+            "F": traces.reshape(-1),
+        }
+    )
+    out.to_csv(outpath, index=False)
+
+    return kept
