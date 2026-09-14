@@ -331,40 +331,44 @@ def run_preprocessing(
 
     outpath = out_dir + os.sep + session_id + "_preprocessed.h5"
     with timer.Timer(f"Writing data to {outpath}"):
-        # da.to_hdf5(
+        # QA results are None when the checks are skipped, and cannot be written.
         io.write_h5(
             path=outpath,
-            data={
-                "/F": f_signal,
-                "/timestamps": timestamps,
-                "/qa/frame_means_timeseries": frame_means,
-                "/qa/frame_stds_timeseries": frame_stds,
-                "/qa/gcamp_mean_timeseries": gcamp_mean[:max_idx],
-                "/qa/isosb_mean_timeseries": isosb_mean[:max_idx],
-                "/qa/gcamp_dff_timeseries": gcamp_signal_mean[:max_idx],
-                "/qa/isosb_dff_timeseries": isosb_signal_mean[:max_idx],
-                "/qa/gcamp_filter": gcamp_filter[:max_idx],
-                "/qa/isosb_filter": isosb_filter[:max_idx],
-                "/qa/gcamp_mean_projection": gcamp_projections.get("mean"),
-                "/qa/gcamp_std_projection": gcamp_projections.get("std"),
-                "/qa/gcamp_maxip_projection": gcamp_projections.get("maxip"),
-                "/qa/isosb_mean_projection": isosb_projections.get("mean"),
-                "/qa/isosb_std_projection": isosb_projections.get("std"),
-                "/qa/isosb_maxip_projection": isosb_projections.get("maxip"),
-                "/qa/f_mean_timeseries": f_mean_timeseries,
-                "/qa/f_maxip": f_maxip,
-                "/qa/noise_levels": qa_noise_levels,
-            },
-            attributes={
-                "/qa/checks/histogram_separation": qa_histogram_separation,
-                "/qa/checks/timestamp_consistency": qa_timestamp_consistency,
-                "/qa/checks/timestamp_jump": qa_timestamp_jump,
-                "/qa/checks/noise_check": qa_check_noise,
-                "/qa/checks/snr_check": qa_check_snr,
-                "/qa/checks/snr": qa_snr,
-                "/qa/checks/bleaching_check": qa_check_bleaching,
-                "/qa/checks/bleaching_factor": qa_bleaching,
-            },
+            data=_drop_none(
+                {
+                    "/F": f_signal,
+                    "/timestamps": timestamps,
+                    "/qa/frame_means_timeseries": frame_means,
+                    "/qa/frame_stds_timeseries": frame_stds,
+                    "/qa/gcamp_mean_timeseries": gcamp_mean[:max_idx],
+                    "/qa/isosb_mean_timeseries": isosb_mean[:max_idx],
+                    "/qa/gcamp_dff_timeseries": gcamp_signal_mean[:max_idx],
+                    "/qa/isosb_dff_timeseries": isosb_signal_mean[:max_idx],
+                    "/qa/gcamp_filter": gcamp_filter[:max_idx],
+                    "/qa/isosb_filter": isosb_filter[:max_idx],
+                    "/qa/gcamp_mean_projection": gcamp_projections.get("mean"),
+                    "/qa/gcamp_std_projection": gcamp_projections.get("std"),
+                    "/qa/gcamp_maxip_projection": gcamp_projections.get("maxip"),
+                    "/qa/isosb_mean_projection": isosb_projections.get("mean"),
+                    "/qa/isosb_std_projection": isosb_projections.get("std"),
+                    "/qa/isosb_maxip_projection": isosb_projections.get("maxip"),
+                    "/qa/f_mean_timeseries": f_mean_timeseries,
+                    "/qa/f_maxip": f_maxip,
+                    "/qa/noise_levels": qa_noise_levels,
+                }
+            ),
+            attributes=_drop_none(
+                {
+                    "/qa/checks/histogram_separation": qa_histogram_separation,
+                    "/qa/checks/timestamp_consistency": qa_timestamp_consistency,
+                    "/qa/checks/timestamp_jump": qa_timestamp_jump,
+                    "/qa/checks/noise_check": qa_check_noise,
+                    "/qa/checks/snr_check": qa_check_snr,
+                    "/qa/checks/snr": qa_snr,
+                    "/qa/checks/bleaching_check": qa_check_bleaching,
+                    "/qa/checks/bleaching_factor": qa_bleaching,
+                }
+            ),
             compression="lzf",
         )
 
@@ -435,3 +439,15 @@ def update_nwb(nwb_path: str, h5_path: str) -> None:
     io.write_nwb(nwb_path, nwbfile, io=nwbio)
 
     return nwbfile
+
+
+def _drop_none(items: dict) -> dict:
+    """Drop entries whose value is None.
+
+    Args:
+        items (dict): Datasets or attributes keyed by name.
+
+    Returns:
+        dict: The entries with a value.
+    """
+    return {key: value for key, value in items.items() if value is not None}
