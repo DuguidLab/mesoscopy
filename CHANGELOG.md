@@ -10,6 +10,7 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 - `align.align_recording` and `align.read_session_start`, plus `io.read_timestamps_aligned` and `io.write_timestamps_aligned` ([#128](https://github.com/DuguidLab/mesoscopy/issues/128)).
 - `process regression` checks the recording's `/timestamps_aligned` against the regressor file's `session_start_time` and `timestamps`: it warns and applies `trial_idx` positionally if either side is unaligned, fails on a session start or length mismatch, warns if aligned timestamps differ by more than 5 ms, and copies `session_start_time` and `behaviour_session` into the regression output ([#128](https://github.com/DuguidLab/mesoscopy/issues/128)).
 - `process smooth` and `process zscore` copy `/timestamps_aligned` and its attributes from the input recording to the output file when present ([#128](https://github.com/DuguidLab/mesoscopy/issues/128)).
+- `process regions` adds a `time_aligned` column (seconds from behaviour session start) after `timestamp` when the recording has `/timestamps_aligned` ([#128](https://github.com/DuguidLab/mesoscopy/issues/128)).
 
 ### Changed
 
