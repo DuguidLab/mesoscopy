@@ -90,6 +90,20 @@ def aligned_preproc_h5(preproc_h5):
 
 
 @pytest.fixture
+def aligned_preproc_h5_bytes_timestamps(preproc_h5_bytes_timestamps):
+    """Copy of `preproc_h5_bytes_timestamps` carrying behaviour-aligned timestamps."""
+    source = pathlib.Path(preproc_h5_bytes_timestamps)
+    path = source.with_name("preproc_bytes_aligned.h5")
+    path.write_bytes(source.read_bytes())
+    io.write_timestamps_aligned(
+        str(path),
+        np.arange(300) * 0.001 + 2.0,
+        {"session_start_time": "2024-01-01T14:00:00", "behaviour_session": "ses-aligned", "offset_s": 2.0},
+    )
+    return str(path)
+
+
+@pytest.fixture
 def aligned_regressor_npz(tmp_path_factory):
     """NPZ regressor file matching `aligned_preproc_h5`, carrying the behaviour alignment keys."""
     tmpfile = tmp_path_factory.mktemp("data") / "regressors_aligned.npz"
@@ -680,6 +694,33 @@ def test_regions_cmd(preproc_h5_bytes_timestamps, output_dir, mock_left_aba, moc
 
     region_activity = pd.read_csv(outpath)
     assert set(region_activity["region"]) == {"L_REG1", "R_REG1"}
+
+
+def test_regions_cmd_adds_time_aligned_column(aligned_preproc_h5_bytes_timestamps, output_dir, mask_npy):
+    result = CliRunner().invoke(
+        mesoscopy.cli, args=f"process regions {aligned_preproc_h5_bytes_timestamps} -o {output_dir} -m {mask_npy}"
+    )
+    assert result.exit_code == 0, result.output
+
+    region_activity = pd.read_csv(pathlib.Path(output_dir) / "preproc_bytes_aligned_regions.csv")
+    columns = list(region_activity.columns)
+    assert columns.index("time_aligned") == columns.index("timestamp") + 1
+    assert region_activity["time_aligned"].dtype == np.float64
+
+    # Each row's aligned time matches its frame, whichever region it belongs to.
+    session_start = datetime(2024, 1, 1, 14, 0, 0)
+    elapsed = [(datetime.fromisoformat(ts) - session_start).total_seconds() for ts in region_activity["timestamp"]]
+    np.testing.assert_allclose(region_activity["time_aligned"], np.array(elapsed) + 2.0, atol=1e-9)
+
+
+def test_regions_cmd_without_timestamps_aligned_has_no_column(preproc_h5_bytes_timestamps, output_dir, mask_npy):
+    result = CliRunner().invoke(
+        mesoscopy.cli, args=f"process regions {preproc_h5_bytes_timestamps} -o {output_dir} -m {mask_npy}"
+    )
+    assert result.exit_code == 0, result.output
+
+    region_activity = pd.read_csv(pathlib.Path(output_dir) / "preproc_bytes_regions.csv")
+    assert "time_aligned" not in region_activity.columns
 
 
 def test_regions_cmd_mask_only_skips_aba(preproc_h5_bytes_timestamps, output_dir, mask_npy):
