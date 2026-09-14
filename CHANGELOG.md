@@ -4,6 +4,11 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 ## Unreleased
 
+### Added
+
+- `align` command for writing behaviour-aligned frame timestamps to a preprocessed or registered HDF5 recording, as seconds from a behaviour session start given either as an ISO 8601 `--session-start` or read from a visiomode `--behaviour-json` file. Writes a `/timestamps_aligned` dataset carrying `session_start_time`, `behaviour_session` and `offset_s` attributes, and refuses offsets beyond `--max-offset` ([#128](https://github.com/DuguidLab/mesoscopy/issues/128)).
+- `align.align_recording` and `align.read_session_start`, plus `io.read_timestamps_aligned` and `io.write_timestamps_aligned` ([#128](https://github.com/DuguidLab/mesoscopy/issues/128)).
+
 ### Fixed
 
 - Incorrect `--help` text for `-o`/`--out_dir` on `process zscore`, `process regions`, `report` and `register label`, and for `-s`/`--sigma` on `process smooth`, which all described the wrong output.
