@@ -31,21 +31,22 @@ def acquisition_viewer(nwbfile: NWBFile) -> None:
     Args:
         nwbfile (NWBFile): NWB file object.
     """
-    viewer = napari.view_image(
-        nwbfile.acquisition.get("DualChannelImagingSeries").data, name="DualChannelImagingSeries"
-    )
+    viewer = napari.Viewer()
+    viewer.add_image(nwbfile.acquisition.get("DualChannelImagingSeries").data, name="DualChannelImagingSeries")
 
     napari.run()
 
 
 def deltaf_viewer(nwbfile):
-    viewer = napari.view_image(nwbfile.processing.get("ophys").get("DeltaFSeries").data, name="DeltaFSeries")
+    viewer = napari.Viewer()
+    viewer.add_image(nwbfile.processing.get("ophys").get("DeltaFSeries").data, name="DeltaFSeries")
 
     napari.run()
 
 
 def ccfregistered_viewer(nwbfile):
-    viewer = napari.view_image(
+    viewer = napari.Viewer()
+    viewer.add_image(
         nwbfile.processing.get("ophys").get("CCFRegisteredSeries").corrected.data, name="CCFRegisteredSeries"
     )
 
