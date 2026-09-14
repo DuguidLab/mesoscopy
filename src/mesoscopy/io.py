@@ -192,6 +192,51 @@ def load_deltaf(path: str, nwb: bool = False) -> tuple[str, np.ndarray, np.ndarr
     return session_id, deltaf_series, timestamps
 
 
+def read_timestamps_aligned(path: str) -> tuple[np.ndarray, dict[str, typing.Any]] | None:
+    """Read behaviour-aligned timestamps from an HDF5 file.
+
+    Args:
+        path (str): Path to the HDF5 file.
+
+    Returns:
+        tuple[np.ndarray, dict[str, typing.Any]] | None: The `/timestamps_aligned` dataset and its attributes
+        (`session_start_time`, `behaviour_session`, `offset_s`), or None if the file has no such dataset.
+    """
+    if path.endswith(".nwb"):
+        return None
+    with h5py.File(path, "r") as f:
+        if "/timestamps_aligned" not in f:
+            return None
+        dataset = f["/timestamps_aligned"]
+        timestamps = np.asarray(dataset[:], dtype=np.float64)
+        attrs = {
+            "session_start_time": str(dataset.attrs["session_start_time"]),
+            "behaviour_session": str(dataset.attrs["behaviour_session"]),
+            "offset_s": float(dataset.attrs["offset_s"]),
+        }
+    return timestamps, attrs
+
+
+def write_timestamps_aligned(path: str, timestamps: npt.ArrayLike, attrs: dict[str, typing.Any]) -> str:
+    """Write behaviour-aligned timestamps to an existing HDF5 file, replacing any existing dataset.
+
+    Args:
+        path (str): Path to the HDF5 file.
+        timestamps (npt.ArrayLike): Seconds from behaviour session start, one value per frame.
+        attrs (dict[str, typing.Any]): Attributes to set on the dataset (`session_start_time`,
+            `behaviour_session`, `offset_s`).
+
+    Returns:
+        str: Path to the HDF5 file.
+    """
+    with h5py.File(path, "r+") as f:
+        if "/timestamps_aligned" in f:
+            del f["/timestamps_aligned"]
+        dataset = f.create_dataset("/timestamps_aligned", data=np.asarray(timestamps, dtype=np.float64))
+        dataset.attrs.update(attrs)
+    return path
+
+
 def read_points(path: str) -> dict[str, tuple[float, float]]:
     """Read a landmark points file.
 
