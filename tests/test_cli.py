@@ -36,6 +36,10 @@ HEAVY_MODULES = ["napari", "sklearn", "scipy", "pims", "matplotlib", "pynwb", "d
 # `scipy` itself is cheap and comes in through dask, `scipy.stats` is not.
 STAGE_HEAVY_MODULES = {
     "process": ["napari", "sklearn", "scipy.stats", "scipy.ndimage", "pims", "matplotlib", "plotly", "diptest"],
+    "align": ["napari", "sklearn", "scipy.stats", "pims", "matplotlib", "plotly", "diptest", "skimage"],
+    "convert": ["napari", "sklearn", "scipy.stats", "pims", "av", "matplotlib", "plotly", "diptest", "skimage"],
+    "export": ["napari", "sklearn", "scipy.stats", "pims", "matplotlib", "plotly", "diptest", "skimage", "tqdm"],
+    "inspect": ["napari", "sklearn", "scipy.stats", "pims", "matplotlib", "plotly", "diptest", "skimage"],
     "preprocess": ["napari", "sklearn", "scipy.stats", "pims", "matplotlib", "plotly", "diptest"],
     "register": ["napari", "magicgui", "skimage", "sklearn", "scipy.stats", "pims", "matplotlib", "plotly", "diptest"],
     "report": ["napari", "magicgui", "skimage", "sklearn", "scipy.stats", "pims", "matplotlib", "plotly", "diptest"],
