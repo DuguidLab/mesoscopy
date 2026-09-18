@@ -4,6 +4,8 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 ## Unreleased
 
+## [0.13.1] - 2026-09-18
+
 ### Added
 
 - `process peri-event` CSV output now carries the trials CSV columns (`sdt_type`, `outcome`, `response_time`, ...) on every row, joined by `trial_index` after `F`. `process metrics` and `metrics.metrics_tables` carry any per-trial columns of the peri-event table through to `<stem>_metrics.csv`, so `-t/--trials` is only needed for peri-event files written without them and skips columns the peri-event table already carries ([#158](https://github.com/DuguidLab/mesoscopy/issues/158)).
