@@ -21,16 +21,25 @@
 
 """Processing submodule."""
 
+from __future__ import annotations
+
 import os
+import typing
 from pathlib import Path
 
 import click
 import h5py
 import numpy as np
 
+import mesoscopy.process.metrics as pm
 import mesoscopy.process.perievent as pev
 from mesoscopy import io
 from mesoscopy import timer
+
+if typing.TYPE_CHECKING:
+    from collections.abc import Callable
+
+    import pandas as pd
 
 
 @click.group("process")
@@ -407,6 +416,115 @@ def regression_cmd(
     click.echo(f"Saved regression results at {outpath}")
 
 
+def _metrics_options(command: Callable[..., None]) -> Callable[..., None]:
+    """Options shared by `process metrics` and `process peri-event --with-metrics`.
+
+    Args:
+        command (Callable[..., None]): Command callback to decorate.
+
+    Returns:
+        Callable[..., None]: The callback with the options attached.
+    """
+    options = [
+        click.option(
+            "--response",
+            type=(float, float),
+            default=None,
+            help="Response window START END, seconds relative to the event, end inclusive. Defaults to all"
+            " post-event samples.",
+        ),
+        click.option(
+            "--onset",
+            type=click.Choice(pm.ONSET_METHODS),
+            default="sd",
+            show_default=True,
+            help="Onset by threshold at a multiple of the baseline SD or a fraction of the amplitude, or by"
+            " extrapolating a line fitted to the rise back to baseline.",
+        ),
+        click.option(
+            "--onset-sd",
+            type=float,
+            default=2.0,
+            show_default=True,
+            help="Baseline SD multiple for --onset sd.",
+        ),
+        click.option(
+            "--onset-fraction",
+            type=float,
+            default=0.2,
+            show_default=True,
+            help="Amplitude fraction for --onset peak.",
+        ),
+        click.option(
+            "--onset-min-samples",
+            type=int,
+            default=3,
+            show_default=True,
+            help="Consecutive samples above threshold required for an onset.",
+        ),
+        click.option(
+            "--extrapolate-range",
+            type=(float, float),
+            default=(0.2, 0.8),
+            show_default=True,
+            help="Amplitude fractions LOW HIGH bounding the rise fitted for --onset extrapolate.",
+        ),
+        click.option(
+            "--smooth",
+            "smoothing",
+            type=int,
+            default=1,
+            show_default=True,
+            help="Moving-average window in samples, odd, for peak, onset, decay and offset detection. 1 disables.",
+        ),
+        click.option(
+            "--decay-fraction",
+            type=float,
+            default=0.5,
+            show_default=True,
+            help="Amplitude fraction the trace must fall to after the peak.",
+        ),
+    ]
+    for option in reversed(options):
+        command = option(command)
+    return command
+
+
+def _validate_metrics_options(smoothing: int, extrapolate_range: tuple[float, float]) -> None:
+    """Reject metric options that `trial_metrics` would refuse.
+
+    Args:
+        smoothing (int): `--smooth` value.
+        extrapolate_range (tuple[float, float]): `--extrapolate-range` value.
+
+    Raises:
+        click.BadParameter: If `smoothing` is not a positive odd integer or the range is not ordered within (0, 1).
+    """
+    if smoothing < 1 or smoothing % 2 == 0:
+        msg = "must be a positive odd integer."
+        raise click.BadParameter(msg, param_hint="--smooth")
+    if not 0 < extrapolate_range[0] < extrapolate_range[1] < 1:
+        msg = "must satisfy 0 < LOW < HIGH < 1."
+        raise click.BadParameter(msg, param_hint="--extrapolate-range")
+
+
+def _write_metrics(trial_table: pd.DataFrame, session_table: pd.DataFrame, out_dir: str, stem: str) -> None:
+    """Write the per-trial and per-session metric tables and echo their paths.
+
+    Args:
+        trial_table (pd.DataFrame): Per-trial metrics, from `metrics.metrics_tables`.
+        session_table (pd.DataFrame): Per-session metrics, from `metrics.metrics_tables`.
+        out_dir (str): Output directory.
+        stem (str): Output filename stem, without `_perievent`.
+    """
+    trial_path = out_dir + os.sep + stem + "_metrics.csv"
+    session_path = out_dir + os.sep + stem + "_metrics-session.csv"
+    trial_table.to_csv(trial_path, index=False)
+    session_table.to_csv(session_path, index=False)
+    click.echo(f"Saved per-trial metrics at {trial_path}")
+    click.echo(f"Saved per-session metrics at {session_path}")
+
+
 @process_cmd.command("peri-event")
 @click.argument(
     "recording_path",
@@ -464,6 +582,13 @@ def regression_cmd(
     default=None,
     help="Baseline window START END, seconds relative to the event; its mean is subtracted per trial.",
 )
+@click.option(
+    "--with-metrics",
+    is_flag=True,
+    default=False,
+    help="Also write the response metrics of `process metrics`, joined with TRIALS_PATH. CSV input only.",
+)
+@_metrics_options
 def perievent_cmd(
     recording_path: str,
     trials_path: str,
@@ -474,14 +599,31 @@ def perievent_cmd(
     fs: float,
     method: str,
     baseline: tuple[float, float] | None,
+    with_metrics: bool,
+    response: tuple[float, float] | None,
+    onset: str,
+    onset_sd: float,
+    onset_fraction: float,
+    onset_min_samples: int,
+    extrapolate_range: tuple[float, float],
+    smoothing: int,
+    decay_fraction: float,
 ) -> None:
     """Extract per-trial windows around a behavioural event from a behaviour-aligned recording.
 
     RECORDING_PATH is an HDF5 recording with /F and /timestamps_aligned, or a _regions.csv with a time_aligned
     column. TRIALS_PATH is the *_trials.csv written by visiomode-analysis session. HDF5 input gives HDF5 output;
-    CSV input gives long-format CSV output.
-    """
+    CSV input gives long-format CSV output. --with-metrics also writes the tables of `process metrics` from the
+    CSV output, using --baseline as the metrics baseline window.
+    """  # noqa: DOC501
     import pandas as pd
+
+    is_csv = recording_path.endswith(".csv")
+    if with_metrics:
+        if not is_csv:
+            msg = "needs a _regions.csv recording; metrics are not computed for HDF5 windows."
+            raise click.BadParameter(msg, param_hint="--with-metrics")
+        _validate_metrics_options(smoothing, extrapolate_range)
 
     if not Path(out_dir).exists():
         click.echo(f"Creating output directory {out_dir}...")
@@ -493,13 +635,12 @@ def perievent_cmd(
     grid = pev.window_grid(pre, post, fs)
 
     click.echo(f"Loading recording from {recording_path}...")
-    is_csv = recording_path.endswith(".csv")
     session_id = Path(recording_path).stem
     outpath = out_dir + os.sep + session_id + f"_event-{pev.event_name(event)}_perievent." + ("csv" if is_csv else "h5")
 
     with timer.Timer(message="Extracting peri-event windows"):
         if is_csv:
-            kept = _perievent_csv(recording_path, outpath, events, trial_index, grid, method, baseline)
+            kept, windows = _perievent_csv(recording_path, outpath, events, trial_index, grid, method, baseline)
         else:
             attrs = {
                 "event": event,
@@ -515,6 +656,23 @@ def perievent_cmd(
     n_kept = int(kept.sum())
     click.echo(f"Kept {n_kept} trials, dropped {len(trials) - n_kept}.")
     click.echo(f"Saved peri-event windows at {outpath}")
+
+    if with_metrics:
+        with timer.Timer(message="Extracting metrics"):
+            tables = pm.metrics_tables(
+                windows,
+                baseline=baseline,
+                response=response,
+                trials=trials,
+                onset=onset,
+                onset_sd=onset_sd,
+                onset_fraction=onset_fraction,
+                onset_min_samples=onset_min_samples,
+                extrapolate_range=extrapolate_range,
+                decay_fraction=decay_fraction,
+                smoothing=smoothing,
+            )
+        _write_metrics(*tables, out_dir, Path(outpath).stem.removesuffix("_perievent"))
 
 
 def _perievent_h5(
@@ -601,7 +759,7 @@ def _perievent_csv(
     grid: np.ndarray,
     method: str,
     baseline: tuple[float, float] | None,
-) -> np.ndarray:
+) -> tuple[np.ndarray, pd.DataFrame]:
     """Write peri-event windows from a long-format regions CSV.
 
     Args:
@@ -614,7 +772,7 @@ def _perievent_csv(
         baseline (tuple[float, float] | None): Baseline window, or None.
 
     Returns:
-        np.ndarray: Boolean mask over `events` marking the kept trials.
+        tuple[np.ndarray, pd.DataFrame]: Boolean mask over `events` marking the kept trials, and the written table.
 
     Raises:
         click.ClickException: If the CSV has no `time_aligned` column.
@@ -647,4 +805,89 @@ def _perievent_csv(
     )
     out.to_csv(outpath, index=False)
 
-    return kept
+    return kept, out
+
+
+@process_cmd.command("metrics")
+@click.argument(
+    "path",
+    type=click.Path(exists=True, dir_okay=False),
+)
+@click.option(
+    "-o",
+    "--out_dir",
+    type=click.Path(dir_okay=True),
+    default="./",
+    help="Output directory for metrics tables.",
+)
+@click.option(
+    "--baseline",
+    type=(float, float),
+    default=None,
+    help="Baseline window START END, seconds relative to the event, end exclusive. Defaults to all pre-event samples.",
+)
+@click.option(
+    "-t",
+    "--trials",
+    "trials_path",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Trials CSV to join onto the per-trial table by trial_index.",
+)
+@_metrics_options
+def metrics_cmd(
+    path: str,
+    out_dir: str,
+    baseline: tuple[float, float] | None,
+    trials_path: str | None,
+    response: tuple[float, float] | None,
+    onset: str,
+    onset_sd: float,
+    onset_fraction: float,
+    onset_min_samples: int,
+    extrapolate_range: tuple[float, float],
+    smoothing: int,
+    decay_fraction: float,
+) -> None:
+    """Extract per-trial response metrics and per-session variability from peri-event traces.
+
+    PATH is the long-format *_perievent.csv written by `process peri-event`. Writes <stem>_metrics.csv with onset
+    time, peak time, amplitude, area under the curve, decay time, offset time and duration per trial per region,
+    and <stem>_metrics-session.csv with the mean, SD and CV of each across trials per region, plus the mean
+    pairwise trial-trace correlation.
+    """  # noqa: DOC501
+    import pandas as pd
+
+    _validate_metrics_options(smoothing, extrapolate_range)
+
+    if not Path(out_dir).exists():
+        click.echo(f"Creating output directory {out_dir}...")
+        Path(out_dir).mkdir(parents=True)
+
+    click.echo(f"Loading peri-event traces from {path}...")
+    perievent = pd.read_csv(path)
+    trials = None
+    if trials_path is not None:
+        click.echo(f"Loading trials from {trials_path}...")
+        trials = pd.read_csv(trials_path)
+
+    with timer.Timer(message="Extracting metrics"):
+        try:
+            tables = pm.metrics_tables(
+                perievent,
+                baseline=baseline,
+                response=response,
+                trials=trials,
+                onset=onset,
+                onset_sd=onset_sd,
+                onset_fraction=onset_fraction,
+                onset_min_samples=onset_min_samples,
+                extrapolate_range=extrapolate_range,
+                decay_fraction=decay_fraction,
+                smoothing=smoothing,
+            )
+        except ValueError as error:
+            msg = f"{path}: {error} Expected the columns written by `process peri-event`."
+            raise click.ClickException(msg) from error
+
+    _write_metrics(*tables, out_dir, Path(path).stem.removesuffix("_perievent"))
