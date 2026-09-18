@@ -27,8 +27,6 @@ from jinja2 import Environment
 from jinja2 import PackageLoader
 from jinja2 import select_autoescape
 
-import mesoscopy.preprocess.qa as preqa
-import mesoscopy.register.qa as regqa
 from mesoscopy import io
 
 PREPROCESSING_REPORT_TEMPLATE = "preprocessing.html"
@@ -77,6 +75,8 @@ def generate_preprocessing_report(path: str, out_dir: str = ".") -> str:
     Returns:
         str: Path to the generated report.
     """
+    import mesoscopy.preprocess.qa as preqa
+
     preproc = io.read_h5(path)
     session_id = path.split("/")[-1].split("_preprocessed")[0]
 
@@ -185,6 +185,8 @@ def generate_registration_report(path: str, out_dir=".") -> str:
     Returns:
         str: Path to the generated report.
     """
+    import mesoscopy.register.qa as regqa
+
     registered = io.read_h5(path)
     session_id = path.split("/")[-1].split("_preprocessed_registered")[0]
 

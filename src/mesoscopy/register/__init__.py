@@ -18,25 +18,23 @@
 #  IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
+from __future__ import annotations
+
 import json
 import os
 import pathlib
+import typing
 
 import click
 import h5py
 import numpy as np
-from dask import array as da
-from pynwb import NWBFile
-from pynwb import TimeSeries
-from pynwb.image import ImageSeries
-from pynwb.ophys import CorrectedImageStack
 
-import mesoscopy.preprocess.compute as preproc_compute
-import mesoscopy.register.landmarks_gui as reg_gui
-import mesoscopy.register.transform as trf
 import mesoscopy.resources as res
 from mesoscopy import io
 from mesoscopy import timer as timer
+
+if typing.TYPE_CHECKING:
+    from pynwb import NWBFile
 
 
 @click.group("register")
@@ -81,6 +79,11 @@ def label_cmd(path, out_dir, template_points, session_id) -> dict:
               Dictionary keys are landmark names, while x-y coordinates are stored as an (x, y)
               tuple, i.e. (column, row).
     """
+    from dask import array as da
+
+    import mesoscopy.preprocess.compute as preproc_compute
+    import mesoscopy.register.landmarks_gui as reg_gui
+
     click.echo("Loading imaging data...")
     nwb = bool(path.endswith(".nwb"))
 
@@ -201,6 +204,8 @@ def landmarks_cmd(
     Raises:
         ValueError: If the path to recording landmarks cannot be inferred, or the options conflict.
     """
+    import mesoscopy.register.transform as trf
+
     click.echo(f"Registering recording {path} to template.")
 
     if scale is not None and (output_width or output_height):
@@ -417,6 +422,10 @@ def update_nwb(nwb_path: str, h5_path: str, tform_params: np.ndarray) -> NWBFile
         NWBFile: The updated NWB file object. Note that its link to the HDF5 file is closed on
             return, so the registered image data is only readable by re-opening nwb_path.
     """
+    from pynwb import TimeSeries
+    from pynwb.image import ImageSeries
+    from pynwb.ophys import CorrectedImageStack
+
     nwbfile, nwbio = io.read_nwb(nwb_path, return_io=True)
 
     with h5py.File(h5_path, "r") as f:
