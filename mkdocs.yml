@@ -100,6 +100,7 @@ nav:
     - Preprocessing: how-to/preprocessing.md
     - Registration to the ABA: how-to/registration.md
     - Quality control: how-to/qa.md
+    - Reports: how-to/reports.md
     - Resting-state recordings: how-to/resting-state-analysis.md
     - Imaging with behaviour: how-to/imaging-with-behaviour-analysis.md
     - Response metrics: how-to/metrics.md

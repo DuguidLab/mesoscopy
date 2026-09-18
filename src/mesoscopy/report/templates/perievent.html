@@ -1,0 +1,449 @@
+{% extends "base.html" %}
+
+{% block toc %}
+<li class="nav-item"> <a class="nav-link d-flex align-items-center gap-2" href="#metadata">
+        <svg class="bi" aria-hidden="true">
+            <use xlink:href="#file-earmark-text"></use>
+        </svg>
+        Metadata
+    </a> </li>
+<li class="nav-item"> <a class="nav-link d-flex align-items-center gap-2" href="#traces">
+        <svg class="bi" aria-hidden="true">
+            <use xlink:href="#graph-up"></use>
+        </svg>
+        Peri-event traces
+    </a> </li>
+<li class="nav-item"> <a class="nav-link d-flex align-items-center gap-2" href="#all-regions">
+        <svg class="bi" aria-hidden="true">
+            <use xlink:href="#graph-up"></use>
+        </svg>
+        All regions
+    </a> </li>
+{% if has_metrics %}
+<li class="nav-item"> <a class="nav-link d-flex align-items-center gap-2" href="#metrics">
+        <svg class="bi" aria-hidden="true">
+            <use xlink:href="#graph-up"></use>
+        </svg>
+        Metrics
+    </a> </li>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<style>
+    h2[id] { scroll-margin-top: var(--pev-sticky, 140px); }
+    .pev-controls { position: sticky; top: 48px; z-index: 5; background: var(--bs-body-bg); border-bottom: 1px solid var(--bs-border-color); }
+    svg.pev-atlas path { stroke: var(--bs-secondary-color); stroke-width: .5; fill: var(--bs-tertiary-bg); cursor: pointer; }
+    svg.pev-atlas path.absent { fill: var(--bs-body-bg); stroke: var(--bs-border-color); cursor: default; }
+    svg.pev-atlas path:not(.absent):hover, svg.pev-atlas path.hovered { fill: var(--bs-primary-bg-subtle); }
+    svg.pev-atlas path.selected { fill: var(--bs-primary); stroke: var(--bs-primary-text-emphasis); stroke-width: 1; }
+    .pev-panel { height: 220px; border: 1px solid var(--bs-border-color); border-radius: .375rem; cursor: pointer; }
+    .pev-panel.selected { border-color: var(--bs-primary); box-shadow: 0 0 0 2px rgba(var(--bs-primary-rgb), .25); }
+    .pev-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: -1px; margin-right: 4px; }
+    table.pev-metrics td, table.pev-metrics th { padding: .25rem .5rem; white-space: nowrap; }
+    table.pev-metrics tr.selected { background: var(--bs-primary-bg-subtle); }
+    table.pev-metrics tbody tr { cursor: pointer; }
+</style>
+
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1>Peri-event Report</h1>
+    <h3>{{ session_id }}</h3>
+</div>
+
+<div class="row mb-3">
+    <h2 id="metadata">Session metadata</h2>
+    <div class="row mb-1">
+        <div class="col-md-4 mb-1"><strong>Animal ID:</strong> {{ animal_id or "Unknown" }}</div>
+        <div class="col-md-4 mb-1"><strong>Session date:</strong> {{ session_date or "Unknown" }}</div>
+        <div class="col-md-4 mb-1"><strong>Experiment ID:</strong> {{ experiment_id or "Unknown" }}</div>
+    </div>
+    <div class="row mb-1">
+        <div class="col-md-4 mb-1"><strong>Event:</strong> {{ event or "Unknown" }}</div>
+        <div class="col-md-4 mb-1"><strong>Window:</strong> {{ window[0] }} to {{ window[1] }} s, {{ n_samples }} samples</div>
+        <div class="col-md-4 mb-1"><strong>Trials:</strong> {{ n_trials }}<span id="pev-type-counts"></span></div>
+    </div>
+    <div class="row mb-1">
+        <div class="col-md-4 mb-1"><strong>Regions:</strong> {{ n_regions }}</div>
+        <div class="col-md-4 mb-1"><strong>Trial types:</strong> {{ "sdt_type" if has_types else "not available" }}</div>
+        <div class="col-md-4 mb-1"><strong>Metrics:</strong> {{ "present" if has_metrics else "not found" }}</div>
+    </div>
+</div>
+
+<div class="pev-controls py-2 mb-3">
+    <div class="row g-2 align-items-center">
+        {% if has_types %}
+        <div class="col-auto">
+            <span class="fw-semibold me-2">Trial type</span>
+            <span id="pev-type-filters"></span>
+        </div>
+        {% endif %}
+        <div class="col-auto">
+            <span class="fw-semibold me-2">View</span>
+            <div class="btn-group btn-group-sm" role="group">
+                <input type="radio" class="btn-check" name="pev-view" id="pev-view-mean" value="mean" checked>
+                <label class="btn btn-outline-primary" for="pev-view-mean">Mean ± 95% CI</label>
+                <input type="radio" class="btn-check" name="pev-view" id="pev-view-trials" value="trials">
+                <label class="btn btn-outline-primary" for="pev-view-trials">Individual trials</label>
+            </div>
+        </div>
+        {% if has_types %}
+        <div class="col-auto form-check form-switch ms-2">
+            <input class="form-check-input" type="checkbox" id="pev-split">
+            <label class="form-check-label" for="pev-split">Split by trial type</label>
+        </div>
+        {% endif %}
+        <div class="col-auto">
+            <span class="fw-semibold me-2">Region</span>
+            <select id="pev-region" class="form-select form-select-sm d-inline-block w-auto"></select>
+        </div>
+    </div>
+    {% if has_metrics %}
+    <div class="row g-2 align-items-center mt-1">
+        <div class="col-auto form-check form-switch">
+            <input class="form-check-input" type="checkbox" id="pev-markers" checked>
+            <label class="form-check-label" for="pev-markers">Metrics on traces</label>
+        </div>
+        <div class="col-auto">
+            <div class="form-check form-check-inline"><input class="form-check-input pev-mark" type="checkbox" id="pev-mark-onset" value="onset_time" checked><label class="form-check-label" for="pev-mark-onset">onset</label></div>
+            <div class="form-check form-check-inline"><input class="form-check-input pev-mark" type="checkbox" id="pev-mark-peak" value="peak_time" checked><label class="form-check-label" for="pev-mark-peak">peak</label></div>
+            <div class="form-check form-check-inline"><input class="form-check-input pev-mark" type="checkbox" id="pev-mark-offset" value="offset_time"><label class="form-check-label" for="pev-mark-offset">offset</label></div>
+        </div>
+        <div class="col-auto">
+            <div class="btn-group btn-group-sm" role="group">
+                <input type="radio" class="btn-check" name="pev-stat" id="pev-stat-mean" value="mean" checked>
+                <label class="btn btn-outline-secondary" for="pev-stat-mean">Mean ± SD</label>
+                <input type="radio" class="btn-check" name="pev-stat" id="pev-stat-median" value="median">
+                <label class="btn btn-outline-secondary" for="pev-stat-median">Median, IQR</label>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<div class="row mb-3">
+    <h2 id="traces">Peri-event traces <small class="text-secondary fs-6" id="pev-subtitle"></small></h2>
+    <div class="col-lg-4 col-md-5">
+        <div class="text-secondary small mb-1">Allen CCF top view. Click a region to select it.</div>
+        <svg id="pev-atlas" class="pev-atlas w-100" style="max-height: 420px"></svg>
+        <div class="small text-secondary" id="pev-atlas-hover">&nbsp;</div>
+    </div>
+    <div class="col-lg-8 col-md-7">
+        <div id="pev-plot" style="height: 420px"></div>
+    </div>
+</div>
+
+<div class="row mb-3">
+    <h2 id="all-regions">All regions <small class="text-secondary fs-6">same filters and view; click a panel to select</small></h2>
+    <div class="row g-2" id="pev-grid"></div>
+</div>
+
+{% if has_metrics %}
+<div class="row mb-3">
+    <h2 id="metrics">Metrics</h2>
+    <div class="col-lg-4 col-md-5">
+        <div class="d-flex align-items-center gap-2 mb-1">
+            <span class="fw-semibold">Colour atlas by</span>
+            <select id="pev-metric" class="form-select form-select-sm w-auto"></select>
+        </div>
+        <svg id="pev-atlas-metric" class="pev-atlas w-100" style="max-height: 380px"></svg>
+        <div id="pev-colorbar" class="small text-secondary"></div>
+    </div>
+    <div class="col-lg-8 col-md-7">
+        <div class="fw-semibold mb-1">Per-trial metrics for <span id="pev-metric-region"></span></div>
+        <div id="pev-trial-metrics" style="height: 380px"></div>
+    </div>
+    <div class="col-12 mt-3">
+        <div class="fw-semibold mb-1">Session metrics (all trials)</div>
+        <div class="table-responsive" style="max-height: 420px">
+            <table class="table table-sm table-hover pev-metrics" id="pev-session-table"></table>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+<script id="pev-data" type="application/json">{{ payload | tojson }}</script>
+<script>
+(function () {
+    const DATA = JSON.parse(document.getElementById('pev-data').textContent);
+    const [nT, nS, nR] = DATA.shape;
+    const bytes = Uint8Array.from(atob(DATA.traces), c => c.charCodeAt(0));
+    const TRACES = new Float32Array(bytes.buffer);
+    const at = (t, k, r) => TRACES[(t * nS + k) * nR + r];
+
+    const COLORS = {hit: '#198754', miss: '#fd7e14', false_alarm: '#dc3545', correct_rejection: '#0d6efd', unlabelled: '#6c757d'};
+    const FALLBACK = ['#6f42c1', '#20c997', '#d63384', '#0dcaf0', '#ffc107'];
+    const TYPE_ORDER = ['hit', 'miss', 'false_alarm', 'correct_rejection'];
+    const typeRank = t => { const i = TYPE_ORDER.indexOf(t); return i >= 0 ? i : t === 'unlabelled' ? 1e6 : 1e3; };
+    const TYPES = DATA.sdt_type ? [...new Set(DATA.sdt_type)].sort((a, b) => typeRank(a) - typeRank(b) || a.localeCompare(b)) : [];
+    TYPES.forEach((t, i) => { if (!COLORS[t]) COLORS[t] = FALLBACK[i % FALLBACK.length]; });
+    const hasMetrics = !!DATA.session_metrics;
+    const MARKERS = {onset_time: {symbol: 'triangle-right', label: 'onset'}, peak_time: {symbol: 'diamond', label: 'peak'}, offset_time: {symbol: 'triangle-left', label: 'offset'}};
+    const SESSION_COLS = ['region', 'n_trials', 'amplitude_mean', 'amplitude_sd', 'peak_time_mean', 'onset_time_mean', 'offset_time_mean', 'auc_mean', 'duration_mean', 'trace_correlation'];
+    const ATLAS_METRICS = ['amplitude_mean', 'peak_time_mean', 'onset_time_mean', 'offset_time_mean', 'auc_mean', 'duration_mean', 'amplitude_cv', 'trace_correlation'];
+
+    const state = {types: new Set(TYPES), view: 'mean', split: false, markers: hasMetrics, marks: new Set(['onset_time', 'peak_time']), stat: 'mean', region: DATA.regions[0]};
+    const ri = Object.fromEntries(DATA.regions.map((r, i) => [r, i]));
+    const $ = id => document.getElementById(id);
+    const CFG = {displayModeBar: false, responsive: true};
+    const dark = () => document.documentElement.getAttribute('data-bs-theme') === 'dark';
+    const fg = () => dark() ? '#dee2e6' : '#212529';
+
+    // ---------- per-trial metrics index: region -> trial_index -> row ----------
+    const TM = {};
+    if (hasMetrics) for (const row of DATA.trial_metrics) (TM[row.region] ??= {})[row.trial_index] = row;
+
+    // ---------- controls ----------
+    const counts = {};
+    (DATA.sdt_type || []).forEach(t => counts[t] = (counts[t] || 0) + 1);
+    if (TYPES.length) {
+        $('pev-type-counts').textContent = ' (' + TYPES.map(t => `${t} ${counts[t]}`).join(', ') + ')';
+        $('pev-type-filters').innerHTML = TYPES.map(t => `
+            <div class="form-check form-check-inline">
+                <input class="form-check-input pev-type" type="checkbox" id="pev-type-${t}" value="${t}" checked>
+                <label class="form-check-label" for="pev-type-${t}"><span class="pev-swatch" style="background:${COLORS[t]}"></span>${t} <span class="text-secondary">(${counts[t]})</span></label>
+            </div>`).join('');
+        document.querySelectorAll('.pev-type').forEach(cb => cb.onchange = () => { cb.checked ? state.types.add(cb.value) : state.types.delete(cb.value); render(); });
+        $('pev-split').onchange = ev => { state.split = ev.target.checked; render(); };
+    }
+    document.querySelectorAll('input[name=pev-view]').forEach(r => r.onchange = () => { state.view = r.value; render(); });
+    if (hasMetrics) {
+        $('pev-markers').onchange = ev => { state.markers = ev.target.checked; render(); };
+        document.querySelectorAll('.pev-mark').forEach(cb => cb.onchange = () => { cb.checked ? state.marks.add(cb.value) : state.marks.delete(cb.value); render(); });
+        document.querySelectorAll('input[name=pev-stat]').forEach(r => r.onchange = () => { state.stat = r.value; render(); });
+    }
+    const select = $('pev-region');
+    select.innerHTML = DATA.regions.map(r => `<option>${r}</option>`).join('');
+    select.onchange = () => selectRegion(select.value);
+
+    function selectRegion(r) { state.region = r; select.value = r; render(); }
+
+    // ---------- atlas ----------
+    function buildAtlas(svg) {
+        const [h, w] = DATA.atlas.shape;
+        svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+        svg.innerHTML = Object.entries(DATA.atlas.paths).map(([r, d]) =>
+            `<path id="${svg.id}-${r}" data-region="${r}" d="${d}" class="${ri[r] === undefined ? 'absent' : ''}"><title>${r}</title></path>`).join('');
+        svg.querySelectorAll('path:not(.absent)').forEach(p => {
+            p.onclick = () => selectRegion(p.dataset.region);
+            p.onmouseenter = () => $('pev-atlas-hover').textContent = p.dataset.region;
+            p.onmouseleave = () => $('pev-atlas-hover').innerHTML = '&nbsp;';
+        });
+    }
+    buildAtlas($('pev-atlas'));
+
+    // ---------- statistics ----------
+    const filtered = () => [...Array(nT).keys()].filter(i => !DATA.sdt_type || state.types.has(DATA.sdt_type[i]));
+    function meanCI(idx, r) {
+        const m = new Array(nS).fill(0), lo = new Array(nS), hi = new Array(nS), n = new Array(nS).fill(0), ss = new Array(nS).fill(0);
+        for (const t of idx) for (let k = 0; k < nS; k++) {
+            const v = at(t, k, r); if (Number.isNaN(v)) continue;
+            n[k]++; const d = v - m[k]; m[k] += d / n[k]; ss[k] += d * (v - m[k]);
+        }
+        for (let k = 0; k < nS; k++) {
+            if (n[k] === 0) { m[k] = null; lo[k] = null; hi[k] = null; continue; }
+            const se = n[k] > 1 ? Math.sqrt(ss[k] / (n[k] - 1)) / Math.sqrt(n[k]) : 0;
+            lo[k] = m[k] - 1.96 * se; hi[k] = m[k] + 1.96 * se;
+        }
+        return {m, lo, hi};
+    }
+    const quantile = (sorted, q) => { const pos = (sorted.length - 1) * q, lo = Math.floor(pos), hi = Math.ceil(pos); return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo); };
+    function summary(values) {
+        // {centre, minus, plus} for the marker and its error bar
+        if (!values.length) return null;
+        if (state.stat === 'median') {
+            const s = [...values].sort((a, b) => a - b), med = quantile(s, 0.5);
+            return {centre: med, minus: med - quantile(s, 0.25), plus: quantile(s, 0.75) - med, n: values.length};
+        }
+        const mu = values.reduce((a, b) => a + b, 0) / values.length;
+        const sd = values.length > 1 ? Math.sqrt(values.reduce((a, b) => a + (b - mu) ** 2, 0) / (values.length - 1)) : 0;
+        return {centre: mu, minus: sd, plus: sd, n: values.length};
+    }
+    // Onset / peak / offset of a trace with the `process metrics` defaults: baseline = pre-event samples,
+    // response = post-event samples, onset at 2 baseline SDs held for 3 samples, offset back at that threshold.
+    function traceFeatures(m) {
+        const base = [], post = [];
+        DATA.time.forEach((t, k) => { if (m[k] === null) return; (t < 0 ? base : post).push(k); });
+        if (base.length < 2 || !post.length) return {};
+        const b0 = base.reduce((a, k) => a + m[k], 0) / base.length;
+        const sd = Math.sqrt(base.reduce((a, k) => a + (m[k] - b0) ** 2, 0) / (base.length - 1));
+        let pk = post[0];
+        for (const k of post) if (Math.abs(m[k] - b0) > Math.abs(m[pk] - b0)) pk = k;
+        const sign = m[pk] - b0 >= 0 ? 1 : -1, thr = 2 * sd;
+        const above = k => sign * (m[k] - b0) > thr;
+        const run = (ks, test) => { let n = 0; for (const k of ks) { n = test(k) ? n + 1 : 0; if (n === 3) return ks[ks.indexOf(k) - 2]; } return null; };
+        const on = run(post, above), off = run(post.filter(k => k > pk), k => !above(k));
+        const pt = k => k === null ? null : {x: DATA.time[k], y: m[k]};
+        return {onset_time: pt(on), peak_time: pt(pk), offset_time: pt(off)};
+    }
+    const yAt = (m, x) => { let k = DATA.time.findIndex(t => t >= x); if (k < 0) k = nS - 1; return m[k]; };
+    const groups = () => {
+        const idx = filtered();
+        if (!state.split || !TYPES.length) return [{name: `all selected (n=${idx.length})`, color: fg(), idx}];
+        return TYPES.filter(t => state.types.has(t)).map(t => { const g = idx.filter(i => DATA.sdt_type[i] === t); return {name: `${t} (n=${g.length})`, color: COLORS[t], idx: g}; });
+    };
+    const typeColor = i => DATA.sdt_type ? COLORS[DATA.sdt_type[i]] : '#0d6efd';
+
+    // ---------- marker traces ----------
+    function markerTraces(g, r, m, small) {
+        if (!hasMetrics || !state.markers || !state.marks.size) return [];
+        const rows = g.idx.map(i => ({i, row: TM[DATA.regions[r]]?.[DATA.trial_index[i]]})).filter(x => x.row);
+        const out = [];
+        if (state.view === 'mean') {
+            const feats = traceFeatures(m);
+            const labels = Object.keys(MARKERS).filter(c => state.marks.has(c)).map(c => MARKERS[c].label).join(' / ');
+            const x = [], y = [], sym = [], text = [];
+            for (const col of Object.keys(MARKERS)) {
+                if (!state.marks.has(col)) continue;
+                const s = summary(rows.map(x => x.row[col]).filter(v => v !== null && v !== undefined));
+                const f = feats[col];
+                if (s && !small) {
+                    const lo = s.centre - s.minus, hi = s.centre + s.plus, yy = f ? f.y : yAt(m, s.centre);
+                    out.push({x: [lo, s.centre, hi], y: [yy, yy, yy], mode: 'lines+markers', line: {color: g.color, width: 1.2}, marker: {symbol: ['line-ns-open', 'circle-open', 'line-ns-open'], size: [7, 5, 7], color: g.color},
+                        name: `${state.split ? g.name + ' ' : ''}per-trial ${MARKERS[col].label} ${state.stat === 'mean' ? 'mean ± SD' : 'median, IQR'}`, showlegend: false,
+                        hovertemplate: `per-trial ${MARKERS[col].label} ${state.stat} ${s.centre.toFixed(2)} s (${lo.toFixed(2)} to ${hi.toFixed(2)}, n=${s.n})<extra></extra>`});
+                }
+                if (!f) continue;
+                x.push(f.x); y.push(f.y); sym.push(MARKERS[col].symbol);
+                text.push(`${MARKERS[col].label} of mean trace ${f.x.toFixed(2)} s` + (s ? `<br>per-trial ${state.stat} ${s.centre.toFixed(2)} s (n=${s.n})` : ''));
+            }
+            out.push({x, y, text, mode: 'markers', marker: {symbol: sym, size: small ? 7 : 11, color: g.color, line: {color: dark() ? '#212529' : '#fff', width: 1}},
+                name: `${state.split ? g.name + ' ' : ''}${labels} of mean trace`, showlegend: !small, hovertemplate: '%{text}<extra></extra>'});
+        } else {
+            const rug = [];
+            for (const col of Object.keys(MARKERS)) {
+                if (!state.marks.has(col)) continue;
+                const x = [], y = [], color = [], text = [];
+                for (const {i, row} of rows) {
+                    const tx = row[col]; if (tx === null || tx === undefined) continue;
+                    let ty;
+                    if (col === 'peak_time' && row.amplitude !== null && row.baseline_mean !== null) ty = row.baseline_mean + row.amplitude;
+                    else { let k = DATA.time.findIndex(t => t >= tx); if (k < 0) k = nS - 1; ty = at(i, k, r); }
+                    x.push(tx); y.push(ty); color.push(typeColor(i));
+                    text.push(`trial ${DATA.trial_index[i]}${DATA.sdt_type ? ' (' + DATA.sdt_type[i] + ')' : ''}: ${MARKERS[col].label} ${tx.toFixed(2)} s`);
+                }
+                out.push({x, y, text, mode: 'markers', marker: {symbol: MARKERS[col].symbol, size: small ? 4 : 6, color, line: {color: fg(), width: 0.5}}, name: `per-trial ${MARKERS[col].label}`, showlegend: !small, hovertemplate: '%{text}<extra></extra>'});
+                if (!small) rug.push({x, y: x.map(() => rug.length), yaxis: 'y2', mode: 'markers', marker: {symbol: 'line-ns-open', size: 8, color, opacity: 0.6, line: {width: 1}}, showlegend: false, hoverinfo: 'skip', name: MARKERS[col].label});
+            }
+            out.push(...rug);
+        }
+        return out;
+    }
+
+    // ---------- trace builders ----------
+    function tracesFor(r, small) {
+        const out = [];
+        for (const g of groups()) {
+            if (!g.idx.length) continue;
+            const {m, lo, hi} = meanCI(g.idx, r);
+            if (state.view === 'mean') {
+                out.push({x: DATA.time, y: hi, mode: 'lines', line: {width: 0}, showlegend: false, hoverinfo: 'skip'});
+                out.push({x: DATA.time, y: lo, mode: 'lines', line: {width: 0}, fill: 'tonexty', fillcolor: g.color + '33', showlegend: false, hoverinfo: 'skip'});
+                out.push({x: DATA.time, y: m, mode: 'lines', line: {color: g.color, width: small ? 1.5 : 2.5}, name: g.name, showlegend: !small, hovertemplate: '%{x:.2f} s, %{y:.4f}<extra>' + g.name + '</extra>'});
+            } else {
+                const byType = state.split || !TYPES.length ? [{color: g.color, name: g.name, idx: g.idx}]
+                    : TYPES.filter(t => state.types.has(t)).map(t => ({color: COLORS[t], name: t, idx: g.idx.filter(i => DATA.sdt_type[i] === t)})).filter(b => b.idx.length);
+                for (const b of byType) {
+                    const x = [], y = [], text = [];
+                    for (const i of b.idx) {
+                        for (let k = 0; k < nS; k++) { x.push(DATA.time[k]); const v = at(i, k, r); y.push(Number.isNaN(v) ? null : v); text.push(`trial ${DATA.trial_index[i]}`); }
+                        x.push(null); y.push(null); text.push('');
+                    }
+                    out.push({x, y, text, mode: 'lines', line: {color: b.color, width: 0.7}, opacity: 0.45, name: `${b.name} (n=${b.idx.length})`, showlegend: !small, hovertemplate: '%{text}<br>%{x:.2f} s, %{y:.4f}<extra></extra>'});
+                }
+                out.push({x: DATA.time, y: m, mode: 'lines', line: {color: g.color, width: small ? 1.5 : 2.5}, name: `mean ${state.split ? g.name : ''}`, showlegend: !small, hoverinfo: 'skip'});
+            }
+            out.push(...markerTraces(g, r, m, small));
+        }
+        return out;
+    }
+    function layout(small, title) {
+        const rug = !small && hasMetrics && state.markers && state.view === 'trials' && state.marks.size;
+        const l = {
+            margin: small ? {l: 36, r: 6, t: 24, b: 24} : {l: 50, r: 10, t: 10, b: 40},
+            xaxis: {title: small ? '' : `Time from ${DATA.event || 'event'} (s)`, zeroline: false, tickfont: {size: small ? 9 : 11}, range: [DATA.time[0], DATA.time[nS - 1]]},
+            yaxis: {title: small ? '' : '∆F/F', zeroline: false, tickfont: {size: small ? 9 : 11}, domain: rug ? [0.14, 1] : [0, 1]},
+            shapes: [{type: 'line', x0: 0, x1: 0, yref: 'paper', y0: 0, y1: 1, line: {color: '#adb5bd', dash: 'dot', width: 1}}],
+            legend: {orientation: 'h', y: 1.08, x: 0}, hovermode: 'closest',
+            paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: {color: fg()},
+            title: small ? {text: title, x: 0.05, y: 0.97, font: {size: 11}} : undefined,
+        };
+        if (rug) {
+            const labels = [...Object.keys(MARKERS)].filter(m => state.marks.has(m));
+            l.yaxis2 = {domain: [0, 0.1], range: [-0.5, labels.length - 0.5], showgrid: false, zeroline: false, fixedrange: true, tickvals: labels.map((_, i) => i), ticktext: labels.map(m => MARKERS[m].label), tickfont: {size: 9}};
+        }
+        return l;
+    }
+
+    // ---------- grid ----------
+    const grid = $('pev-grid');
+    grid.innerHTML = DATA.regions.map(r => `<div class="col-xl-3 col-lg-4 col-md-6"><div class="pev-panel" id="pev-panel-${r}" data-region="${r}"></div></div>`).join('');
+    grid.querySelectorAll('.pev-panel').forEach(p => {
+        p.onclick = () => selectRegion(p.dataset.region);
+        p.onmouseenter = () => $('pev-atlas-' + p.dataset.region)?.classList.add('hovered');
+        p.onmouseleave = () => $('pev-atlas-' + p.dataset.region)?.classList.remove('hovered');
+    });
+
+    // ---------- metrics section ----------
+    function renderSessionTable() {
+        const cols = SESSION_COLS.filter(c => c in DATA.session_metrics[0]);
+        const fmt = v => typeof v === 'number' ? (Number.isInteger(v) ? v : v.toFixed(3)) : (v ?? '');
+        $('pev-session-table').innerHTML = `<thead><tr>${cols.map(c => `<th>${c}</th>`).join('')}</tr></thead><tbody>` +
+            DATA.session_metrics.map(row => `<tr data-region="${row.region}" class="${row.region === state.region ? 'selected' : ''}">${cols.map(c => `<td>${fmt(row[c])}</td>`).join('')}</tr>`).join('') + '</tbody>';
+        $('pev-session-table').querySelectorAll('tbody tr').forEach(tr => tr.onclick = () => selectRegion(tr.dataset.region));
+    }
+    function renderMetricAtlas() {
+        const metric = $('pev-metric').value;
+        const vals = Object.fromEntries(DATA.session_metrics.map(r => [r.region, r[metric]]));
+        const nums = Object.values(vals).filter(v => typeof v === 'number');
+        const lo = Math.min(...nums), hi = Math.max(...nums);
+        const cmap = v => { const t = (v - lo) / (hi - lo || 1); return `rgb(${Math.round(255 - 200 * t)},${Math.round(245 - 160 * t)},${Math.round(255 - 60 * t)})`; };
+        $('pev-atlas-metric').querySelectorAll('path').forEach(p => {
+            const v = vals[p.dataset.region];
+            p.style.fill = typeof v === 'number' ? cmap(v) : '';
+            p.classList.toggle('selected', p.dataset.region === state.region);
+            p.querySelector('title').textContent = typeof v === 'number' ? `${p.dataset.region}: ${metric} = ${v.toFixed(3)}` : p.dataset.region;
+        });
+        $('pev-colorbar').innerHTML = `<span style="display:inline-block;width:120px;height:10px;background:linear-gradient(90deg,${cmap(lo)},${cmap(hi)});vertical-align:middle"></span> ${lo.toFixed(3)} to ${hi.toFixed(3)} (${metric}, all trials)`;
+    }
+    function renderTrialMetrics() {
+        $('pev-metric-region').textContent = state.region;
+        const rows = filtered().map(i => TM[state.region]?.[DATA.trial_index[i]]).filter(Boolean);
+        const metrics = ['amplitude', 'peak_time', 'onset_time', 'auc'];
+        const byType = TYPES.length ? TYPES.filter(t => state.types.has(t)).map(t => ({name: t, color: COLORS[t], rows: rows.filter(r => DATA.sdt_type[DATA.trial_index.indexOf(r.trial_index)] === t)})) : [{name: 'all', color: '#0d6efd', rows}];
+        const traces = [];
+        for (const b of byType) metrics.forEach((m, k) => traces.push({type: 'box', y: b.rows.map(r => r[m]), name: b.name, legendgroup: b.name, showlegend: k === 0, boxpoints: 'all', jitter: 0.4, pointpos: 0, marker: {size: 3, color: b.color}, line: {color: b.color}, xaxis: `x${k + 1}`, yaxis: `y${k + 1}`, hovertemplate: '%{y:.3f}<extra>' + b.name + '</extra>'}));
+        const lay = {grid: {rows: 1, columns: metrics.length, pattern: 'independent'}, margin: {l: 40, r: 10, t: 30, b: 30}, boxmode: 'group', legend: {orientation: 'h', y: 1.12}, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: {color: fg()}};
+        metrics.forEach((m, k) => { lay[`xaxis${k + 1}`] = {showticklabels: false, title: {text: m, font: {size: 11}}}; lay[`yaxis${k + 1}`] = {tickfont: {size: 9}}; });
+        Plotly.react('pev-trial-metrics', traces, lay, CFG);
+    }
+    if (hasMetrics) {
+        buildAtlas($('pev-atlas-metric'));
+        $('pev-metric').innerHTML = ATLAS_METRICS.filter(m => m in DATA.session_metrics[0]).map(m => `<option value="${m}">${m}</option>`).join('');
+        $('pev-metric').onchange = renderMetricAtlas;
+    }
+
+    // ---------- render ----------
+    function render() {
+        const r = ri[state.region];
+        const n = filtered().length;
+        $('pev-subtitle').textContent = `${state.region}, ${n} of ${nT} trials, ${state.view === 'mean' ? 'mean ± 95% CI' : 'individual trials'}`;
+        $('pev-atlas').querySelectorAll('path').forEach(p => p.classList.toggle('selected', p.dataset.region === state.region));
+        Plotly.react('pev-plot', tracesFor(r, false), layout(false), CFG);
+        DATA.regions.forEach((name, i) => {
+            const el = $('pev-panel-' + name);
+            el.classList.toggle('selected', name === state.region);
+            Plotly.react(el, tracesFor(i, true), layout(true, name), CFG);
+        });
+        if (hasMetrics) { renderSessionTable(); renderMetricAtlas(); renderTrialMetrics(); }
+    }
+    render();
+    const setSticky = () => document.documentElement.style.setProperty('--pev-sticky', `${48 + document.querySelector('.pev-controls').offsetHeight + 8}px`);
+    setSticky();
+    window.addEventListener('resize', setSticky);
+    new MutationObserver(render).observe(document.documentElement, {attributes: true, attributeFilter: ['data-bs-theme']});
+})();
+</script>
+{% endblock %}

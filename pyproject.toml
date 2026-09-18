@@ -190,7 +190,7 @@ banned-module-level-imports = [
 [tool.ruff.lint.per-file-ignores]
 # Numerics, GUI and format modules; the command modules (`*/__init__.py`) and `io.py` import these lazily.
 # `process/perievent.py` is not exempt: the process command module reads its `EVENTS` at import time.
-"src/mesoscopy/{plots,convert/hdf5,convert/video,export/nwb,inspect/data_viewers,preprocess/compute,preprocess/qa,process/region,process/regression,process/smooth,process/zscore,register/landmarks_gui,register/qa,register/transform}.py" = ["TID253"]
+"src/mesoscopy/{plots,convert/hdf5,convert/video,export/nwb,inspect/data_viewers,preprocess/compute,preprocess/qa,process/region,process/regression,process/smooth,process/zscore,register/landmarks_gui,register/qa,register/transform,report/perievent}.py" = ["TID253"]
 "tests/**" = ["TID253"]
 
 [tool.ruff.lint.isort]
