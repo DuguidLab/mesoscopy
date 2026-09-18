@@ -4,6 +4,10 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 ## Unreleased
 
+### Changed
+
+- `process peri-event` CSV output now carries the trials CSV columns (`sdt_type`, `outcome`, `response_time`, ...) on every row, joined by `trial_index` after `F`. `process metrics` and `metrics.metrics_tables` carry any per-trial columns of the peri-event table through to `<stem>_metrics.csv`, so `-t/--trials` is only needed for peri-event files written without them; `metrics.join_trials` skips columns the table already has ([#158](https://github.com/DuguidLab/mesoscopy/issues/158)).
+
 ### Fixed
 
 - `process peri-event --with-metrics` crashed with `IndexError` when no trials were kept, after writing a header-only `_perievent.csv`, and `process metrics` crashed the same way on that file. The peri-event command now skips the metrics step with a message when no trials are kept, `process metrics` reports the empty input, and `metrics.metrics_tables` raises `ValueError` on a table with no rows ([#156](https://github.com/DuguidLab/mesoscopy/issues/156)).
