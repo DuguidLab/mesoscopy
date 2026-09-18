@@ -4,6 +4,10 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 ## Unreleased
 
+### Performance
+
+- The root CLI imports a subcommand's module only when that subcommand is invoked, and each stage's command module imports its heavy dependencies (pynwb, dask, zarr, pandas, scipy, scikit-learn, pims, napari, plotly) inside the command that uses them. `mesoscopy --help` and every `<stage> --help` now start in about 0.1 s instead of 1-2 s, and HDF5-only commands no longer load pynwb ([#149](https://github.com/DuguidLab/mesoscopy/issues/149)).
+
 ## [0.12.0] - 2026-09-14
 
 ### Added

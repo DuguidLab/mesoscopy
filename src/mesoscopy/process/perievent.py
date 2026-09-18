@@ -21,9 +21,15 @@
 
 """Peri-event window extraction from behaviour-aligned recordings."""
 
+from __future__ import annotations
+
+import typing
+
 import numpy as np
 import numpy.typing as npt
-import pandas as pd
+
+if typing.TYPE_CHECKING:
+    import pandas as pd
 
 # Trials CSV column, or columns, that give the event time for each `--event` choice.
 EVENTS = ("cue_onset", "trial_start", "response", "reward")
@@ -72,6 +78,8 @@ def event_times(trials: pd.DataFrame, event: str) -> tuple[npt.NDArray[np.float6
         times = trials["start_time"].to_numpy(dtype=np.float64)
         keep = ~np.isnan(times)
     elif event == "response":
+        import pandas as pd
+
         response_time = pd.to_numeric(trials["response_time"], errors="coerce").to_numpy(dtype=np.float64)
         times = trials["start_time"].to_numpy(dtype=np.float64) + response_time
         keep = ~np.isnan(response_time) & (response_time >= 0) & ~np.isnan(times)

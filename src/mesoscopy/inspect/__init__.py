@@ -23,7 +23,6 @@
 
 import click
 
-import mesoscopy.inspect.data_viewers as dvs
 from mesoscopy import io
 
 
@@ -65,6 +64,8 @@ def inspect(input_path: str, info_level: str = "meta_only") -> None:  # noqa: PL
         input_path (str): Path to NWB file.
         info_level (str): Inspection level. Defaults to metadata only.
     """
+    import mesoscopy.inspect.data_viewers as dvs
+
     nwbfile = io.read_nwb(input_path)
 
     click.echo("-" * (len(input_path) + 14))

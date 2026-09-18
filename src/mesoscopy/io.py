@@ -18,6 +18,8 @@
 #  IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
+from __future__ import annotations
+
 import csv
 import typing
 from collections import OrderedDict
@@ -28,10 +30,12 @@ import imageio.v2 as iio
 import numpy as np
 import numpy.typing as npt
 import xmltodict
-import zarr
-from dask import array as da
-from pynwb import NWBHDF5IO
-from pynwb import NWBFile
+
+if typing.TYPE_CHECKING:
+    import zarr
+    from dask import array as da
+    from pynwb import NWBHDF5IO
+    from pynwb import NWBFile
 
 # Region masks are 2D (height, width) arrays, matching a single recording frame.
 _MASK_NDIM = 2
@@ -57,6 +61,8 @@ def read_nwb(path: str, mode: str = "a", return_io: bool = False) -> NWBFile | t
         NWBFile: NWB file object.
         NWBHDF5IO: IO object (if return_io=True).
     """
+    from pynwb import NWBHDF5IO
+
     io = NWBHDF5IO(path, mode=mode)
     nwbfile = io.read()
     if return_io:
@@ -75,6 +81,8 @@ def write_nwb(path: str, nwbfile: NWBFile, mode: str = "w", io: NWBHDF5IO = None
             is not reopened and `path` and `mode` are ignored. Defaults to None.
         **kwargs (typing.Any): Parameters passed to NWBHDF5IO.write.
     """
+    from pynwb import NWBHDF5IO
+
     if io:
         return io.write(nwbfile, **kwargs)
     with NWBHDF5IO(path, mode=mode) as io:
@@ -152,6 +160,9 @@ def store_interim(
     Returns:
         Zarr Array: Persistent Zarr array object
     """
+    import zarr
+    from dask import array as da
+
     if not interim_path.endswith(".zarr"):
         interim_path += ".zarr"
 

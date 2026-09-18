@@ -21,33 +21,106 @@
 
 """Main entry point to the mesoscopy CLI"""
 
+import importlib
 import os
+import typing
 from importlib.metadata import version
 
 import click
-import h5py
-from matplotlib import pyplot as plt
-
-import mesoscopy.register as reg
-from mesoscopy import align
-from mesoscopy import convert
-from mesoscopy import export
-from mesoscopy import inspect
-from mesoscopy import postprocess
-from mesoscopy import preprocess
-from mesoscopy import process
-from mesoscopy import report
 
 __version__ = version("mesoscopy")
 
+# Lazy subcommands are imported only when they are looked up, to avoid importing heavy dependencies unnecessarily.
+LAZY_SUBCOMMANDS = {
+    "align": ("mesoscopy.align:align_cmd", "Write behaviour-aligned frame timestamps to a recording."),
+    "convert": ("mesoscopy.convert:convert_cmd", "Convert raw recordings to NWB or HDF5."),
+    "export": ("mesoscopy.export:export_cmd", "Export mesoscopy-generated files to other formats."),
+    "inspect": ("mesoscopy.inspect:inspect_cmd", "Inspect a recording session and associated preprocessing output."),
+    "postprocess": ("mesoscopy.postprocess:postprocess_cmd", "Postprocess extracted activity."),
+    "preprocess": ("mesoscopy.preprocess:preprocess_cmd", "Extract haemodynamics-corrected deltaF from a recording."),
+    "process": ("mesoscopy.process:process_cmd", "Extract activity from preprocessed or registered recordings."),
+    "register": ("mesoscopy.register:register_cmd", "Register recordings to an anatomical template."),
+    "report": ("mesoscopy.report:report_cmd", "Generate an HTML report for a mesoscopy processing step."),
+    "sample": ("mesoscopy:sample", "Sample an image frame from an HDF5 file and export it as a PNG."),
+}
 
-@click.group()
+
+class LazyGroup(click.Group):
+    """Click group that imports a subcommand's module only when that subcommand is looked up."""
+
+    def __init__(
+        self, *args: typing.Any, lazy_subcommands: dict[str, tuple[str, str]] | None = None, **kwargs: typing.Any
+    ) -> None:
+        """Initialise the group.
+
+        Args:
+            *args: Passed to `click.Group`.
+            lazy_subcommands: Mapping of subcommand name to `("module:attribute", summary)` of its click command.
+            **kwargs: Passed to `click.Group`.
+        """
+        super().__init__(*args, **kwargs)
+        self.lazy_subcommands = lazy_subcommands or {}
+
+    def list_commands(self, ctx: click.Context) -> list[str]:
+        """List registered and lazy subcommand names without importing the lazy ones.
+
+        Args:
+            ctx: Click context.
+
+        Returns:
+            Sorted subcommand names.
+        """
+        return sorted([*super().list_commands(ctx), *self.lazy_subcommands])
+
+    def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
+        """Return the subcommand, importing its module if it is lazy.
+
+        Args:
+            ctx: Click context.
+            cmd_name: Subcommand name.
+
+        Returns:
+            The click command, or `None` if no such subcommand exists.
+        """
+        if cmd_name in self.lazy_subcommands:
+            return self._load_lazy_command(cmd_name)
+        return super().get_command(ctx, cmd_name)
+
+    def format_commands(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
+        """Write the subcommand listing, using stored summaries for lazy subcommands instead of importing them.
+
+        Args:
+            ctx: Click context.
+            formatter: Help formatter to write to.
+        """
+        rows = []
+        for name in self.list_commands(ctx):
+            if name in self.lazy_subcommands:
+                rows.append((name, self.lazy_subcommands[name][1]))
+                continue
+            cmd = super().get_command(ctx, name)
+            if cmd is not None and not cmd.hidden:
+                rows.append((name, cmd.get_short_help_str(limit=formatter.width - 6 - len(name))))
+        if rows:
+            with formatter.section("Commands"):
+                formatter.write_dl(rows)
+
+    def _load_lazy_command(self, cmd_name: str) -> click.Command:
+        module_name, attr_name = self.lazy_subcommands[cmd_name][0].split(":")
+        cmd = getattr(importlib.import_module(module_name), attr_name)
+        if not isinstance(cmd, click.Command):
+            msg = f"Lazy subcommand {cmd_name!r} resolved to {cmd!r}, not a click command."
+            raise TypeError(msg)
+        return cmd
+
+
+@click.group(cls=LazyGroup, lazy_subcommands=LAZY_SUBCOMMANDS)
 @click.version_option(__version__)
 def cli():
     """Widefield calcium imaging analysis pipeline."""
 
 
-@cli.command()
+@click.command()
 @click.argument("path", type=click.Path(exists=True))
 @click.argument("out_dir", type=click.Path(dir_okay=True))
 @click.option("--index", default=0, show_default=True, help="Index of frame to sample.")
@@ -57,6 +130,9 @@ def cli():
 @click.option("--key", type=str, default=None, help="Activity column")
 def sample(path, out_dir, index, crop=0, vmin=0, vmax=255, key="frames"):
     """Sample an image frame from an HDF5 file and export it as a PNG."""
+    import h5py
+    from matplotlib import pyplot as plt
+
     click.echo(f"Sampling {path} at index {index}.")
 
     f = h5py.File(path)
@@ -70,14 +146,3 @@ def sample(path, out_dir, index, crop=0, vmin=0, vmax=255, key="frames"):
     else:
         plt.imsave(outpath, d[index], vmin=vmin, vmax=vmax, cmap="jet")
     click.echo(f"Saved sample at {outpath}")
-
-
-cli.add_command(align.align_cmd)
-cli.add_command(preprocess.preprocess_cmd)
-cli.add_command(process.process_cmd)
-cli.add_command(postprocess.postprocess_cmd)
-cli.add_command(reg.register_cmd)
-cli.add_command(convert.convert_cmd)
-cli.add_command(inspect.inspect_cmd)
-cli.add_command(export.export_cmd)
-cli.add_command(report.report_cmd)

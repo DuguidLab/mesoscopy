@@ -24,13 +24,10 @@ import os
 import typing
 
 import click
-import imageio.v2 as iio
 import numpy as np
 
-import mesoscopy.export.nwb as exp_nwb
 
 from mesoscopy import io
-from tqdm import tqdm
 
 
 @click.group("export")
@@ -94,6 +91,8 @@ def export_nwb(nwb_path: str, out_path: str = "") -> str:
     Returns:
         str: Path to the exported NWB file.
     """
+    import mesoscopy.export.nwb as exp_nwb
+
     return exp_nwb.export_standalone(nwb_path, out_path)
 
 
@@ -107,6 +106,9 @@ def export_deltaf(path: str, out_path: str) -> str:
     Returns:
         str: Path to the exported video file.
     """
+    import imageio.v2 as iio
+    from tqdm import tqdm
+
     session_id = path.split("/")[-1].replace(".h5", "").replace(".nwb", "")
 
     nwb = bool(path.endswith(".nwb"))

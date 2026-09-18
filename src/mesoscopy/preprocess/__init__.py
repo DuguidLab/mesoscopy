@@ -18,21 +18,21 @@
 #  IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
+from __future__ import annotations
+
 import os
 import shutil
 import time
 import typing
 
 import click
-import dask
 import numpy as np
-from dask import array as da
-from pynwb.image import ImageSeries
 
-import mesoscopy.preprocess.compute as calc
-import mesoscopy.preprocess.qa as qa
 from mesoscopy import io
 from mesoscopy import timer
+
+if typing.TYPE_CHECKING:
+    from dask import array as da
 
 
 @click.command(name="preprocess")
@@ -137,6 +137,12 @@ def run_preprocessing(
         skip_end (int, optional): Number of frames to skip at the end of the recording. Defaults to None.
         no_qa (bool, optional): Skip automatic quality control checks. Defaults to False.
     """
+    import dask
+    from dask import array as da
+
+    import mesoscopy.preprocess.compute as calc
+    from mesoscopy.preprocess import qa
+
     click.echo(f"Preprocessing file {path}.")
 
     preprocessing_start = time.time()
@@ -421,6 +427,8 @@ def update_nwb(nwb_path: str, h5_path: str) -> None:
         nwb_path (str): Path to NWB file.
         h5_path (str): Path to HDF5 file containing the delta F imaging series.
     """
+    from pynwb.image import ImageSeries
+
     f = io.read_h5(h5_path)
     nwbfile, nwbio = io.read_nwb(nwb_path, return_io=True)
     deltaF_series = ImageSeries(
