@@ -1988,15 +1988,47 @@ def test_perievent_cmd_csv(perievent_regions_csv, perievent_trials_csv, output_d
     outpath = pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_perievent.csv"
     assert outpath.is_file()
     out = pd.read_csv(outpath)
-    assert list(out.columns) == ["trial_index", "event_time", "time", "region", "F"]
+    assert list(out.columns) == [
+        "trial_index",
+        "event_time",
+        "time",
+        "region",
+        "F",
+        "start_time",
+        "cue_onset",
+        "stop_time",
+        "response_time",
+        "sdt_type",
+    ]
     assert len(out) == 4 * 101 * len(PERIEVENT_REGIONS)
     assert sorted(out["trial_index"].unique()) == [1, 2, 3, 4]
     assert list(out["region"].unique()) == PERIEVENT_REGIONS
+    per_trial = out.drop_duplicates(subset="trial_index").set_index("trial_index")
+    assert per_trial["sdt_type"].tolist() == ["hit", "miss", "false_alarm", "correct_rejection"]
+    np.testing.assert_allclose(per_trial["cue_onset"], per_trial["event_time"])
 
     trial = out[(out["trial_index"] == 1) & (out["region"] == "R_MOp")]
     assert trial["event_time"].unique().tolist() == [5.5]
     np.testing.assert_allclose(trial["time"], pev.window_grid(1.0, 3.0, 25.0))
     np.testing.assert_allclose(trial["F"], _perievent_signal(5.5 + trial["time"].to_numpy()) + 1, atol=5e-3)
+
+
+def test_perievent_cmd_csv_trials_with_index_column(perievent_regions_csv, perievent_trials_csv, output_dir, tmp_path):
+    indexed = tmp_path / "ses-01_trials.csv"
+    pd.read_csv(perievent_trials_csv).to_csv(indexed)  # leading "Unnamed: 0" column, as pandas writes by default
+    result = CliRunner().invoke(
+        mesoscopy.cli, args=f"process peri-event {perievent_regions_csv} {indexed} -o {output_dir}"
+    )
+    assert result.exit_code == 0, result.output
+
+    out = pd.read_csv(pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_perievent.csv")
+    assert not any(column.startswith("Unnamed") for column in out.columns)
+    assert out.drop_duplicates(subset="trial_index")["sdt_type"].tolist() == [
+        "hit",
+        "miss",
+        "false_alarm",
+        "correct_rejection",
+    ]
 
 
 def test_perievent_cmd_csv_without_time_aligned(perievent_regions_csv, perievent_trials_csv, output_dir, tmp_path):
@@ -2471,6 +2503,29 @@ class TestMetricsTables:
         per_trial, _ = pm.metrics_tables(pd.read_csv(metrics_perievent_csv), trials=pd.read_csv(perievent_trials_csv))
         assert per_trial[per_trial["region"] == "L_MOp"]["sdt_type"].tolist() == ["hit", "miss", "correct_rejection"]
 
+    def test_carries_trial_columns_through(self, metrics_perievent_csv, perievent_trials_csv):
+        perievent = pm.join_trials(pd.read_csv(metrics_perievent_csv), pd.read_csv(perievent_trials_csv))
+        per_trial, per_session = pm.metrics_tables(perievent)
+        plain, _ = pm.metrics_tables(pd.read_csv(metrics_perievent_csv))
+        assert list(per_trial.columns) == [
+            *plain.columns,
+            "start_time",
+            "cue_onset",
+            "stop_time",
+            "response_time",
+            "sdt_type",
+        ]
+        pd.testing.assert_frame_equal(per_trial[plain.columns], plain)
+        assert per_trial[per_trial["region"] == "R_MOp"]["sdt_type"].tolist() == ["hit", "miss", "correct_rejection"]
+        assert "sdt_type" not in per_session.columns
+
+    def test_trials_skips_columns_already_present(self, metrics_perievent_csv, perievent_trials_csv):
+        trials = pd.read_csv(perievent_trials_csv)
+        perievent = pm.join_trials(pd.read_csv(metrics_perievent_csv), trials)
+        with_trials, _ = pm.metrics_tables(perievent, trials=trials)
+        without, _ = pm.metrics_tables(perievent)
+        pd.testing.assert_frame_equal(with_trials, without)
+
     def test_options_pass_through(self, metrics_perievent_csv):
         per_trial, _ = pm.metrics_tables(
             pd.read_csv(metrics_perievent_csv),
@@ -2698,7 +2753,8 @@ def test_perievent_cmd_with_metrics_no_trials_kept(perievent_regions_csv, periev
 
     windows = pd.read_csv(pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_perievent.csv")
     assert windows.empty
-    assert list(windows.columns) == ["trial_index", "event_time", "time", "region", "F"]
+    assert list(windows.columns[:5]) == ["trial_index", "event_time", "time", "region", "F"]
+    assert "sdt_type" in windows.columns
     assert not list(pathlib.Path(output_dir).glob("*_metrics*.csv"))
 
 
