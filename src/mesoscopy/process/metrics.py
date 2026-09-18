@@ -504,13 +504,14 @@ def metrics_tables(
 
     Args:
         perievent (pd.DataFrame): Peri-event table with `trial_index`, `event_time`, `time`, `region` and `F`
-            columns, as written by `process peri-event` from a `_regions.csv`.
+            columns, as written by `process peri-event` from a `_regions.csv`. Any other column is taken as
+            per-trial information, such as the trials columns `process peri-event` joins on, and carried through.
         baseline (tuple[float, float] | None, optional): Baseline window `[start, end)`. Defaults to all
             pre-event samples.
         response (tuple[float, float] | None, optional): Response window `[start, end]`. Defaults to all
             post-event samples.
         trials (pd.DataFrame | None, optional): Trials table to join onto the per-trial table by row index, via
-            `join_trials`. Defaults to None.
+            `join_trials`, for peri-event tables without trials columns. Defaults to None.
         onset (str, optional): Onset method, see `trial_metrics`. Defaults to `sd`.
         onset_sd (float, optional): See `trial_metrics`. Defaults to 2.0.
         onset_fraction (float, optional): See `trial_metrics`. Defaults to 0.2.
@@ -521,8 +522,8 @@ def metrics_tables(
 
     Returns:
         tuple[pd.DataFrame, pd.DataFrame]: The per-trial table, one row per trial per region with `trial_index`,
-        `event_time`, `region` and the `trial_metrics` columns, and the per-session table, one row per region
-        with `region` and the `session_metrics` columns.
+        `event_time`, `region`, the `trial_metrics` columns and then the per-trial columns of `perievent`, and the
+        per-session table, one row per region with `region` and the `session_metrics` columns.
 
     Raises:
         ValueError: If `perievent` lacks any of `PERIEVENT_COLUMNS`, or has no rows.
@@ -544,7 +545,10 @@ def metrics_tables(
     time = np.sort(perievent["time"].unique()).astype(np.float64)
     baseline = baseline if baseline is not None else (float(time[0]), 0.0)
     response = response if response is not None else (0.0, float(time[-1]))
-    events = perievent[["trial_index", "event_time"]].drop_duplicates().reset_index(drop=True)
+    trial_columns = [column for column in perievent.columns if column not in {"time", "region", "F"}]
+    trial_info = perievent[trial_columns].drop_duplicates(subset="trial_index").reset_index(drop=True)
+    events = trial_info[["trial_index", "event_time"]]
+    extra = trial_info.drop(columns="event_time")
 
     per_trial = []
     per_session = []
@@ -574,22 +578,25 @@ def metrics_tables(
         per_session.append({"region": region, **session_metrics(metrics, correlation)})
 
     trial_table = pd.concat(per_trial, ignore_index=True)
+    if len(extra.columns) > 1:
+        trial_table = trial_table.merge(extra, on="trial_index", how="left")
     if trials is not None:
         trial_table = join_trials(trial_table, trials)
     return trial_table, pd.DataFrame(per_session)
 
 
-def join_trials(metrics: pd.DataFrame, trials: pd.DataFrame) -> pd.DataFrame:
-    """Left-join trials table columns onto per-trial metrics by trials row index.
+def join_trials(table: pd.DataFrame, trials: pd.DataFrame) -> pd.DataFrame:
+    """Left-join trials table columns onto a per-trial table by trials row index.
 
     Args:
-        metrics (pd.DataFrame): Per-trial metrics with a `trial_index` column.
+        table (pd.DataFrame): Table with a `trial_index` column, such as per-trial metrics or peri-event windows.
         trials (pd.DataFrame): Trials table as written by `visiomode-analysis session`.
 
     Returns:
-        pd.DataFrame: `metrics` with the trials columns appended, minus any unnamed index column; clashing names
-        get a `_trial` suffix.
+        pd.DataFrame: `table` with the trials columns appended, minus any unnamed index column and any column
+        `table` already has.
     """
     trials = trials.loc[:, ~trials.columns.str.startswith("Unnamed")].reset_index(drop=True)
+    trials = trials.drop(columns=[column for column in trials.columns if column in table.columns])
     trials.index.name = "trial_index"
-    return metrics.merge(trials.reset_index(), on="trial_index", how="left", suffixes=("", "_trial"))
+    return table.merge(trials.reset_index(), on="trial_index", how="left")
