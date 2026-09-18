@@ -4,6 +4,15 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 ## Unreleased
 
+### Added
+
+- `process metrics` command for extracting per-trial response metrics from the `*_perievent.csv` written by `process peri-event`. Traces are baseline-subtracted per trial (`--baseline START END`, default all pre-event samples), then onset time (`--onset sd`, a `--onset-sd` multiple of the baseline SD, or `--onset peak`, an `--onset-fraction` of the amplitude, held for `--onset-min-samples` samples; or `--onset extrapolate`, a line fitted to the rise between `--extrapolate-range` fractions of the amplitude and extrapolated back to baseline), peak time, signed amplitude, signed area under the curve, decay time (from the peak to `--decay-fraction` of the amplitude), offset time (the return to the onset threshold after the peak) and duration are taken over the response window (`--response START END`, default all post-event samples). `--smooth N` detects the peak, onset, decay and offset on an N-sample moving average. `process peri-event --with-metrics` writes the same tables in one step, taking the same options and joining the trials file. Writes `<stem>_metrics.csv` per trial per region, optionally joined with a `-t/--trials` CSV, and `<stem>_metrics-session.csv` per region with the across-trial mean, SD and CV of each metric plus the mean pairwise trial-trace correlation ([#152](https://github.com/DuguidLab/mesoscopy/issues/152)).
+- `process.metrics` module with `baseline_stats`, `smooth`, `peak`, `auc`, `onset_time`, `extrapolated_onset`, `offset_time`, `decay_time`, `trace_correlation`, `trial_metrics`, `session_metrics`, `metrics_tables` and `join_trials`, and a [Response metrics](https://docs.mesoscopy.org/how-to/metrics/) how-to page ([#152](https://github.com/DuguidLab/mesoscopy/issues/152)).
+
+### Fixed
+
+- `process peri-event` grid times carried float residue, e.g. `8.9e-16` at the event and `3.0000000000000036` at `--post 3`, so windows bounded at those times could miss the end samples. `perievent.window_grid` now builds each time as `(k - pre * fs) / fs`, which puts the event on exactly `0.0` and every grid time on its nearest double ([#152](https://github.com/DuguidLab/mesoscopy/issues/152)).
+
 ### Performance
 
 - The root CLI imports a subcommand's module only when that subcommand is invoked, and each stage's command module imports its heavy dependencies (pynwb, dask, zarr, pandas, scipy, scikit-learn, pims, napari, plotly) inside the command that uses them. `mesoscopy --help` and every `<stage> --help` now start in about 0.1 s instead of 1-2 s, and HDF5-only commands no longer load pynwb ([#149](https://github.com/DuguidLab/mesoscopy/issues/149)).
