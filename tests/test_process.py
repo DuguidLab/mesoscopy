@@ -2519,6 +2519,13 @@ class TestMetricsTables:
         assert per_trial[per_trial["region"] == "R_MOp"]["sdt_type"].tolist() == ["hit", "miss", "correct_rejection"]
         assert "sdt_type" not in per_session.columns
 
+    def test_varying_column_raises(self, metrics_perievent_csv):
+        perievent = pd.read_csv(metrics_perievent_csv)
+        perievent["per_sample"] = np.arange(len(perievent))
+        perievent["constant"] = 1
+        with pytest.raises(ValueError, match="per_sample vary within a trial"):
+            pm.metrics_tables(perievent)
+
     def test_trials_skips_columns_already_present(self, metrics_perievent_csv, perievent_trials_csv):
         trials = pd.read_csv(perievent_trials_csv)
         perievent = pm.join_trials(pd.read_csv(metrics_perievent_csv), trials)
