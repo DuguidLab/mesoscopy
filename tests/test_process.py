@@ -2677,6 +2677,35 @@ def test_metrics_cmd_joins_trials(metrics_perievent_csv, perievent_trials_csv, o
     np.testing.assert_allclose(joined["cue_onset"], [5.5, 10.5, 20.5])
 
 
+def test_metrics_cmd_carries_trial_columns(metrics_perievent_csv, perievent_trials_csv, output_dir, tmp_path):
+    trials = pd.read_csv(perievent_trials_csv)
+    trials["correction"] = [True, False, False, True, False, False]
+    trials["response"] = np.nan  # all-empty column, as visiomode writes for no-response sessions
+    joined = tmp_path / "ses-01_regions_event-cueonset_perievent.csv"
+    pm.join_trials(pd.read_csv(metrics_perievent_csv), trials).to_csv(joined, index=False)
+    result = CliRunner().invoke(mesoscopy.cli, args=f"process metrics {joined} -o {output_dir}")
+    assert result.exit_code == 0, result.output
+
+    trial = pd.read_csv(pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_metrics.csv")
+    assert list(trial.columns[-7:]) == [
+        "start_time",
+        "cue_onset",
+        "stop_time",
+        "response_time",
+        "sdt_type",
+        "correction",
+        "response",
+    ]
+    assert trial.columns.get_loc("start_time") > trial.columns.get_loc("duration")
+    joined_trial = trial[trial["region"] == "L_MOp"].set_index("trial_index")
+    assert joined_trial["sdt_type"].tolist() == ["hit", "miss", "correct_rejection"]
+    assert joined_trial["correction"].tolist() == [False, False, False]
+    assert joined_trial["response"].isna().all()
+    np.testing.assert_allclose(joined_trial["cue_onset"], [5.5, 10.5, 20.5])
+    session = pd.read_csv(pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_metrics-session.csv")
+    assert "sdt_type" not in session.columns
+
+
 def test_metrics_cmd_joins_trials_with_index_column(metrics_perievent_csv, perievent_trials_csv, output_dir, tmp_path):
     indexed = tmp_path / "ses-01_trials.csv"
     pd.read_csv(perievent_trials_csv).to_csv(indexed)  # leading "Unnamed: 0" column, as pandas writes by default
