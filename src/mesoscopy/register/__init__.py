@@ -104,7 +104,7 @@ def label_cmd(path, out_dir, template_points, session_id) -> dict:
         # Fall back to projecting the dF/F series itself. It is a poorer anatomical image than the
         # gcamp projection, but it is guaranteed to be in the same pixel space as the data being
         # registered - projecting the raw frames instead would be off by the preprocessing crop and
-        # binning factor, silently scaling the transform.
+        # binning factor, which would lead to misalignment.
         click.echo("⚠️ No preprocessing maximum intensity projection found, projecting the ∆F/F series instead.")
         with timer.Timer("Generating maximum intensity projection"):
             _, deltaf_series, _ = io.load_deltaf(path, nwb=nwb)
