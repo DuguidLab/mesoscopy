@@ -242,7 +242,7 @@ def landmarks_cmd(
         click.echo(f"Using recording landmarks at {recording_points}")
     recording_landmarks = io.read_points(recording_points)
 
-    # Registered frames land in template space, so their shape is the template's, scaled.
+    # Registered frames are in template space, so their shape is the template's but scaled.
     attributes: dict = {}
     requested_shape = _deprecated_output_shape(output_width, output_height)
     if template_points:
