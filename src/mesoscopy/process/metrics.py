@@ -511,7 +511,8 @@ def metrics_tables(
         response (tuple[float, float] | None, optional): Response window `[start, end]`. Defaults to all
             post-event samples.
         trials (pd.DataFrame | None, optional): Trials table to join onto the per-trial table by row index, via
-            `join_trials`, for peri-event tables without trials columns. Defaults to None.
+            `join_trials`, for peri-event tables without trials columns. Columns `perievent` already carries are
+            skipped. Defaults to None.
         onset (str, optional): Onset method, see `trial_metrics`. Defaults to `sd`.
         onset_sd (float, optional): See `trial_metrics`. Defaults to 2.0.
         onset_fraction (float, optional): See `trial_metrics`. Defaults to 0.2.
@@ -586,7 +587,7 @@ def metrics_tables(
     if extra_columns:
         trial_table = trial_table.merge(trial_info[["trial_index", *extra_columns]], on="trial_index", how="left")
     if trials is not None:
-        trial_table = join_trials(trial_table, trials)
+        trial_table = join_trials(trial_table, trials.drop(columns=extra_columns, errors="ignore"))
     return trial_table, pd.DataFrame(per_session)
 
 
@@ -598,10 +599,9 @@ def join_trials(table: pd.DataFrame, trials: pd.DataFrame) -> pd.DataFrame:
         trials (pd.DataFrame): Trials table as written by `visiomode-analysis session`.
 
     Returns:
-        pd.DataFrame: `table` with the trials columns appended, minus any unnamed index column and any column
-        `table` already has.
+        pd.DataFrame: `table` with the trials columns appended, minus any unnamed index column; clashing names
+        get a `_trial` suffix.
     """
     trials = trials.loc[:, ~trials.columns.str.startswith("Unnamed")].reset_index(drop=True)
-    trials = trials.drop(columns=[column for column in trials.columns if column in table.columns])
     trials.index.name = "trial_index"
-    return table.merge(trials.reset_index(), on="trial_index", how="left")
+    return table.merge(trials.reset_index(), on="trial_index", how="left", suffixes=("", "_trial"))
