@@ -4,6 +4,8 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 ## Unreleased
 
+## [0.13.0] - 2026-09-18
+
 ### Added
 
 - `process metrics` command for extracting per-trial response metrics from the `*_perievent.csv` written by `process peri-event`. Traces are baseline-subtracted per trial (`--baseline START END`, default all pre-event samples), then onset time (`--onset sd`, a `--onset-sd` multiple of the baseline SD, or `--onset peak`, an `--onset-fraction` of the amplitude, held for `--onset-min-samples` samples; or `--onset extrapolate`, a line fitted to the rise between `--extrapolate-range` fractions of the amplitude and extrapolated back to baseline), peak time, signed amplitude, signed area under the curve, decay time (from the peak to `--decay-fraction` of the amplitude), offset time (the return to the onset threshold after the peak) and duration are taken over the response window (`--response START END`, default all post-event samples). `--smooth N` detects the peak, onset, decay and offset on an N-sample moving average. `process peri-event --with-metrics` writes the same tables in one step, taking the same options and joining the trials file. Writes `<stem>_metrics.csv` per trial per region, optionally joined with a `-t/--trials` CSV, and `<stem>_metrics-session.csv` per region with the across-trial mean, SD and CV of each metric plus the mean pairwise trial-trace correlation ([#152](https://github.com/DuguidLab/mesoscopy/issues/152)).
