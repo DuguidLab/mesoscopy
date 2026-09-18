@@ -33,14 +33,14 @@ __version__ = version("mesoscopy")
 # Lazy subcommands are imported only when they are looked up, to avoid importing heavy dependencies unnecessarily.
 LAZY_SUBCOMMANDS = {
     "align": ("mesoscopy.align:align_cmd", "Write behaviour-aligned frame timestamps to a recording."),
-    "convert": ("mesoscopy.convert:convert_cmd", "Convert raw recordings to NWB."),
-    "export": ("mesoscopy.export:export_cmd", "Export mesoscopy-generated files."),
+    "convert": ("mesoscopy.convert:convert_cmd", "Convert raw recordings to NWB or HDF5."),
+    "export": ("mesoscopy.export:export_cmd", "Export mesoscopy-generated files to other formats."),
     "inspect": ("mesoscopy.inspect:inspect_cmd", "Inspect a recording session and associated preprocessing output."),
     "postprocess": ("mesoscopy.postprocess:postprocess_cmd", "Postprocess extracted activity."),
     "preprocess": ("mesoscopy.preprocess:preprocess_cmd", "Extract haemodynamics-corrected deltaF from a recording."),
     "process": ("mesoscopy.process:process_cmd", "Extract activity from preprocessed or registered recordings."),
-    "register": ("mesoscopy.register:register_cmd", "Register recordings to a template."),
-    "report": ("mesoscopy.report:report_cmd", "Generate a report for a mesoscopy processing step."),
+    "register": ("mesoscopy.register:register_cmd", "Register recordings to an anatomical template."),
+    "report": ("mesoscopy.report:report_cmd", "Generate an HTML report for a mesoscopy processing step."),
     "sample": ("mesoscopy:sample", "Sample an image frame from an HDF5 file and export it as a PNG."),
 }
 
