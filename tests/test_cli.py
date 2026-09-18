@@ -32,6 +32,19 @@ import mesoscopy
 
 HEAVY_MODULES = ["napari", "sklearn", "scipy", "pims", "matplotlib", "pynwb", "dask", "h5py"]
 
+# Modules a stage's `--help` must not import; grows as each command module defers its imports. Exact names:
+# `scipy` itself is cheap and comes in through dask, `scipy.stats` is not.
+STAGE_HEAVY_MODULES = {
+    "process": ["napari", "sklearn", "scipy.stats", "scipy.ndimage", "pims", "matplotlib", "plotly", "diptest"],
+}
+
+
+def _imported_heavy_modules(args: list[str], heavy: list[str]) -> str:
+    code = "import sys, mesoscopy; from click.testing import CliRunner; "
+    code += f"CliRunner().invoke(mesoscopy.cli, {args!r}); "
+    code += f"print(sorted(set(sys.modules) & set({heavy!r})))"
+    return subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout.strip()  # noqa: S603
+
 
 def test_help_lists_every_subcommand():
     result = CliRunner().invoke(mesoscopy.cli, ["--help"])
@@ -42,12 +55,12 @@ def test_help_lists_every_subcommand():
 
 
 def test_help_does_not_import_stage_modules():
-    code = "import sys, mesoscopy; from click.testing import CliRunner; "
-    code += "CliRunner().invoke(mesoscopy.cli, ['--help']); "
-    code += f"print(sorted(m for m in sys.modules if m.split('.')[0] in {HEAVY_MODULES!r}))"
-    output = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout  # noqa: S603
+    assert _imported_heavy_modules(["--help"], HEAVY_MODULES) == "[]"
 
-    assert output.strip() == "[]"
+
+@pytest.mark.parametrize(("stage", "heavy"), list(STAGE_HEAVY_MODULES.items()))
+def test_stage_help_does_not_import_heavy_modules(stage, heavy):
+    assert _imported_heavy_modules([stage, "--help"], heavy) == "[]"
 
 
 @pytest.mark.parametrize("name", list(mesoscopy.LAZY_SUBCOMMANDS))
