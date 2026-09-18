@@ -27,14 +27,8 @@ from pathlib import Path
 import click
 import h5py
 import numpy as np
-import pandas as pd
-from pynwb.image import ImageSeries
 
 import mesoscopy.process.perievent as pev
-import mesoscopy.process.region as pr
-import mesoscopy.process.regression as regr
-import mesoscopy.process.smooth as psm
-import mesoscopy.process.zscore as pzs
 from mesoscopy import io
 from mesoscopy import timer
 
@@ -64,6 +58,8 @@ def process_cmd(): ...
 )
 def smooth_cmd(path: str, out_dir: str, sigma: int = 2) -> None:
     """Generate a smoothed DeltaF/F recording using a Laplace of Gaussian filter."""
+    import mesoscopy.process.smooth as psm
+
     if not Path(out_dir).exists():
         click.echo(f"Creating output directory {out_dir}...")
         Path(out_dir).mkdir(parents=True)
@@ -105,6 +101,10 @@ def smooth_cmd(path: str, out_dir: str, sigma: int = 2) -> None:
 )
 def zscore_cmd(path: str, out_dir: str) -> None:
     """Pixel-wise z-score ∆F/F signal."""
+    from pynwb.image import ImageSeries
+
+    import mesoscopy.process.zscore as pzs
+
     if not Path(out_dir).exists():
         click.echo(f"Creating output directory {out_dir}...")
         Path(out_dir).mkdir(parents=True)
@@ -191,6 +191,10 @@ def zscore_cmd(path: str, out_dir: str) -> None:
 # A click command's docstring doubles as its --help text, so it deliberately carries no Raises: section.
 def regions_cmd(path: str, out_dir: str, mask_paths: tuple[str, ...], include_aba: bool) -> None:
     """Extract ∆F signal averages from ABA-defined regions, custom region masks, or both."""  # noqa: DOC501
+    import pandas as pd
+
+    import mesoscopy.process.region as pr
+
     if not Path(out_dir).exists():
         click.echo(f"Creating output directory {out_dir}...")
         Path(out_dir).mkdir(parents=True)
@@ -319,6 +323,8 @@ def regression_cmd(
     file_format: str,
 ) -> None:
     """Perform pixel-wise ridge regression on a preprocessed ∆F/F recording."""  # noqa: DOC501
+    import mesoscopy.process.regression as regr
+
     if not Path(out_dir).exists():
         click.echo(f"Creating output directory {out_dir}...")
         Path(out_dir).mkdir(parents=True)
@@ -475,6 +481,8 @@ def perievent_cmd(
     column. TRIALS_PATH is the *_trials.csv written by visiomode-analysis session. HDF5 input gives HDF5 output;
     CSV input gives long-format CSV output.
     """
+    import pandas as pd
+
     if not Path(out_dir).exists():
         click.echo(f"Creating output directory {out_dir}...")
         Path(out_dir).mkdir(parents=True)
@@ -611,6 +619,8 @@ def _perievent_csv(
     Raises:
         click.ClickException: If the CSV has no `time_aligned` column.
     """
+    import pandas as pd
+
     regions = pd.read_csv(recording_path)
     if "time_aligned" not in regions.columns:
         msg = f"{recording_path} has no time_aligned column; run `mesoscopy align` before `process regions`."
