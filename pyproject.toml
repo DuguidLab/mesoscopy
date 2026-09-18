@@ -179,6 +179,20 @@ unfixable = [
   "B905",  # Force programmer to decide which strictness to use with `builtins.zip`
 ]
 
+[tool.ruff.lint.flake8-tidy-imports]
+# Expensive libraries must be imported inside the function that needs them, so that every `mesoscopy` command
+# starts without loading the whole pipeline. Numerics modules are exempted below and keep top-level imports.
+banned-module-level-imports = [
+  "av", "dask", "diptest", "hdmf", "magicgui", "matplotlib", "napari", "pandas", "pims", "plotly", "pynwb",
+  "scipy", "skimage", "sklearn", "zarr",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Numerics, GUI and format modules; the command modules (`*/__init__.py`) and `io.py` import these lazily.
+# `process/perievent.py` is not exempt: the process command module reads its `EVENTS` at import time.
+"src/mesoscopy/{plots,convert/hdf5,convert/video,export/nwb,inspect/data_viewers,preprocess/compute,preprocess/qa,process/region,process/regression,process/smooth,process/zscore,register/landmarks_gui,register/qa,register/transform}.py" = ["TID253"]
+"tests/**" = ["TID253"]
+
 [tool.ruff.lint.isort]
 force-single-line = true
 
