@@ -168,6 +168,7 @@ ignore = [
   "RET505", "RET506",      # Avoid false posiives (especially with `if-elif` where the `if` returns or raises)
   "TD002", "TD003",        # Don't enforce including an author or issue with TODOs
   "TC003",                 # Don't force the use of `if TYPE_CHECKING` blocks
+  "PLC0415",               # Allow function-level imports so heavy dependencies load only when needed
   "D100", "D104",          # Allow undocumented modules and packages
   "D107",                  # Don't force a documented `__init__` since we document it at the class level
   # Allow too many branches, arguments, locals, statements, and positional arguments
