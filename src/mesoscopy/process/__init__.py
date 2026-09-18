@@ -657,7 +657,9 @@ def perievent_cmd(
     click.echo(f"Kept {n_kept} trials, dropped {len(trials) - n_kept}.")
     click.echo(f"Saved peri-event windows at {outpath}")
 
-    if with_metrics:
+    if with_metrics and n_kept == 0:
+        click.echo("No trials kept, skipping metrics.")
+    elif with_metrics:
         with timer.Timer(message="Extracting metrics"):
             tables = pm.metrics_tables(
                 windows,
@@ -866,6 +868,9 @@ def metrics_cmd(
 
     click.echo(f"Loading peri-event traces from {path}...")
     perievent = pd.read_csv(path)
+    if perievent.empty:
+        msg = f"{path} has no rows; `process peri-event` kept no trials."
+        raise click.ClickException(msg)
     trials = None
     if trials_path is not None:
         click.echo(f"Loading trials from {trials_path}...")
