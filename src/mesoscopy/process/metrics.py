@@ -525,7 +525,7 @@ def metrics_tables(
         with `region` and the `session_metrics` columns.
 
     Raises:
-        ValueError: If `perievent` lacks any of `PERIEVENT_COLUMNS`.
+        ValueError: If `perievent` lacks any of `PERIEVENT_COLUMNS`, or has no rows.
 
     Example:
         >>> perievent = pd.read_csv("ses-01_regions_event-cueonset_perievent.csv")
@@ -536,6 +536,9 @@ def metrics_tables(
     missing = PERIEVENT_COLUMNS - set(perievent.columns)
     if missing:
         msg = f"Peri-event table lacks the {', '.join(sorted(missing))} column(s)."
+        raise ValueError(msg)
+    if perievent.empty:
+        msg = "Peri-event table has no rows."
         raise ValueError(msg)
 
     time = np.sort(perievent["time"].unique()).astype(np.float64)
