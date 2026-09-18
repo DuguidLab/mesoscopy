@@ -4,6 +4,10 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 ## Unreleased
 
+### Performance
+
+- The root CLI imports a subcommand's module only when that subcommand is invoked, so `mesoscopy --help` and `--version` no longer load every pipeline stage's dependencies ([#149](https://github.com/DuguidLab/mesoscopy/issues/149)).
+
 ## [0.12.0] - 2026-09-14
 
 ### Added
