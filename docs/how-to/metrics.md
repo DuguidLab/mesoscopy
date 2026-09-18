@@ -10,7 +10,7 @@ A long-format `_perievent.csv`, as written by `process peri-event` from a `_regi
 ```bash
 mesoscopy process regions /path/to/recording_smoothed.h5
 mesoscopy process peri-event /path/to/recording_smoothed_regions.csv /path/to/recording_trials.csv --event cue_onset --pre 1 --post 3
-mesoscopy process metrics /path/to/recording_smoothed_regions_event-cueonset_perievent.csv --trials /path/to/recording_trials.csv
+mesoscopy process metrics /path/to/recording_smoothed_regions_event-cueonset_perievent.csv
 ```
 
 Or in one step:
@@ -19,9 +19,8 @@ Or in one step:
 mesoscopy process peri-event /path/to/recording_smoothed_regions.csv /path/to/recording_trials.csv --with-metrics
 ```
 
-`--with-metrics` accepts every option of `process metrics` and joins the trials file automatically. The peri-event
-`--baseline`, when given, is also the metrics baseline window. Metrics are not computed for HDF5 peri-event
-windows.
+`--with-metrics` accepts every option of `process metrics`. The peri-event `--baseline`, when given, is also the
+metrics baseline window. Metrics are not computed for HDF5 peri-event windows.
 
 ## Output
 
@@ -38,7 +37,8 @@ windows.
 | `offset_time` | Time at which the response returns to the onset threshold after the peak. |
 | `duration` | `offset_time` minus `onset_time`. |
 
-With `--trials`, the trials table columns (`sdt_type`, `outcome`, `response_time`, ...) follow, joined by row index.
+The trials table columns (`sdt_type`, `outcome`, `response_time`, ...) follow, carried over from the peri-event file.
+For a peri-event file without them, `--trials` joins a trials CSV by row index.
 
 `<stem>_metrics-session.csv` has one row per region with `n_trials`, `trace_correlation` (the mean pairwise
 Pearson correlation between trial traces over the response window) and, for each metric above, `<metric>_mean`,
@@ -92,7 +92,7 @@ import pandas as pd
 from mesoscopy.process import metrics
 
 perievent = pd.read_csv("recording_smoothed_regions_event-cueonset_perievent.csv")
-per_trial, per_session = metrics.metrics_tables(perievent, smoothing=5, trials=pd.read_csv("recording_trials.csv"))
+per_trial, per_session = metrics.metrics_tables(perievent, smoothing=5)
 ```
 
 `metrics.trial_metrics` works on a `(n_trials, n_samples)` array for one region, and the per-metric functions
