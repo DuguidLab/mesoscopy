@@ -59,5 +59,10 @@ def test_every_subcommand_resolves(name):
     assert cmd.name == name
 
 
+def test_no_eager_subcommands():
+    # mkdocs-click ignores lazy subcommands when any are registered with `cli.add_command`.
+    assert mesoscopy.cli.commands == {}
+
+
 def test_unknown_subcommand_is_none():
     assert mesoscopy.cli.get_command(click.Context(mesoscopy.cli), "nope") is None
