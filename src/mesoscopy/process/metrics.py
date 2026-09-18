@@ -526,7 +526,8 @@ def metrics_tables(
         per-session table, one row per region with `region` and the `session_metrics` columns.
 
     Raises:
-        ValueError: If `perievent` lacks any of `PERIEVENT_COLUMNS`, or has no rows.
+        ValueError: If `perievent` lacks any of `PERIEVENT_COLUMNS`, has no rows, or has a column other than `time`,
+            `region` and `F` that varies within a trial.
 
     Example:
         >>> perievent = pd.read_csv("ses-01_regions_event-cueonset_perievent.csv")
@@ -545,10 +546,14 @@ def metrics_tables(
     time = np.sort(perievent["time"].unique()).astype(np.float64)
     baseline = baseline if baseline is not None else (float(time[0]), 0.0)
     response = response if response is not None else (0.0, float(time[-1]))
-    trial_columns = [column for column in perievent.columns if column not in {"time", "region", "F"}]
-    trial_info = perievent[trial_columns].drop_duplicates(subset="trial_index").reset_index(drop=True)
+    extra_columns = [column for column in perievent.columns if column not in PERIEVENT_COLUMNS]
+    trial_info = perievent[["trial_index", "event_time", *extra_columns]].drop_duplicates().reset_index(drop=True)
+    if trial_info["trial_index"].duplicated().any():
+        per_trial_values = perievent.groupby("trial_index")[["event_time", *extra_columns]].nunique(dropna=False)
+        varying = per_trial_values.columns[(per_trial_values > 1).any()]
+        msg = f"Column(s) {', '.join(varying)} vary within a trial; only per-trial columns can be carried through."
+        raise ValueError(msg)
     events = trial_info[["trial_index", "event_time"]]
-    extra = trial_info.drop(columns="event_time")
 
     per_trial = []
     per_session = []
@@ -578,8 +583,8 @@ def metrics_tables(
         per_session.append({"region": region, **session_metrics(metrics, correlation)})
 
     trial_table = pd.concat(per_trial, ignore_index=True)
-    if len(extra.columns) > 1:
-        trial_table = trial_table.merge(extra, on="trial_index", how="left")
+    if extra_columns:
+        trial_table = trial_table.merge(trial_info[["trial_index", *extra_columns]], on="trial_index", how="left")
     if trials is not None:
         trial_table = join_trials(trial_table, trials)
     return trial_table, pd.DataFrame(per_session)
