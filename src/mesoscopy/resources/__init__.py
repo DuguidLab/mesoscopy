@@ -23,7 +23,6 @@ from importlib import resources
 
 import imageio
 import numpy as np
-import pandas as pd
 
 import mesoscopy.resources
 from mesoscopy import io
@@ -70,6 +69,8 @@ def get_atlas(shape: tuple[int, int] | None = None) -> tuple[np.ndarray, np.ndar
 
 
 def get_atlas_annotations():
+    import pandas as pd
+
     return pd.read_csv(
         str(resources.files(mesoscopy.resources).joinpath("ccf_annotations.csv")), delimiter=", ", engine="python"
     )
