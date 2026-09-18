@@ -32,17 +32,19 @@ import mesoscopy
 
 HEAVY_MODULES = ["napari", "sklearn", "scipy", "pims", "matplotlib", "pynwb", "dask", "h5py"]
 
-# Modules a stage's `--help` must not import; grows as each command module defers its imports. Exact names:
-# `scipy` itself is cheap and comes in through dask, `scipy.stats` is not.
+# Modules no stage's `--help` may import, plus per-stage additions. Exact names, so `scipy.stats` is listed
+# rather than `scipy`.
+COMMON_HEAVY_MODULES = ["pynwb", "hdmf", "dask", "zarr", "pandas", "scipy.stats", "sklearn", "napari", "magicgui"]
+COMMON_HEAVY_MODULES += ["pims", "av", "matplotlib", "plotly", "diptest", "skimage"]
 STAGE_HEAVY_MODULES = {
-    "process": ["napari", "sklearn", "scipy.stats", "scipy.ndimage", "pims", "matplotlib", "plotly", "diptest"],
-    "align": ["napari", "sklearn", "scipy.stats", "pims", "matplotlib", "plotly", "diptest", "skimage"],
-    "convert": ["napari", "sklearn", "scipy.stats", "pims", "av", "matplotlib", "plotly", "diptest", "skimage"],
-    "export": ["napari", "sklearn", "scipy.stats", "pims", "matplotlib", "plotly", "diptest", "skimage", "tqdm"],
-    "inspect": ["napari", "sklearn", "scipy.stats", "pims", "matplotlib", "plotly", "diptest", "skimage"],
-    "preprocess": ["napari", "sklearn", "scipy.stats", "pims", "matplotlib", "plotly", "diptest"],
-    "register": ["napari", "magicgui", "skimage", "sklearn", "scipy.stats", "pims", "matplotlib", "plotly", "diptest"],
-    "report": ["napari", "magicgui", "skimage", "sklearn", "scipy.stats", "pims", "matplotlib", "plotly", "diptest"],
+    "process": [*COMMON_HEAVY_MODULES, "scipy.ndimage"],
+    "align": [*COMMON_HEAVY_MODULES],
+    "convert": [*COMMON_HEAVY_MODULES],
+    "export": [*COMMON_HEAVY_MODULES, "tqdm"],
+    "inspect": [*COMMON_HEAVY_MODULES],
+    "preprocess": [*COMMON_HEAVY_MODULES],
+    "register": [*COMMON_HEAVY_MODULES],
+    "report": [*COMMON_HEAVY_MODULES],
 }
 
 
