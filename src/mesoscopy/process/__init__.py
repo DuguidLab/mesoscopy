@@ -613,8 +613,8 @@ def perievent_cmd(
 
     RECORDING_PATH is an HDF5 recording with /F and /timestamps_aligned, or a _regions.csv with a time_aligned
     column. TRIALS_PATH is the *_trials.csv written by visiomode-analysis session. HDF5 input gives HDF5 output;
-    CSV input gives long-format CSV output. --with-metrics also writes the tables of `process metrics` from the
-    CSV output, using --baseline as the metrics baseline window.
+    CSV input gives long-format CSV output with the TRIALS_PATH columns joined onto every row. --with-metrics also
+    writes the tables of `process metrics` from the CSV output, using --baseline as the metrics baseline window.
     """  # noqa: DOC501
     import pandas as pd
 
@@ -640,7 +640,7 @@ def perievent_cmd(
 
     with timer.Timer(message="Extracting peri-event windows"):
         if is_csv:
-            kept, windows = _perievent_csv(recording_path, outpath, events, trial_index, grid, method, baseline)
+            kept, windows = _perievent_csv(recording_path, outpath, events, trial_index, grid, method, baseline, trials)
         else:
             attrs = {
                 "event": event,
@@ -665,7 +665,6 @@ def perievent_cmd(
                 windows,
                 baseline=baseline,
                 response=response,
-                trials=trials,
                 onset=onset,
                 onset_sd=onset_sd,
                 onset_fraction=onset_fraction,
@@ -761,8 +760,9 @@ def _perievent_csv(
     grid: np.ndarray,
     method: str,
     baseline: tuple[float, float] | None,
+    trials: pd.DataFrame,
 ) -> tuple[np.ndarray, pd.DataFrame]:
-    """Write peri-event windows from a long-format regions CSV.
+    """Write peri-event windows from a long-format regions CSV, with the trials columns joined on.
 
     Args:
         recording_path (str): Regions CSV with a `time_aligned` column.
@@ -772,6 +772,7 @@ def _perievent_csv(
         grid (np.ndarray): Sample times relative to the event.
         method (str): `interp` or `nearest`.
         baseline (tuple[float, float] | None): Baseline window, or None.
+        trials (pd.DataFrame): Trials table, joined onto every row by `trial_index` via `metrics.join_trials`.
 
     Returns:
         tuple[np.ndarray, pd.DataFrame]: Boolean mask over `events` marking the kept trials, and the written table.
@@ -805,6 +806,7 @@ def _perievent_csv(
             "F": traces.reshape(-1),
         }
     )
+    out = pm.join_trials(out, trials)
     out.to_csv(outpath, index=False)
 
     return kept, out
@@ -834,7 +836,7 @@ def _perievent_csv(
     "trials_path",
     type=click.Path(exists=True, dir_okay=False),
     default=None,
-    help="Trials CSV to join onto the per-trial table by trial_index.",
+    help="Trials CSV to join onto the per-trial table by trial_index, for peri-event files without trials columns.",
 )
 @_metrics_options
 def metrics_cmd(

@@ -82,19 +82,20 @@ mesoscopy process peri-event /path/to/example-recording_regions.csv /path/to/exa
 will extract trial-by-trial activity aligned to behaviour.
 
 An HDF5 recording (e.g. `_zscored.h5`) gives an HDF5 file of `(n_trials, n_samples, height, width)` traces; a
-`_regions.csv` gives a long-format CSV. Add `--baseline START END` to subtract a per-trial baseline.
+`_regions.csv` gives a long-format CSV with the trials columns (`sdt_type`, `outcome`, ...) joined onto every row.
+Add `--baseline START END` to subtract a per-trial baseline.
 
 ## Extract response metrics
 
 Given the peri-event CSV from the step above:
 
 ```bash
-mesoscopy process metrics /path/to/example-recording_regions_event-cueonset_perievent.csv --trials /path/to/example-recording_trials.csv
+mesoscopy process metrics /path/to/example-recording_regions_event-cueonset_perievent.csv
 ```
 
 writes `example-recording_regions_event-cueonset_metrics.csv` with the onset time, peak time, amplitude, area
-under the curve, decay time, offset time and duration of every trial in every region, joined with the trials
-table when `--trials` is given, and `example-recording_regions_event-cueonset_metrics-session.csv` with the mean,
+under the curve, decay time, offset time and duration of every trial in every region, with the trials columns
+carried over from the peri-event file, and `example-recording_regions_event-cueonset_metrics-session.csv` with the mean,
 SD and CV of each metric across trials per region, and the mean pairwise correlation between trial traces.
 
 Traces are baseline-subtracted with the mean over `--baseline START END` (default: all pre-event samples), and
