@@ -2486,6 +2486,10 @@ class TestMetricsTables:
         with pytest.raises(ValueError, match="F, region"):
             pm.metrics_tables(pd.read_csv(metrics_perievent_csv).drop(columns=["region", "F"]))
 
+    def test_empty_raises(self, metrics_perievent_csv):
+        with pytest.raises(ValueError, match="no rows"):
+            pm.metrics_tables(pd.read_csv(metrics_perievent_csv).iloc[:0])
+
 
 def test_metrics_cmd(metrics_perievent_csv, output_dir):
     result = CliRunner().invoke(mesoscopy.cli, args=f"process metrics {metrics_perievent_csv} -o {output_dir}")
@@ -2678,3 +2682,31 @@ def test_metrics_cmd_missing_columns(metrics_perievent_csv, output_dir, tmp_path
     result = CliRunner().invoke(mesoscopy.cli, args=f"process metrics {broken} -o {output_dir}")
     assert result.exit_code != 0
     assert "F, region" in result.output
+
+
+def test_perievent_cmd_with_metrics_no_trials_kept(perievent_regions_csv, perievent_trials_csv, output_dir, tmp_path):
+    late = tmp_path / "ses-01_trials.csv"
+    trials = pd.read_csv(perievent_trials_csv)
+    trials[["start_time", "cue_onset", "stop_time"]] += 100.0  # every window runs past the recording
+    trials.to_csv(late, index=False)
+    result = CliRunner().invoke(
+        mesoscopy.cli, args=f"process peri-event {perievent_regions_csv} {late} -o {output_dir} --with-metrics"
+    )
+    assert result.exit_code == 0, result.output
+    assert "Kept 0 trials" in result.output
+    assert "skipping metrics" in result.output
+
+    windows = pd.read_csv(pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_perievent.csv")
+    assert windows.empty
+    assert list(windows.columns) == ["trial_index", "event_time", "time", "region", "F"]
+    assert not list(pathlib.Path(output_dir).glob("*_metrics*.csv"))
+
+
+def test_metrics_cmd_empty_input(metrics_perievent_csv, output_dir, tmp_path):
+    empty = tmp_path / "ses-01_regions_event-cueonset_perievent.csv"
+    pd.read_csv(metrics_perievent_csv).iloc[:0].to_csv(empty, index=False)
+    result = CliRunner().invoke(mesoscopy.cli, args=f"process metrics {empty} -o {output_dir}")
+    assert result.exit_code == 1
+    assert str(empty) in result.output
+    assert "no rows" in result.output
+    assert not list(pathlib.Path(output_dir).glob("*_metrics*.csv"))

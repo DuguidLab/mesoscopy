@@ -4,6 +4,10 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 ## Unreleased
 
+### Fixed
+
+- `process peri-event --with-metrics` crashed with `IndexError` when no trials were kept, after writing a header-only `_perievent.csv`, and `process metrics` crashed the same way on that file. The peri-event command now skips the metrics step with a message when no trials are kept, `process metrics` reports the empty input, and `metrics.metrics_tables` raises `ValueError` on a table with no rows ([#156](https://github.com/DuguidLab/mesoscopy/issues/156)).
+
 ## [0.13.0] - 2026-09-18
 
 ### Added
