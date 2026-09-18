@@ -14,6 +14,7 @@ from click.testing import CliRunner
 
 import mesoscopy
 from mesoscopy import io
+from mesoscopy.process import metrics as pm
 from mesoscopy.process import perievent as pev
 from mesoscopy.process import regression as regr
 from mesoscopy.process import smooth
@@ -1846,6 +1847,13 @@ class TestWindowGrid:
         assert grid[-1] <= 1.03 + 1e-9
         assert grid[-1] > 1.03 - 0.04
 
+    @pytest.mark.parametrize(("pre", "post", "fs"), [(1.0, 3.0, 25.0), (0.5, 2.0, 30.0), (0.1, 0.7, 30.0)])
+    def test_event_and_ends_are_exact(self, pre, post, fs):
+        grid = pev.window_grid(pre, post, fs)
+        assert grid[0] == -pre
+        assert 0.0 in grid
+        assert grid[-1] == post
+
 
 class TestExtract:
     @pytest.fixture
@@ -2054,3 +2062,619 @@ def test_extract_all_regions_at_non_integer_template_scale():
     activity = extract_all_regions(series)
 
     assert all(np.allclose(trace, 1.0) for trace in activity.values())
+
+
+# ---------------------------------------------------------------------------
+# metrics
+# ---------------------------------------------------------------------------
+
+METRICS_GRID = pev.window_grid(1.0, 3.0, 25.0)
+
+
+def _metrics_traces():
+    """Four trials on the 25 Hz grid, with alternating +-0.01 samples in the pre-event window.
+
+    Trial 0 rises linearly from 0 at t=0.2 to 1 at t=1.0, falls back to 0 at t=2.0, then stays flat. Trial 1 is
+    flat after the event. Trial 2 ramps to 1 at t=3.0, and so never decays. Trial 3 is all NaN.
+    """
+    t = METRICS_GRID
+    noise = np.where(np.arange(len(t)) % 2 == 0, 0.01, -0.01) * (t < 0)
+    response = np.interp(t, [0.2, 1.0, 2.0], [0.0, 1.0, 0.0]) * (t >= 0.2)
+    ramp = np.interp(t, [0.0, 3.0], [0.0, 1.0]) * (t >= 0)
+    return np.stack([response + noise, noise, ramp + noise, np.full_like(t, np.nan)])
+
+
+class TestWindowMask:
+    def test_inclusive_and_exclusive_end(self):
+        t = np.array([-1.0, -0.5, 0.0, 0.5, 1.0])
+        np.testing.assert_array_equal(pm.window_mask(t, 0.0, 1.0), [False, False, True, True, True])
+        np.testing.assert_array_equal(
+            pm.window_mask(t, -1.0, 0.0, inclusive_end=False), [True, True, False, False, False]
+        )
+
+    def test_empty_window_raises(self):
+        with pytest.raises(ValueError, match="No samples"):
+            pm.window_mask(METRICS_GRID, 5.0, 6.0)
+
+
+class TestBaselineStats:
+    def test_mean_and_sd(self):
+        traces = np.array([[1.0, 3.0, 5.0, 100.0], [2.0, 2.0, 2.0, 100.0]])
+        t = np.array([-1.0, -0.5, -0.25, 0.0])
+        mean, sd = pm.baseline_stats(traces, t, -1.0, 0.0)
+        np.testing.assert_allclose(mean, [3.0, 2.0])
+        np.testing.assert_allclose(sd, [2.0, 0.0])
+
+    def test_ignores_nan(self):
+        traces = np.array([[1.0, np.nan, 5.0, 100.0]])
+        t = np.array([-1.0, -0.5, -0.25, 0.0])
+        mean, _ = pm.baseline_stats(traces, t, -1.0, 0.0)
+        np.testing.assert_allclose(mean, [3.0])
+
+
+class TestPeak:
+    def test_signed_maximum(self):
+        amplitude, peak_time, index = pm.peak(_metrics_traces(), METRICS_GRID, 0.0, 3.0)
+        np.testing.assert_allclose(amplitude[:3], [1.0, 0.0, 1.0], atol=1e-12)
+        np.testing.assert_allclose(peak_time[:3], [1.0, 0.0, 3.0])
+        np.testing.assert_array_equal(index[:3], [50, 25, 100])
+
+    def test_nan_trial(self):
+        amplitude, peak_time, index = pm.peak(_metrics_traces(), METRICS_GRID, 0.0, 3.0)
+        assert np.isnan(amplitude[3])
+        assert np.isnan(peak_time[3])
+        assert index[3] == -1
+
+    def test_negative_response_keeps_sign(self):
+        traces = -_metrics_traces()[:1]
+        amplitude, peak_time, _ = pm.peak(traces, METRICS_GRID, 0.0, 3.0)
+        np.testing.assert_allclose(amplitude, [0.0], atol=1e-12)
+        np.testing.assert_allclose(peak_time, [0.0])
+
+
+class TestAuc:
+    def test_triangle(self):
+        area = pm.auc(_metrics_traces(), METRICS_GRID, 0.0, 3.0)
+        np.testing.assert_allclose(area[:3], [0.9, 0.0, 1.5], atol=1e-12)
+        assert np.isnan(area[3])
+
+    def test_window(self):
+        area = pm.auc(_metrics_traces(), METRICS_GRID, 0.0, 1.0)
+        np.testing.assert_allclose(area[0], 0.4, atol=1e-12)
+
+
+class TestOnsetTime:
+    def test_threshold_crossing(self):
+        onset = pm.onset_time(_metrics_traces(), METRICS_GRID, np.full(4, 0.02), 0.0, 3.0)
+        np.testing.assert_allclose(onset[:3], [0.24, np.nan, 0.08])
+        assert np.isnan(onset[3])
+
+    def test_nan_threshold_gives_nan(self):
+        onset = pm.onset_time(_metrics_traces(), METRICS_GRID, np.array([np.nan, 0.02, 0.02, 0.02]), 0.0, 3.0)
+        assert np.isnan(onset[0])
+
+    def test_min_samples_rejects_blips(self):
+        t = METRICS_GRID
+        trace = np.zeros((1, len(t)))
+        trace[0, 30:32] = 1.0  # two samples at t=0.2, 0.24
+        trace[0, 40:43] = 1.0  # three samples from t=0.6
+        np.testing.assert_allclose(pm.onset_time(trace, t, np.array([0.5]), 0.0, 3.0, min_samples=3), [0.6])
+        np.testing.assert_allclose(pm.onset_time(trace, t, np.array([0.5]), 0.0, 3.0, min_samples=1), [0.2])
+        assert np.isnan(pm.onset_time(trace, t, np.array([0.5]), 0.0, 3.0, min_samples=4))[0]
+
+    def test_window_shorter_than_min_samples(self):
+        onset = pm.onset_time(_metrics_traces(), METRICS_GRID, np.full(4, 0.02), 0.0, 0.04, min_samples=3)
+        assert np.all(np.isnan(onset))
+
+    def test_min_samples_below_one_raises(self):
+        with pytest.raises(ValueError, match="min_samples"):
+            pm.onset_time(_metrics_traces(), METRICS_GRID, np.full(4, 0.02), 0.0, 3.0, min_samples=0)
+
+
+class TestDecayTime:
+    def test_half_decay(self):
+        traces = _metrics_traces()
+        amplitude, _, index = pm.peak(traces, METRICS_GRID, 0.0, 3.0)
+        decay = pm.decay_time(traces, METRICS_GRID, index, amplitude, 3.0)
+        np.testing.assert_allclose(decay[0], 0.52)
+        assert np.all(np.isnan(decay[1:]))  # flat, never decays, NaN
+
+    def test_fraction(self):
+        traces = _metrics_traces()
+        amplitude, _, index = pm.peak(traces, METRICS_GRID, 0.0, 3.0)
+        decay = pm.decay_time(traces, METRICS_GRID, index, amplitude, 3.0, fraction=0.1)
+        np.testing.assert_allclose(decay[0], 0.92)
+
+    def test_window_end_limits_search(self):
+        traces = _metrics_traces()
+        amplitude, _, index = pm.peak(traces, METRICS_GRID, 0.0, 1.2)
+        assert np.isnan(pm.decay_time(traces, METRICS_GRID, index, amplitude, 1.2)[0])
+
+    @pytest.mark.parametrize("fraction", [0.0, 1.0, 1.5])
+    def test_fraction_out_of_range_raises(self, fraction):
+        with pytest.raises(ValueError, match="fraction"):
+            pm.decay_time(_metrics_traces(), METRICS_GRID, np.zeros(4, dtype=np.int64), np.ones(4), 3.0, fraction)
+
+
+class TestSmooth:
+    def test_window_one_is_identity(self):
+        traces = _metrics_traces()
+        out = pm.smooth(traces, 1)
+        np.testing.assert_array_equal(out, traces)
+        assert out is not traces
+
+    def test_moving_average_and_edges(self):
+        trace = np.array([[1.0, 2.0, 3.0, 4.0, 5.0]])
+        np.testing.assert_allclose(pm.smooth(trace, 3), [[1.5, 2.0, 3.0, 4.0, 4.5]])
+        np.testing.assert_allclose(pm.smooth(trace, 5), [[2.0, 2.5, 3.0, 3.5, 4.0]])
+
+    def test_ignores_nan(self):
+        trace = np.array([[1.0, np.nan, 3.0, np.nan, np.nan]])
+        out = pm.smooth(trace, 3)
+        np.testing.assert_allclose(out[0, :3], [1.0, 2.0, 3.0])
+        assert out[0, 3] == 3.0
+        assert np.isnan(out[0, 4])
+
+    @pytest.mark.parametrize("window", [0, 2, 4, -1])
+    def test_even_or_non_positive_raises(self, window):
+        with pytest.raises(ValueError, match="odd"):
+            pm.smooth(_metrics_traces(), window)
+
+
+class TestExtrapolatedOnset:
+    def test_linear_rise(self):
+        traces = _metrics_traces()
+        amplitude, _, index = pm.peak(traces, METRICS_GRID, 0.0, 3.0)
+        onset = pm.extrapolated_onset(traces, METRICS_GRID, index, amplitude, 0.0)
+        assert onset[0] == pytest.approx(0.2, abs=1e-3)
+        assert np.isnan(onset[1])
+        assert onset[2] == pytest.approx(0.0, abs=1e-3)
+        assert np.isnan(onset[3])
+
+    def test_fits_last_rise_before_peak(self):
+        t = METRICS_GRID
+        # An early bump to 0.6 that falls back, then the real rise from t=1.0 to the peak at t=2.0.
+        trace = np.interp(t, [0.0, 0.2, 0.4, 1.0, 2.0], [0.0, 0.6, 0.0, 0.0, 1.0])[None]
+        amplitude, _, index = pm.peak(trace, t, 0.0, 3.0)
+        onset = pm.extrapolated_onset(trace, t, index, amplitude, 0.0)
+        assert onset[0] == pytest.approx(1.0, abs=1e-9)
+
+    def test_too_few_rise_samples(self):
+        t = METRICS_GRID
+        trace = np.where(t >= 1.0, 1.0, 0.0)[None]  # a step: no samples between 0.2 and 0.8
+        amplitude, _, index = pm.peak(trace, t, 0.0, 3.0)
+        assert np.isnan(pm.extrapolated_onset(trace, t, index, amplitude, 0.0))[0]
+
+    @pytest.mark.parametrize(("low", "high"), [(0.0, 0.8), (0.2, 1.0), (0.8, 0.2), (0.5, 0.5)])
+    def test_bad_range_raises(self, low, high):
+        with pytest.raises(ValueError, match="fractions"):
+            pm.extrapolated_onset(
+                _metrics_traces(), METRICS_GRID, np.zeros(4, dtype=np.int64), np.ones(4), 0.0, low, high
+            )
+
+
+class TestOffsetTime:
+    def test_return_to_threshold(self):
+        traces = _metrics_traces()
+        amplitude, _, index = pm.peak(traces, METRICS_GRID, 0.0, 3.0)
+        offset = pm.offset_time(traces, METRICS_GRID, np.full(4, 0.02), index, 3.0)
+        assert offset[0] == pytest.approx(2.0)
+        assert np.all(np.isnan(offset[1:]))  # never above, never returns, NaN
+
+    def test_min_samples_rejects_dips(self):
+        t = METRICS_GRID
+        trace = np.ones((1, len(t)))
+        trace[0, 40:42] = 0.0  # two samples from t=0.6
+        trace[0, 60:] = 0.0  # from t=1.4 onward
+        index = np.array([30])
+        np.testing.assert_allclose(pm.offset_time(trace, t, np.array([0.5]), index, 3.0, min_samples=3), [1.4])
+        np.testing.assert_allclose(pm.offset_time(trace, t, np.array([0.5]), index, 3.0, min_samples=1), [0.6])
+
+    def test_window_end_limits_search(self):
+        traces = _metrics_traces()
+        amplitude, _, index = pm.peak(traces, METRICS_GRID, 0.0, 1.5)
+        assert np.isnan(pm.offset_time(traces, METRICS_GRID, np.full(4, 0.02), index, 1.5)[0])
+
+    def test_nan_threshold(self):
+        traces = _metrics_traces()
+        amplitude, _, index = pm.peak(traces, METRICS_GRID, 0.0, 3.0)
+        assert np.all(np.isnan(pm.offset_time(traces, METRICS_GRID, np.full(4, np.nan), index, 3.0)))
+
+    def test_min_samples_below_one_raises(self):
+        with pytest.raises(ValueError, match="min_samples"):
+            pm.offset_time(_metrics_traces(), METRICS_GRID, np.zeros(4), np.zeros(4, dtype=np.int64), 3.0, 0)
+
+
+class TestTraceCorrelation:
+    def test_identical_and_opposite(self):
+        trace = _metrics_traces()[0]
+        assert pm.trace_correlation(np.stack([trace, trace]), METRICS_GRID, 0.0, 3.0) == pytest.approx(1.0)
+        assert pm.trace_correlation(np.stack([trace, -trace]), METRICS_GRID, 0.0, 3.0) == pytest.approx(-1.0)
+
+    def test_mean_over_pairs(self):
+        trace = _metrics_traces()[0]
+        correlation = pm.trace_correlation(np.stack([trace, trace, -trace]), METRICS_GRID, 0.0, 3.0)
+        assert correlation == pytest.approx((1.0 - 1.0 - 1.0) / 3)
+
+    def test_ignores_nan_trials(self):
+        trace = _metrics_traces()[0]
+        nan = np.full_like(trace, np.nan)
+        assert pm.trace_correlation(np.stack([trace, trace, nan]), METRICS_GRID, 0.0, 3.0) == pytest.approx(1.0)
+
+    def test_single_trial_is_nan(self):
+        assert np.isnan(pm.trace_correlation(_metrics_traces()[:1], METRICS_GRID, 0.0, 3.0))
+
+
+class TestTrialMetrics:
+    def test_columns_and_values(self):
+        metrics = pm.trial_metrics(_metrics_traces(), METRICS_GRID, baseline=(-1.0, 0.0), response=(0.0, 3.0))
+        assert list(metrics.columns) == [
+            "baseline_mean",
+            "baseline_sd",
+            "onset_time",
+            "peak_time",
+            "amplitude",
+            "auc",
+            "decay_time",
+            "offset_time",
+            "duration",
+        ]
+        assert len(metrics) == 4
+        row = metrics.iloc[0]
+        assert row["baseline_mean"] == pytest.approx(0.01 / 25)
+        assert row["baseline_sd"] == pytest.approx(0.01, abs=1e-3)
+        assert row["onset_time"] == pytest.approx(0.24)
+        assert row["peak_time"] == pytest.approx(1.0)
+        assert row["amplitude"] == pytest.approx(1.0, abs=1e-3)
+        assert row["auc"] == pytest.approx(0.9, abs=2e-3)
+        assert row["decay_time"] == pytest.approx(0.52)
+        assert row["offset_time"] == pytest.approx(2.0)
+        assert row["duration"] == pytest.approx(1.76)
+
+        flat = metrics.iloc[1]
+        assert np.isnan(flat["onset_time"])
+        assert flat["amplitude"] < 0
+        assert np.isnan(flat["decay_time"])
+        assert np.isnan(flat["offset_time"])
+        assert np.isnan(flat["duration"])
+
+        ramp = metrics.iloc[2]
+        assert ramp["onset_time"] == pytest.approx(0.08)
+        assert np.isnan(ramp["offset_time"])  # never returns to threshold
+
+        assert metrics.iloc[3].isna().all()
+
+    def test_onset_from_peak_fraction(self):
+        metrics = pm.trial_metrics(
+            _metrics_traces(), METRICS_GRID, (-1.0, 0.0), (0.0, 3.0), onset="peak", onset_fraction=0.53
+        )
+        # Rises through 0.53 of the amplitude between t=0.6 (0.5) and t=0.64 (0.55).
+        assert metrics["onset_time"].iloc[0] == pytest.approx(0.64)
+        assert np.isnan(metrics["onset_time"].iloc[1])  # amplitude is not positive
+        # Offset is the return to the same fraction: falls through 0.53 between t=1.44 (0.56) and t=1.48 (0.52).
+        assert metrics["offset_time"].iloc[0] == pytest.approx(1.48)
+        assert metrics["duration"].iloc[0] == pytest.approx(1.48 - 0.64)
+
+    def test_onset_extrapolate(self):
+        metrics = pm.trial_metrics(
+            _metrics_traces(),
+            METRICS_GRID,
+            (-1.0, 0.0),
+            (0.0, 3.0),
+            onset="extrapolate",
+            extrapolate_range=(0.25, 0.75),
+        )
+        # The rise is a line from (0.2, 0) to (1.0, 1), so extrapolation recovers 0.2; the offset is the return
+        # to 0.25 of the amplitude, between t=1.72 (0.28) and t=1.76 (0.24).
+        assert metrics["onset_time"].iloc[0] == pytest.approx(0.2, abs=1e-3)
+        assert metrics["offset_time"].iloc[0] == pytest.approx(1.76)
+        assert np.isnan(metrics["onset_time"].iloc[1])
+        assert metrics["onset_time"].iloc[2] == pytest.approx(0.0, abs=2e-3)
+
+    def test_smoothing_ignores_spike(self):
+        traces = _metrics_traces()[:1].copy()
+        traces[0, 35] = 2.0  # one-sample spike at t=0.4, above the true peak
+        raw = pm.trial_metrics(traces, METRICS_GRID, (-1.0, 0.0), (0.0, 3.0))
+        smoothed = pm.trial_metrics(traces, METRICS_GRID, (-1.0, 0.0), (0.0, 3.0), smoothing=5)
+        assert raw["peak_time"].iloc[0] == pytest.approx(0.4)
+        assert raw["decay_time"].iloc[0] == pytest.approx(0.04)
+        assert smoothed["peak_time"].iloc[0] == pytest.approx(1.0)
+        assert smoothed["amplitude"].iloc[0] == pytest.approx(0.94, abs=0.01)  # the averaged triangle tip
+        assert smoothed["decay_time"].iloc[0] == pytest.approx(0.52, abs=0.05)
+        # AUC and baseline SD come from the raw trace.
+        assert smoothed["auc"].iloc[0] == raw["auc"].iloc[0]
+        assert smoothed["baseline_sd"].iloc[0] == raw["baseline_sd"].iloc[0]
+
+    def test_onset_sd_multiple(self):
+        loose = pm.trial_metrics(_metrics_traces(), METRICS_GRID, (-1.0, 0.0), (0.0, 3.0), onset_sd=1.0)
+        strict = pm.trial_metrics(_metrics_traces(), METRICS_GRID, (-1.0, 0.0), (0.0, 3.0), onset_sd=30.0)
+        assert loose["onset_time"].iloc[0] == pytest.approx(0.24)
+        assert strict["onset_time"].iloc[0] == pytest.approx(0.48)
+
+    def test_unknown_onset_raises(self):
+        with pytest.raises(ValueError, match="onset method"):
+            pm.trial_metrics(_metrics_traces(), METRICS_GRID, (-1.0, 0.0), (0.0, 3.0), onset="slope")
+
+
+class TestSessionMetrics:
+    def test_summary(self):
+        metrics = pd.DataFrame(
+            {
+                "onset_time": [0.2, 0.4, np.nan],
+                "peak_time": [1.0, 1.0, 1.0],
+                "amplitude": [1.0, 3.0, 5.0],
+                "auc": [0.0, 0.0, 0.0],
+                "decay_time": [np.nan, np.nan, np.nan],
+                "offset_time": [1.0, np.nan, np.nan],
+                "duration": [0.8, np.nan, np.nan],
+            }
+        )
+        summary = pm.session_metrics(metrics, correlation=0.5)
+        assert summary["n_trials"] == 3
+        assert summary["trace_correlation"] == 0.5
+        assert summary["onset_time_mean"] == pytest.approx(0.3)
+        assert summary["onset_time_sd"] == pytest.approx(np.std([0.2, 0.4], ddof=1))
+        assert summary["onset_time_cv"] == pytest.approx(np.std([0.2, 0.4], ddof=1) / 0.3)
+        assert summary["peak_time_sd"] == 0.0
+        assert summary["amplitude_mean"] == 3.0
+        assert np.isnan(summary["auc_cv"])
+        assert np.isnan(summary["decay_time_mean"])
+        assert summary["onset_n"] == 2
+        assert summary["decay_n"] == 0
+        assert summary["offset_n"] == 1
+        assert summary["duration_mean"] == 0.8
+        assert list(summary)[:2] == ["n_trials", "trace_correlation"]
+        assert all(f"{name}_{stat}" in summary for name in pm.METRICS for stat in ("mean", "sd", "cv"))
+
+    def test_single_trial_has_no_sd(self):
+        metrics = pd.DataFrame({name: [1.0] for name in pm.METRICS})
+        summary = pm.session_metrics(metrics, correlation=np.nan)
+        assert summary["amplitude_mean"] == 1.0
+        assert np.isnan(summary["amplitude_sd"])
+
+
+@pytest.fixture(scope="module")
+def metrics_perievent_csv(tmp_path_factory):
+    """Long-format peri-event CSV of the first three synthetic trials, for two regions with the second doubled."""
+    path = tmp_path_factory.mktemp("data") / "ses-01_regions_event-cueonset_perievent.csv"
+    traces = _metrics_traces()[:3]
+    frames = []
+    for factor, region in enumerate(PERIEVENT_REGIONS, start=1):
+        for trial, trace in zip([1, 2, 4], traces, strict=True):
+            frames.append(
+                pd.DataFrame(
+                    {
+                        "trial_index": trial,
+                        "event_time": 5.0 * trial + 0.5,
+                        "time": METRICS_GRID,
+                        "region": region,
+                        "F": factor * trace,
+                    }
+                )
+            )
+    pd.concat(frames, ignore_index=True).to_csv(path, index=False)
+    return str(path)
+
+
+class TestMetricsTables:
+    def test_tables(self, metrics_perievent_csv):
+        per_trial, per_session = pm.metrics_tables(pd.read_csv(metrics_perievent_csv))
+        assert list(per_trial.columns[:3]) == ["trial_index", "event_time", "region"]
+        assert len(per_trial) == 3 * len(PERIEVENT_REGIONS)
+        assert per_session["region"].tolist() == PERIEVENT_REGIONS
+        assert per_session["n_trials"].tolist() == [3, 3]
+        first = per_trial.iloc[0]
+        assert first["onset_time"] == pytest.approx(0.24)
+        assert first["amplitude"] == pytest.approx(1.0, abs=1e-3)
+
+    def test_joins_trials(self, metrics_perievent_csv, perievent_trials_csv):
+        per_trial, _ = pm.metrics_tables(pd.read_csv(metrics_perievent_csv), trials=pd.read_csv(perievent_trials_csv))
+        assert per_trial[per_trial["region"] == "L_MOp"]["sdt_type"].tolist() == ["hit", "miss", "correct_rejection"]
+
+    def test_options_pass_through(self, metrics_perievent_csv):
+        per_trial, _ = pm.metrics_tables(
+            pd.read_csv(metrics_perievent_csv),
+            baseline=(-0.5, 0.0),
+            response=(0.0, 1.2),
+            onset="peak",
+            onset_fraction=0.53,
+        )
+        assert per_trial["onset_time"].iloc[0] == pytest.approx(0.64)
+        assert per_trial["peak_time"].max() <= 1.2
+
+    def test_missing_columns_raises(self, metrics_perievent_csv):
+        with pytest.raises(ValueError, match="F, region"):
+            pm.metrics_tables(pd.read_csv(metrics_perievent_csv).drop(columns=["region", "F"]))
+
+
+def test_metrics_cmd(metrics_perievent_csv, output_dir):
+    result = CliRunner().invoke(mesoscopy.cli, args=f"process metrics {metrics_perievent_csv} -o {output_dir}")
+    assert result.exit_code == 0, result.output
+
+    trial_path = pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_metrics.csv"
+    session_path = pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_metrics-session.csv"
+    assert trial_path.is_file()
+    assert session_path.is_file()
+    assert "Saved per-trial metrics" in result.output
+
+    trial = pd.read_csv(trial_path)
+    assert list(trial.columns) == [
+        "trial_index",
+        "event_time",
+        "region",
+        "baseline_mean",
+        "baseline_sd",
+        "onset_time",
+        "peak_time",
+        "amplitude",
+        "auc",
+        "decay_time",
+        "offset_time",
+        "duration",
+    ]
+    assert len(trial) == 3 * len(PERIEVENT_REGIONS)
+    assert list(trial["region"].unique()) == PERIEVENT_REGIONS
+    assert trial["trial_index"].tolist() == [1, 2, 4] * len(PERIEVENT_REGIONS)
+    np.testing.assert_allclose(trial["event_time"], [5.5, 10.5, 20.5] * len(PERIEVENT_REGIONS))
+
+    first = trial[(trial["region"] == "L_MOp") & (trial["trial_index"] == 1)].iloc[0]
+    assert first["onset_time"] == pytest.approx(0.24)
+    assert first["peak_time"] == pytest.approx(1.0)
+    assert first["amplitude"] == pytest.approx(1.0, abs=1e-3)
+    assert first["auc"] == pytest.approx(0.9, abs=2e-3)
+    assert first["decay_time"] == pytest.approx(0.52)
+    assert first["offset_time"] == pytest.approx(2.0)
+    assert first["duration"] == pytest.approx(1.76)
+    doubled = trial[(trial["region"] == "R_MOp") & (trial["trial_index"] == 1)].iloc[0]
+    assert doubled["amplitude"] == pytest.approx(2 * first["amplitude"])
+    assert doubled["auc"] == pytest.approx(2 * first["auc"])
+    assert doubled["onset_time"] == pytest.approx(first["onset_time"])
+
+    ramp = trial[(trial["region"] == "L_MOp") & (trial["trial_index"] == 4)].iloc[0]
+    assert ramp["onset_time"] == pytest.approx(0.08)
+    assert trial["peak_time"].iloc[1] == 0.0
+
+    session = pd.read_csv(session_path)
+    assert list(session.columns[:3]) == ["region", "n_trials", "trace_correlation"]
+    assert session["region"].tolist() == PERIEVENT_REGIONS
+    assert session["n_trials"].tolist() == [3, 3]
+    assert session["onset_n"].tolist() == [2, 2]
+    assert session["decay_n"].tolist() == [1, 1]
+    assert session["offset_n"].tolist() == [1, 1]
+    assert session["duration_mean"].tolist() == pytest.approx([1.76, 1.76])
+    assert session["amplitude_mean"].iloc[1] == pytest.approx(2 * session["amplitude_mean"].iloc[0])
+    assert session["amplitude_cv"].iloc[1] == pytest.approx(session["amplitude_cv"].iloc[0])
+    assert session["trace_correlation"].iloc[0] == pytest.approx(session["trace_correlation"].iloc[1])
+
+
+def test_metrics_cmd_options(metrics_perievent_csv, output_dir):
+    result = CliRunner().invoke(
+        mesoscopy.cli,
+        args=(
+            f"process metrics {metrics_perievent_csv} -o {output_dir} --baseline -0.5 0 --response 0 1.2"
+            " --onset peak --onset-fraction 0.53 --onset-min-samples 1 --decay-fraction 0.9"
+        ),
+    )
+    assert result.exit_code == 0, result.output
+
+    trial = pd.read_csv(pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_metrics.csv")
+    first = trial[(trial["region"] == "L_MOp") & (trial["trial_index"] == 1)].iloc[0]
+    assert first["onset_time"] == pytest.approx(0.64)
+    assert first["peak_time"] == pytest.approx(1.0)
+    assert first["auc"] == pytest.approx(0.4 + 0.2 - 0.02, abs=2e-3)
+    assert first["decay_time"] == pytest.approx(0.12)
+
+
+def test_metrics_cmd_extrapolate_and_smooth(metrics_perievent_csv, output_dir):
+    result = CliRunner().invoke(
+        mesoscopy.cli,
+        args=(
+            f"process metrics {metrics_perievent_csv} -o {output_dir} --onset extrapolate"
+            " --extrapolate-range 0.3 0.7 --smooth 3"
+        ),
+    )
+    assert result.exit_code == 0, result.output
+
+    trial = pd.read_csv(pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_metrics.csv")
+    first = trial[(trial["region"] == "L_MOp") & (trial["trial_index"] == 1)].iloc[0]
+    assert first["onset_time"] == pytest.approx(0.2, abs=0.02)
+    assert first["peak_time"] == pytest.approx(1.0)
+    assert first["offset_time"] == pytest.approx(1.72, abs=0.05)  # return to 0.3 of the amplitude
+
+
+@pytest.mark.parametrize(("option", "hint"), [("--smooth 4", "odd"), ("--extrapolate-range 0.8 0.2", "LOW < HIGH")])
+def test_metrics_cmd_rejects_bad_options(metrics_perievent_csv, output_dir, option, hint):
+    result = CliRunner().invoke(mesoscopy.cli, args=f"process metrics {metrics_perievent_csv} -o {output_dir} {option}")
+    assert result.exit_code == 2
+    assert hint in result.output
+
+
+def test_metrics_cmd_joins_trials(metrics_perievent_csv, perievent_trials_csv, output_dir):
+    result = CliRunner().invoke(
+        mesoscopy.cli, args=f"process metrics {metrics_perievent_csv} -o {output_dir} -t {perievent_trials_csv}"
+    )
+    assert result.exit_code == 0, result.output
+
+    trial = pd.read_csv(pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_metrics.csv")
+    assert "sdt_type" in trial.columns
+    assert trial.columns.get_loc("sdt_type") > trial.columns.get_loc("duration")
+    joined = trial[trial["region"] == "L_MOp"].set_index("trial_index")
+    assert joined["sdt_type"].tolist() == ["hit", "miss", "correct_rejection"]
+    np.testing.assert_allclose(joined["cue_onset"], [5.5, 10.5, 20.5])
+
+
+def test_metrics_cmd_joins_trials_with_index_column(metrics_perievent_csv, perievent_trials_csv, output_dir, tmp_path):
+    indexed = tmp_path / "ses-01_trials.csv"
+    pd.read_csv(perievent_trials_csv).to_csv(indexed)  # leading "Unnamed: 0" column, as pandas writes by default
+    result = CliRunner().invoke(
+        mesoscopy.cli, args=f"process metrics {metrics_perievent_csv} -o {output_dir} -t {indexed}"
+    )
+    assert result.exit_code == 0, result.output
+
+    trial = pd.read_csv(pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_metrics.csv")
+    assert not any(column.startswith("Unnamed") for column in trial.columns)
+    assert trial[trial["region"] == "L_MOp"]["sdt_type"].tolist() == ["hit", "miss", "correct_rejection"]
+
+
+def test_perievent_cmd_with_metrics(perievent_regions_csv, perievent_trials_csv, output_dir):
+    result = CliRunner().invoke(
+        mesoscopy.cli,
+        args=(
+            f"process peri-event {perievent_regions_csv} {perievent_trials_csv} -o {output_dir} --with-metrics"
+            " --baseline -0.5 0 --smooth 3 --onset peak"
+        ),
+    )
+    assert result.exit_code == 0, result.output
+    assert "Saved peri-event windows" in result.output
+    assert "Saved per-trial metrics" in result.output
+
+    windows = pd.read_csv(pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_perievent.csv")
+    trial = pd.read_csv(pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_metrics.csv")
+    session = pd.read_csv(pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_metrics-session.csv")
+    assert trial["trial_index"].tolist() == [1, 2, 3, 4] * len(PERIEVENT_REGIONS)
+    assert trial["sdt_type"].tolist()[:4] == ["hit", "miss", "false_alarm", "correct_rejection"]
+    assert session["region"].tolist() == PERIEVENT_REGIONS
+    # The peri-event --baseline is the metrics baseline, so the baseline mean is already zero.
+    np.testing.assert_allclose(trial["baseline_mean"], 0.0, atol=1e-6)
+
+    # Same result as running `process metrics` on the written windows with the same options.
+    expected, _ = pm.metrics_tables(
+        windows, baseline=(-0.5, 0.0), smoothing=3, onset="peak", trials=pd.read_csv(perievent_trials_csv)
+    )
+    pd.testing.assert_frame_equal(trial, expected, check_dtype=False)
+
+
+def test_perievent_cmd_with_metrics_rejects_h5(perievent_h5, perievent_trials_csv, output_dir):
+    result = CliRunner().invoke(
+        mesoscopy.cli, args=f"process peri-event {perievent_h5} {perievent_trials_csv} -o {output_dir} --with-metrics"
+    )
+    assert result.exit_code == 2
+    assert "_regions.csv" in result.output
+    assert not list(pathlib.Path(output_dir).glob("*_perievent.h5"))
+
+
+def test_perievent_cmd_with_metrics_validates_options(perievent_regions_csv, perievent_trials_csv, output_dir):
+    result = CliRunner().invoke(
+        mesoscopy.cli,
+        args=f"process peri-event {perievent_regions_csv} {perievent_trials_csv} -o {output_dir} --with-metrics --smooth 2",
+    )
+    assert result.exit_code == 2
+    assert "odd" in result.output
+
+
+def test_perievent_cmd_metric_options_need_with_metrics(perievent_regions_csv, perievent_trials_csv, output_dir):
+    """Metric options are accepted without --with-metrics and simply have no effect."""
+    result = CliRunner().invoke(
+        mesoscopy.cli,
+        args=f"process peri-event {perievent_regions_csv} {perievent_trials_csv} -o {output_dir} --smooth 2",
+    )
+    assert result.exit_code == 0, result.output
+    assert not list(pathlib.Path(output_dir).glob("*_metrics*.csv"))
+
+
+def test_metrics_cmd_missing_columns(metrics_perievent_csv, output_dir, tmp_path):
+    broken = tmp_path / "ses-02_regions_event-cueonset_perievent.csv"
+    pd.read_csv(metrics_perievent_csv).drop(columns=["region", "F"]).to_csv(broken, index=False)
+    result = CliRunner().invoke(mesoscopy.cli, args=f"process metrics {broken} -o {output_dir}")
+    assert result.exit_code != 0
+    assert "F, region" in result.output

@@ -102,6 +102,7 @@ nav:
     - Quality control: how-to/qa.md
     - Resting-state recordings: how-to/resting-state-analysis.md
     - Imaging with behaviour: how-to/imaging-with-behaviour-analysis.md
+    - Response metrics: how-to/metrics.md
     - Converting video files to HDF5: how-to/convert-video-to-h5.md
     - Using mesoscopy as a library: how-to/using-mesoscopy-as-a-library.md
   - Design principles:

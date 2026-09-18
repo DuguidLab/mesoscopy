@@ -97,6 +97,9 @@ def event_times(trials: pd.DataFrame, event: str) -> tuple[npt.NDArray[np.float6
 def window_grid(pre: float, post: float, fs: float) -> npt.NDArray[np.float64]:
     """Sample times relative to the event, from `-pre` to `post` inclusive at `fs` Hz.
 
+    Each time is `(k - pre * fs) / fs`, so whenever `pre * fs` is an integer every time is a single correctly
+    rounded division and the event falls on exactly 0.0.
+
     Args:
         pre (float): Seconds before the event.
         post (float): Seconds after the event.
@@ -105,9 +108,8 @@ def window_grid(pre: float, post: float, fs: float) -> npt.NDArray[np.float64]:
     Returns:
         npt.NDArray[np.float64]: Grid times in seconds, shape `(n_samples,)`.
     """
-    step = 1.0 / fs
-    grid = np.arange(-pre, post + step, step, dtype=np.float64)
-    return grid[grid <= post + _GRID_TOLERANCE_S]
+    n_samples = int(np.floor((pre + post) * fs + _GRID_TOLERANCE_S)) + 1
+    return (np.arange(n_samples, dtype=np.float64) - pre * fs) / fs
 
 
 def extract(

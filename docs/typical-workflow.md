@@ -84,4 +84,33 @@ will extract trial-by-trial activity aligned to behaviour.
 An HDF5 recording (e.g. `_zscored.h5`) gives an HDF5 file of `(n_trials, n_samples, height, width)` traces; a
 `_regions.csv` gives a long-format CSV. Add `--baseline START END` to subtract a per-trial baseline.
 
+## Extract response metrics
+
+Given the peri-event CSV from the step above:
+
+```bash
+mesoscopy process metrics /path/to/example-recording_regions_event-cueonset_perievent.csv --trials /path/to/example-recording_trials.csv
+```
+
+writes `example-recording_regions_event-cueonset_metrics.csv` with the onset time, peak time, amplitude, area
+under the curve, decay time, offset time and duration of every trial in every region, joined with the trials
+table when `--trials` is given, and `example-recording_regions_event-cueonset_metrics-session.csv` with the mean,
+SD and CV of each metric across trials per region, and the mean pairwise correlation between trial traces.
+
+Traces are baseline-subtracted with the mean over `--baseline START END` (default: all pre-event samples), and
+metrics are taken over `--response START END` (default: all post-event samples). Onset is the first
+`--onset-min-samples` consecutive samples above `--onset-sd` baseline standard deviations, or above
+`--onset-fraction` of the peak amplitude with `--onset peak`; `--onset extrapolate` instead fits a line to the
+rise between `--extrapolate-range LOW HIGH` fractions of the amplitude and takes where it crosses baseline. Offset
+is the first `--onset-min-samples` consecutive samples back at or below the onset threshold after the peak (or
+below `LOW` of the amplitude for `--onset extrapolate`), and duration is offset minus onset. Decay is the time
+from the peak until the trace falls to `--decay-fraction` of the amplitude. Each is empty when it never happens.
+
+Noisy traces can put the peak on a single-sample spike, which shortens the decay and shifts the offset. `--smooth N`
+detects the peak, onset, decay and offset on an `N`-sample moving average while keeping the raw trace for the
+baseline SD and the area under the curve.
+
+The same tables can be written in one step with `process peri-event ... --with-metrics`, which takes the same
+options. See [Response metrics](how-to/metrics.md) for the definitions.
+
 ## Next steps
