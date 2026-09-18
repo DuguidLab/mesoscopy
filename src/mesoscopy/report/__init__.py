@@ -18,7 +18,6 @@
 #  IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
-import json
 from pathlib import Path
 
 import click
@@ -31,6 +30,7 @@ from mesoscopy import io
 
 PREPROCESSING_REPORT_TEMPLATE = "preprocessing.html"
 REGISTRATION_REPORT_TEMPLATE = "registration.html"
+PERIEVENT_REPORT_TEMPLATE = "perievent.html"
 
 env = Environment(loader=PackageLoader("mesoscopy.report", "templates"), autoescape=select_autoescape())
 
@@ -44,25 +44,36 @@ env = Environment(loader=PackageLoader("mesoscopy.report", "templates"), autoesc
     default=".",
     help="Output directory for the report.",
 )
-def report_cmd(path: str, out_dir: str) -> str:
-    """Generate a report for a mesoscopy processing step.
+@click.option(
+    "-t",
+    "--trials",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Trials CSV giving sdt_type per trial, for peri-event files written without it.",
+)
+def report_cmd(path: str, out_dir: str, trials: str | None) -> str:
+    """Generate an HTML report for a mesoscopy processing step.
+
+    PATH is a *_preprocessed.h5, *_registered.h5 or *_perievent.csv file. Peri-event reports pick up the
+    *_metrics.csv and *_metrics-session.csv written by `process metrics` next to the input when present.
 
     Args:
-        path (str): Path to the input file, which should be either a preprocessed or registered recording.
+        path (str): Path to the input file.
         out_dir (str): Directory where the report will be saved. Defaults to the current directory
+        trials (str, optional): Trials CSV for peri-event files without an sdt_type column.
 
     Returns:
         str: Path to the generated report.
-
-    Raises:
-        ValueError: If the input file does not match expected patterns for preprocessing or registration.
-    """
+    """  # noqa: DOC501
     if path.endswith("_preprocessed.h5"):
         return generate_preprocessing_report(path, out_dir=out_dir)
     elif path.endswith("_registered.h5"):
         return generate_registration_report(path, out_dir=out_dir)
+    elif path.endswith("_perievent.csv"):
+        return generate_perievent_report(path, out_dir=out_dir, trials_path=trials)
     else:
-        raise ValueError
+        msg = f"{path} is not a _preprocessed.h5, _registered.h5 or _perievent.csv file."
+        raise click.ClickException(msg)
 
 
 def generate_preprocessing_report(path: str, out_dir: str = ".") -> str:
@@ -78,7 +89,7 @@ def generate_preprocessing_report(path: str, out_dir: str = ".") -> str:
     import mesoscopy.preprocess.qa as preqa
 
     preproc = io.read_h5(path)
-    session_id = path.split("/")[-1].split("_preprocessed")[0]
+    session_id = Path(path).name.split("_preprocessed")[0]
 
     template = env.get_template(PREPROCESSING_REPORT_TEMPLATE)
 
@@ -170,12 +181,12 @@ def generate_preprocessing_report(path: str, out_dir: str = ".") -> str:
         "fig_corrected_maxip": preqa.plot_projection(preproc.get("qa").get("f_maxip"), as_html=True),  # type: ignore[attr-defined]
     }
 
-    out_path = out_dir / Path(path.split("/")[-1].replace(".h5", "_report.html"))
+    out_path = Path(out_dir) / Path(path).name.replace(".h5", "_report.html")
     out_path.write_text(template.render(template_identifiers), encoding="utf-8")
     return str(out_path)
 
 
-def generate_registration_report(path: str, out_dir=".") -> str:
+def generate_registration_report(path: str, out_dir: str = ".") -> str:
     """Generate a registration report for a mesoscopy recording.
 
     Args:
@@ -188,7 +199,7 @@ def generate_registration_report(path: str, out_dir=".") -> str:
     import mesoscopy.register.qa as regqa
 
     registered = io.read_h5(path)
-    session_id = path.split("/")[-1].split("_preprocessed_registered")[0]
+    session_id = Path(path).name.split("_preprocessed_registered")[0]
 
     template = env.get_template(REGISTRATION_REPORT_TEMPLATE)
 
@@ -219,6 +230,46 @@ def generate_registration_report(path: str, out_dir=".") -> str:
         ),
     }
 
-    out_path = out_dir / Path(path.split("/")[-1].replace(".h5", "_report.html"))
+    out_path = Path(out_dir) / Path(path).name.replace(".h5", "_report.html")
+    out_path.write_text(template.render(template_identifiers), encoding="utf-8")
+    return str(out_path)
+
+
+def generate_perievent_report(path: str, out_dir: str = ".", trials_path: str | None = None) -> str:
+    """Generate a peri-event report from a `*_perievent.csv` and any metrics tables next to it.
+
+    Args:
+        path (str): Path to the peri-event CSV.
+        out_dir (str): Directory where the report will be saved. Defaults to the current directory.
+        trials_path (str, optional): Trials CSV giving `sdt_type` when the peri-event file lacks it.
+
+    Returns:
+        str: Path to the generated report.
+    """
+    import mesoscopy.report.perievent as pevreport
+
+    payload, warnings = pevreport.report_payload(path, trials_path)
+    for warning in warnings:
+        click.echo(f"Warning: {warning}", err=True)
+
+    name = Path(path).name
+    session_id = name.split("_preprocessed")[0] if "_preprocessed" in name else name.removesuffix("_perievent.csv")
+    template = env.get_template(PERIEVENT_REPORT_TEMPLATE)
+    template_identifiers = {
+        "session_id": session_id,
+        "animal_id": session_id.split("_")[0].replace("sub-", ""),
+        "session_date": session_id.split("_ses-")[-1].split("_")[0] if "_ses-" in session_id else None,
+        "experiment_id": session_id.split("_exp-")[-1].split("_")[0] if "_exp-" in session_id else None,
+        "event": payload["event"],
+        "n_trials": payload["shape"][0],
+        "n_samples": payload["shape"][1],
+        "n_regions": payload["shape"][2],
+        "window": (payload["time"][0], payload["time"][-1]),
+        "has_types": payload["sdt_type"] is not None,
+        "has_metrics": payload["session_metrics"] is not None,
+        "payload": payload,
+    }
+
+    out_path = Path(out_dir) / name.replace(".csv", "_report.html")
     out_path.write_text(template.render(template_identifiers), encoding="utf-8")
     return str(out_path)
