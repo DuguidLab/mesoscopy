@@ -2533,6 +2533,14 @@ class TestMetricsTables:
         without, _ = pm.metrics_tables(perievent)
         pd.testing.assert_frame_equal(with_trials, without)
 
+    def test_trials_clashing_column_gets_suffix(self, metrics_perievent_csv, perievent_trials_csv):
+        trials = pd.read_csv(perievent_trials_csv)
+        trials["duration"] = 9.0
+        per_trial, _ = pm.metrics_tables(pd.read_csv(metrics_perievent_csv), trials=trials)
+        assert "duration_trial" in per_trial.columns
+        assert per_trial["duration_trial"].eq(9.0).all()
+        assert not per_trial["duration"].eq(9.0).any()
+
     def test_options_pass_through(self, metrics_perievent_csv):
         per_trial, _ = pm.metrics_tables(
             pd.read_csv(metrics_perievent_csv),
