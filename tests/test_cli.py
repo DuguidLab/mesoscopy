@@ -25,6 +25,7 @@ import subprocess
 import sys
 
 import click
+import h5py
 import pytest
 from click.testing import CliRunner
 
@@ -88,3 +89,32 @@ def test_no_eager_subcommands():
 
 def test_unknown_subcommand_is_none():
     assert mesoscopy.cli.get_command(click.Context(mesoscopy.cli), "nope") is None
+
+
+def test_start_time_prints_first_timestamp(tmp_path):
+    path = str(tmp_path / "rec.h5")
+    with h5py.File(path, "w") as f:
+        f.create_dataset("/timestamps", data=[b"2025-05-20T14:42:39.6422784", b"2025-05-20T14:42:39.6622784"])
+
+    result = CliRunner().invoke(mesoscopy.cli, ["start-time", path])
+
+    assert result.exit_code == 0
+    assert result.output == "2025-05-20T14:42:39.6422784\n"
+
+
+def test_start_time_nwb(nwbfile):
+    result = CliRunner().invoke(mesoscopy.cli, ["start-time", nwbfile])
+
+    assert result.exit_code == 0
+    assert result.output.startswith("2024-01-01T14:00:00")
+
+
+def test_start_time_missing_timestamps_fails(tmp_path):
+    path = str(tmp_path / "rec.h5")
+    with h5py.File(path, "w") as f:
+        f.create_dataset("/F", data=[0.0])
+
+    result = CliRunner().invoke(mesoscopy.cli, ["start-time", path])
+
+    assert result.exit_code == 1
+    assert "no /timestamps" in result.output
