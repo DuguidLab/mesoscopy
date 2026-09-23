@@ -42,6 +42,7 @@ LAZY_SUBCOMMANDS = {
     "register": ("mesoscopy.register:register_cmd", "Register recordings to an anatomical template."),
     "report": ("mesoscopy.report:report_cmd", "Generate an HTML report for a mesoscopy processing step."),
     "sample": ("mesoscopy:sample", "Sample an image frame from an HDF5 file and export it as a PNG."),
+    "start-time": ("mesoscopy:start_time", "Print a recording's start time."),
 }
 
 
@@ -146,3 +147,18 @@ def sample(path, out_dir, index, crop=0, vmin=0, vmax=255, key="frames"):
     else:
         plt.imsave(outpath, d[index], vmin=vmin, vmax=vmax, cmap="jet")
     click.echo(f"Saved sample at {outpath}")
+
+
+@click.command("start-time")
+@click.argument("path", type=click.Path(exists=True, dir_okay=False))
+def start_time(path: str) -> None:
+    """Print a recording's start time.
+
+    This is the first /timestamps entry of an HDF5 file, or the session_start_time of an NWB file, as stored.
+    """  # noqa: DOC501
+    from mesoscopy import io
+
+    try:
+        click.echo(io.read_start_time(path))
+    except ValueError as err:
+        raise click.ClickException(str(err)) from err
