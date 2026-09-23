@@ -248,6 +248,30 @@ def write_timestamps_aligned(path: str, timestamps: npt.ArrayLike, attrs: dict[s
     return path
 
 
+def read_start_time(path: str) -> str:
+    """Read a recording's start time, as stored in the file.
+
+    For HDF5 files this is the first `/timestamps` entry; for NWB files it is `/session_start_time`.
+
+    Args:
+        path (str): Path to the HDF5 or NWB file.
+
+    Returns:
+        str: The start time.
+
+    Raises:
+        ValueError: If the file has no start time.
+    """
+    key = "/session_start_time" if path.endswith(".nwb") else "/timestamps"
+    with h5py.File(path, "r") as f:
+        if key not in f or f[key].size == 0:
+            msg = f"{path} has no {key} to read a start time from."
+            raise ValueError(msg)
+        dataset = f[key]
+        value = dataset[()] if dataset.ndim == 0 else dataset[0]
+    return value.decode("utf-8") if isinstance(value, bytes) else str(value)
+
+
 def read_points(path: str) -> dict[str, tuple[float, float]]:
     """Read a landmark points file.
 

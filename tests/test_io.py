@@ -3,6 +3,7 @@ from importlib import resources
 from uuid import uuid4
 
 import dask.array as da
+import h5py
 import imageio.v2 as iio
 import numpy as np
 import pytest
@@ -24,6 +25,43 @@ def test_h5_write(tmp_path):
     io.write_h5(path, data)
     assert io.read_h5(path)["dataset1"][0] == 1
     assert io.read_h5(path)["dataset2"][0][0] == 1
+
+
+def test_read_start_time_raw_h5(raw_h5):
+    with h5py.File(raw_h5, "r") as f:
+        expected = f["/timestamps"][0].decode("utf-8")
+
+    assert io.read_start_time(raw_h5) == expected
+
+
+def test_read_start_time_keeps_stored_string(tmp_path):
+    path = str(tmp_path / "rec_preprocessed.h5")
+    with h5py.File(path, "w") as f:
+        f.create_dataset("/timestamps", data=[b"2025-05-20T14:42:39.64227", b"2025-05-20T14:42:39.68227"], dtype="S25")
+
+    assert io.read_start_time(path) == "2025-05-20T14:42:39.64227"
+
+
+def test_read_start_time_nwb(nwbfile):
+    assert io.read_start_time(nwbfile).startswith("2024-01-01T14:00:00")
+
+
+def test_read_start_time_missing_timestamps_raises(tmp_path):
+    path = str(tmp_path / "rec.h5")
+    with h5py.File(path, "w") as f:
+        f.create_dataset("/F", data=np.zeros((2, 2, 2)))
+
+    with pytest.raises(ValueError, match="/timestamps"):
+        io.read_start_time(path)
+
+
+def test_read_start_time_empty_timestamps_raises(tmp_path):
+    path = str(tmp_path / "rec.h5")
+    with h5py.File(path, "w") as f:
+        f.create_dataset("/timestamps", shape=(0,), dtype="S25")
+
+    with pytest.raises(ValueError, match="/timestamps"):
+        io.read_start_time(path)
 
 
 def test_read_nwb(nwbfile):
