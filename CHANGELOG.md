@@ -4,6 +4,8 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 ## Unreleased
 
+## [0.13.2] - 2026-09-23
+
 ### Added
 
 - `report` accepts a `*_perievent.csv` written by `process peri-event` and writes `<stem>_report.html`, an interactive peri-event report: per-region traces as mean ± 95% CI or individual trials, filtered by `sdt_type` and optionally split by trial type, a clickable Allen CCF top view for choosing the region, and an all-regions grid. When the `*_metrics.csv` and `*_metrics-session.csv` from `process metrics` are stored together, the report also marks the onset, peak and offset of the mean trace with the per-trial mean ± SD or median and IQR of each time alongside (per-trial markers in the individual-trials view), plots per-trial metrics for the selected region, colours the atlas by a session metric and lists the session table. `-t/--trials` supplies `sdt_type` for peri-event files written without it ([#162](https://github.com/DuguidLab/mesoscopy/issues/162)).
