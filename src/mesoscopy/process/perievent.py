@@ -61,7 +61,7 @@ def event_times(trials: pd.DataFrame, event: str) -> tuple[npt.NDArray[np.float6
     Args:
         trials (pd.DataFrame): Trials table as written by `visiomode-analysis session`, with `start_time`,
             `cue_onset`, `stop_time`, `response_time` and `sdt_type` columns. Times are seconds from
-            behaviour start.
+            behaviour start, except `response_time`, which is seconds from `cue_onset`.
         event (str): One of `cue_onset`, `trial_start`, `response` or `reward`.
 
     Returns:
@@ -80,8 +80,9 @@ def event_times(trials: pd.DataFrame, event: str) -> tuple[npt.NDArray[np.float6
     elif event == "response":
         import pandas as pd
 
+        # `response_time` is measured from the cue.
         response_time = pd.to_numeric(trials["response_time"], errors="coerce").to_numpy(dtype=np.float64)
-        times = trials["start_time"].to_numpy(dtype=np.float64) + response_time
+        times = trials["cue_onset"].to_numpy(dtype=np.float64) + response_time
         keep = ~np.isnan(response_time) & (response_time >= 0) & ~np.isnan(times)
     elif event == "reward":
         times = trials["stop_time"].to_numpy(dtype=np.float64)
