@@ -2810,3 +2810,373 @@ def test_metrics_cmd_empty_input(metrics_perievent_csv, output_dir, tmp_path):
     assert str(empty) in result.output
     assert "no rows" in result.output
     assert not list(pathlib.Path(output_dir).glob("*_metrics*.csv"))
+
+
+# ---------------------------------------------------------------------------
+# reliability metrics
+# ---------------------------------------------------------------------------
+
+GONOGO_TYPES = ["hit"] * 12 + ["miss"] * 6 + ["false_alarm"] * 12 + ["correct_rejection"] * 6
+GONOGO_RT = [0.4, 0.6, 0.8, 1.0, 1.2, 1.4] * 2 + [np.nan] * 6 + [0.5, 0.7, 0.9, 1.1, 1.3, 1.5] * 2 + [np.nan] * 6
+
+
+def _gonogo_info(event="cue_onset"):
+    """One row per trial of a go/no-go session with a 5 s ITI; `response_time` is seconds from the cue."""
+    n_trials = len(GONOGO_TYPES)
+    cue = 10.0 * np.arange(n_trials) + 5.0
+    response_time = np.asarray(GONOGO_RT)
+    event_time = {"cue_onset": cue, "trial_start": cue - 5.0, "response": cue + response_time}[event]
+    keep = ~np.isnan(event_time)
+    return pd.DataFrame(
+        {
+            "trial_index": np.arange(n_trials),
+            "event_time": event_time,
+            "start_time": cue - 5.0,
+            "cue_onset": cue,
+            "stop_time": np.where(np.isnan(response_time), cue + 2.0, cue + response_time),
+            "response_time": response_time,
+            "sdt_type": GONOGO_TYPES,
+            "protocol": "gonogo",
+        }
+    )[keep].reset_index(drop=True)
+
+
+def _gonogo_traces(n_trials, noise=0.1, seed=0):
+    """A shared response rising after the event, plus independent Gaussian noise per trial."""
+    rng = np.random.default_rng(seed)
+    shape = np.interp(METRICS_GRID, [0.0, 0.5, 1.5], [0.0, 1.0, 0.0])
+    return shape + noise * rng.standard_normal((n_trials, len(METRICS_GRID)))
+
+
+def _gonogo_perievent(event="cue_onset"):
+    """Long-format peri-event table of the go/no-go session for two regions, the second pure noise."""
+    info = _gonogo_info(event)
+    traces = _gonogo_traces(len(info))
+    noise = np.random.default_rng(1).standard_normal(traces.shape)
+    frames = []
+    for i, row in info.iterrows():
+        for region, values in zip(PERIEVENT_REGIONS, (traces[i], noise[i]), strict=True):
+            frames.append(
+                pd.DataFrame(
+                    {
+                        "trial_index": row["trial_index"],
+                        "event_time": row["event_time"],
+                        "time": METRICS_GRID,
+                        "region": region,
+                        "F": values,
+                    }
+                )
+            )
+    table = pd.concat(frames, ignore_index=True)
+    return table.merge(info.drop(columns="event_time"), on="trial_index")
+
+
+class TestInferEvent:
+    @pytest.mark.parametrize("event", ["cue_onset", "trial_start", "response"])
+    def test_matches_event(self, event):
+        assert pm.infer_event(_gonogo_info(event)) == event
+
+    def test_unknown(self):
+        info = _gonogo_info()
+        info["event_time"] += 0.3
+        assert pm.infer_event(info) is None
+
+    def test_missing_columns(self):
+        assert pm.infer_event(_gonogo_info().drop(columns=["cue_onset", "start_time", "stop_time"])) is None
+
+
+class TestReliabilityEpochs:
+    def test_cue_masked_at_response(self):
+        start, end, cue, keep = pm.reliability_epochs(_gonogo_info(), "cue_onset", (0.0, 3.0))
+        np.testing.assert_allclose(start, 0.0)
+        np.testing.assert_allclose(cue, 0.0)
+        np.testing.assert_allclose(end[:12], GONOGO_RT[:12])
+        # Trials without a response end at the median of the others.
+        np.testing.assert_allclose(end[12:18], np.nanmedian(GONOGO_RT))
+        assert keep.all()
+
+    def test_trial_start_offsets_by_iti(self):
+        _, end, cue, _ = pm.reliability_epochs(_gonogo_info("trial_start"), "trial_start", (0.0, 10.0))
+        np.testing.assert_allclose(cue, 5.0)
+        np.testing.assert_allclose(end[:12], 5.0 + np.asarray(GONOGO_RT[:12]))
+
+    def test_capped_at_response_window(self):
+        _, end, _, _ = pm.reliability_epochs(_gonogo_info(), "cue_onset", (0.0, 0.7))
+        assert end.max() == pytest.approx(0.7)
+        assert end.max() > 0.7
+
+    def test_unmasked_runs_over_window(self):
+        _, end, _, _ = pm.reliability_epochs(_gonogo_info(), "cue_onset", (0.0, 3.0), mask_response=False)
+        assert (end > 3.0).all()
+        assert (end < 3.0 + 1e-9).all()
+
+    def test_min_rt_drops_fast_trials(self):
+        _, _, _, keep = pm.reliability_epochs(_gonogo_info(), "cue_onset", (0.0, 3.0), min_rt=0.65)
+        rt = np.asarray(GONOGO_RT)
+        np.testing.assert_array_equal(keep, ~(rt < 0.65))
+
+    def test_lever_runs_from_cue(self):
+        info = _gonogo_info("response")
+        start, end, cue, keep = pm.reliability_epochs(info, "response", (0.0, 3.0))
+        np.testing.assert_allclose(start, -info["response_time"])
+        np.testing.assert_allclose(cue, -info["response_time"])
+        np.testing.assert_allclose(end, 0.0)
+        assert keep.all()
+
+    def test_reward_raises(self):
+        with pytest.raises(ValueError, match="not defined"):
+            pm.reliability_epochs(_gonogo_info(), "reward", (0.0, 3.0))
+
+
+class TestEpochTraces:
+    def test_masks_outside_epoch(self):
+        t = np.array([-0.5, 0.0, 0.5, 1.0])
+        epochs = pm.epoch_traces(np.ones((2, 4)), t, np.array([0.0, -0.5]), np.array([1.0, np.nan]))
+        np.testing.assert_array_equal(epochs[0], [np.nan, 1.0, 1.0, np.nan])
+        assert np.isnan(epochs[1]).all()
+
+
+class TestAnchoredWindow:
+    def test_interpolates_relative_to_anchor(self):
+        t = np.arange(-2.0, 1.01, 0.5)
+        window = pm.anchored_window(t[None, :].repeat(2, axis=0), t, np.array([0.0, -0.75]), -1.0, 0.0)
+        np.testing.assert_allclose(window[0], [-1.0, -0.5])
+        np.testing.assert_allclose(window[1], [-1.75, -1.25])
+
+    def test_outside_window_is_nan(self):
+        t = np.arange(-2.0, 1.01, 0.5)
+        window = pm.anchored_window(np.ones((2, len(t))), t, np.array([-1.5, np.nan]), -1.0, 0.0)
+        assert np.isnan(window).all()
+
+
+class TestWarpEpochs:
+    def test_linear_epochs_share_grid(self):
+        t = METRICS_GRID
+        start, end = np.array([0.0, 0.0]), np.array([1.0, 2.0])
+        epochs = pm.epoch_traces(np.stack([t, t / 2]), t, start, end)
+        warped = pm.warp_epochs(epochs, t, start, end, 11)
+        # Both rise from 0 towards 1 over their own epoch; the last grid point is past the last sample.
+        np.testing.assert_allclose(warped[:, :10], np.linspace(0, 1, 11)[None, :10].repeat(2, axis=0), atol=1e-9)
+        assert np.isnan(warped[:, -1]).all()
+
+    def test_too_short_is_nan(self):
+        t = METRICS_GRID
+        epochs = pm.epoch_traces(np.ones((1, len(t))), t, np.array([0.0]), np.array([0.01]))
+        assert np.isnan(pm.warp_epochs(epochs, t, np.array([0.0]), np.array([0.01]), 5)).all()
+
+
+class TestReliabilityMeasures:
+    def test_identical_trials(self):
+        epochs = _gonogo_traces(20, noise=0.0)
+        assert pm.epoch_correlation(epochs) == pytest.approx(1.0)
+        assert pm.signal_fraction(epochs) == pytest.approx(1.0)
+
+    def test_pure_noise(self):
+        epochs = np.random.default_rng(0).standard_normal((60, 100))
+        assert abs(pm.epoch_correlation(epochs)) < 0.02
+        assert pm.signal_fraction(epochs) == pytest.approx(1 / 60, abs=0.01)
+
+    def test_epoch_correlation_uses_shared_samples(self):
+        a = np.array([1.0, 2.0, 3.0, 4.0, np.nan])
+        b = np.array([np.nan, 4.0, 6.0, 8.0, 1.0])
+        assert pm.epoch_correlation(np.stack([a, b])) == pytest.approx(1.0)
+        assert np.isnan(pm.epoch_correlation(np.stack([a, b]), min_samples=4))
+
+    def test_response_fraction(self):
+        baseline = np.tile([-0.1, 0.1, -0.1, 0.1], (4, 1))  # SD about 0.115
+        epochs = np.array([[1.0, 1.0], [0.1, 0.1], [0.5, np.nan], [np.nan, np.nan]])
+        assert pm.response_fraction(epochs, baseline, 2.0) == pytest.approx(2 / 3)
+
+    def test_variance_quench(self):
+        rng = np.random.default_rng(0)
+        baseline = rng.standard_normal((200, 25))
+        epochs = 0.5 * rng.standard_normal((200, 25))
+        assert pm.variance_quench(epochs, baseline) == pytest.approx(0.25, rel=0.1)
+        assert np.isnan(pm.variance_quench(epochs, np.zeros((200, 25))))
+
+
+class TestReliabilityGroups:
+    def test_groups(self):
+        groups = pm.reliability_groups(_gonogo_info())
+        assert list(groups) == [
+            "",
+            "sdt-hit",
+            "sdt-miss",
+            "sdt-false_alarm",
+            "sdt-correct_rejection",
+            "stim-go",
+            "stim-nogo",
+        ]
+        assert groups[""].sum() == 36
+        assert groups["sdt-hit"].sum() == 12
+        assert groups["stim-go"].sum() == 18
+        assert groups["stim-nogo"].sum() == 18
+
+
+class TestReliabilityMetrics:
+    def test_columns_and_min_trials(self):
+        info = _gonogo_info()
+        summary = pm.reliability_metrics(
+            _gonogo_traces(len(info)), METRICS_GRID, info, "cue_onset", (-1.0, 0.0), (0.0, 3.0)
+        )
+        groups = ["", "_sdt-hit", "_sdt-miss", "_sdt-false_alarm", "_sdt-correct_rejection", "_stim-go", "_stim-nogo"]
+        assert list(summary) == [f"{metric}{group}" for group in groups for metric in pm.RELIABILITY_METRICS]
+        assert summary["reliability_n"] == 36
+        assert summary["reliability_n_sdt-miss"] == 6
+        # Six misses are below the default 10-trial minimum.
+        assert np.isnan(summary["epoch_correlation_sdt-miss"])
+        assert summary["epoch_correlation"] > 0.5
+        assert summary["epoch_correlation_sdt-hit"] > 0.5
+        assert 0 < summary["signal_fraction"] <= 1
+
+    def test_masking_changes_epochs(self):
+        info = _gonogo_info()
+        traces = _gonogo_traces(len(info))
+        args = (traces, METRICS_GRID, info, "cue_onset", (-1.0, 0.0), (0.0, 3.0))
+        masked = pm.reliability_metrics(*args)
+        unmasked = pm.reliability_metrics(*args, pm.ReliabilityOptions(mask_response=False))
+        assert masked["epoch_correlation"] != unmasked["epoch_correlation"]
+        # Unmasked over the whole response window, epoch correlation is the trace correlation.
+        assert unmasked["epoch_correlation"] == pytest.approx(pm.trace_correlation(traces, METRICS_GRID, 0.0, 3.0))
+
+    def test_min_rt_excludes_trials(self):
+        info = _gonogo_info()
+        options = pm.ReliabilityOptions(min_rt=0.65)
+        summary = pm.reliability_metrics(
+            _gonogo_traces(len(info)), METRICS_GRID, info, "cue_onset", (-1.0, 0.0), (0.0, 3.0), options
+        )
+        assert summary["reliability_n_sdt-hit"] == 8
+        # Two false alarms are also faster than 0.65 s.
+        assert summary["reliability_n"] == 36 - 6
+
+    def test_time_warp(self):
+        info = _gonogo_info()
+        summary = pm.reliability_metrics(
+            _gonogo_traces(len(info)),
+            METRICS_GRID,
+            info,
+            "cue_onset",
+            (-1.0, 0.0),
+            (0.0, 3.0),
+            pm.ReliabilityOptions(time_warp=True),
+        )
+        assert np.isfinite(summary["epoch_correlation"])
+
+    def test_lever_baseline_before_cue(self):
+        info = _gonogo_info("response")
+        traces = _gonogo_traces(len(info))
+        summary = pm.reliability_metrics(
+            traces,
+            METRICS_GRID,
+            info,
+            "response",
+            (-1.0, 0.0),
+            (0.0, 3.0),
+            pm.ReliabilityOptions(cue_baseline=(-0.5, 0.0)),
+        )
+        assert summary["reliability_n"] == 24
+        assert np.isfinite(summary["variance_quench"])
+        # With a baseline reaching before the window, every trial's baseline is NaN.
+        uncovered = pm.reliability_metrics(
+            traces,
+            METRICS_GRID,
+            info,
+            "response",
+            (-1.0, 0.0),
+            (0.0, 3.0),
+            pm.ReliabilityOptions(cue_baseline=(-2.0, 0.0)),
+        )
+        assert np.isnan(uncovered["variance_quench"])
+        assert np.isnan(uncovered["response_fraction"])
+        assert uncovered["epoch_correlation"] == pytest.approx(summary["epoch_correlation"])
+
+
+class TestMetricsTablesReliability:
+    def test_gonogo_session(self):
+        _, per_session = pm.metrics_tables(_gonogo_perievent())
+        assert per_session["region"].tolist() == PERIEVENT_REGIONS
+        assert "epoch_correlation_stim-nogo" in per_session.columns
+        signal, noise = per_session["epoch_correlation"]
+        assert signal > 0.5
+        assert abs(noise) < 0.1
+
+    def test_old_columns_unchanged(self):
+        perievent = _gonogo_perievent()
+        _, with_reliability = pm.metrics_tables(perievent)
+        with pytest.warns(UserWarning, match="Skipping reliability"):
+            _, without = pm.metrics_tables(perievent.drop(columns="sdt_type"))
+        pd.testing.assert_frame_equal(with_reliability[without.columns], without)
+
+    def test_lever_aligned(self):
+        _, per_session = pm.metrics_tables(_gonogo_perievent("response"), baseline=(-1.0, 0.0))
+        assert per_session["reliability_n"].tolist() == [24, 24]
+        assert per_session["reliability_n_sdt-miss"].tolist() == [0, 0]
+
+    def test_lever_baseline_outside_window_warns(self):
+        with pytest.warns(UserWarning, match="pre-cue baseline outside the window"):
+            pm.metrics_tables(_gonogo_perievent("response"), reliability=pm.ReliabilityOptions(cue_baseline=(-2, 0)))
+
+    def test_trials_supply_columns(self):
+        perievent = _gonogo_perievent()
+        trials = _gonogo_info().drop(columns=["trial_index", "event_time"])
+        bare = perievent[["trial_index", "event_time", "time", "region", "F"]]
+        _, joined = pm.metrics_tables(bare, trials=trials)
+        _, carried = pm.metrics_tables(perievent)
+        pd.testing.assert_frame_equal(joined, carried)
+
+    @pytest.mark.parametrize(
+        ("change", "match"),
+        [
+            (lambda table: table.drop(columns="response_time"), "no response_time column"),
+            (lambda table: table.assign(protocol="2afc"), "only go/no-go"),
+            (lambda table: table.assign(event_time=table["event_time"] + 0.3), "aligned event is unknown"),
+        ],
+    )
+    def test_skipped(self, change, match):
+        with pytest.warns(UserWarning, match=match):
+            _, per_session = pm.metrics_tables(change(_gonogo_perievent()))
+        assert "epoch_correlation" not in per_session.columns
+
+    def test_reward_skipped(self):
+        with pytest.warns(UserWarning, match="not defined for reward"):
+            _, per_session = pm.metrics_tables(_gonogo_perievent(), event="reward")
+        assert "epoch_correlation" not in per_session.columns
+
+
+def test_metrics_cmd_reliability(output_dir, tmp_path):
+    path = tmp_path / "ses-01_regions_event-cueonset_perievent.csv"
+    _gonogo_perievent().to_csv(path, index=False)
+    result = CliRunner().invoke(
+        mesoscopy.cli,
+        args=f"process metrics {path} -o {output_dir} --no-mask-response --min-rt 0.3 --response-sd 1"
+        " --time-warp --cue-baseline -0.5 0",
+    )
+    assert result.exit_code == 0, result.output
+    session = pd.read_csv(pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_metrics-session.csv")
+    expected = pm.metrics_tables(
+        pd.read_csv(path),
+        reliability=pm.ReliabilityOptions(
+            mask_response=False,
+            min_rt=0.3,
+            response_sd=1.0,
+            time_warp=True,
+            cue_baseline=(-0.5, 0.0),
+        ),
+    )[1]
+    pd.testing.assert_frame_equal(session, expected, check_dtype=False)
+    assert session["reliability_n"].tolist() == [36, 36]
+
+
+def test_metrics_cmd_reliability_skipped_warns(metrics_perievent_csv, output_dir):
+    result = CliRunner().invoke(mesoscopy.cli, args=f"process metrics {metrics_perievent_csv} -o {output_dir}")
+    assert result.exit_code == 0, result.output
+    assert "Warning: Skipping reliability metrics: no cue_onset, response_time, sdt_type column(s)" in result.output
+
+
+def test_perievent_cmd_reliability_options_rejected(perievent_regions_csv, perievent_trials_csv, output_dir):
+    result = CliRunner().invoke(
+        mesoscopy.cli,
+        args=f"process peri-event {perievent_regions_csv} {perievent_trials_csv} -o {output_dir} --min-rt -1",
+    )
+    assert result.exit_code == 2
+    assert "--min-rt" in result.output

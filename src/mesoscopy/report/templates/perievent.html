@@ -153,7 +153,13 @@
         <div id="pev-trial-metrics" style="height: 380px"></div>
     </div>
     <div class="col-12 mt-3">
-        <div class="fw-semibold mb-1">Session metrics (all trials)</div>
+        <div class="d-flex align-items-center gap-2 mb-1">
+            <span class="fw-semibold">Session metrics (all trials)</span>
+            <span id="pev-session-group-wrap" class="d-none align-items-center gap-2">
+                <span class="text-secondary">reliability for</span>
+                <select id="pev-session-group" class="form-select form-select-sm w-auto"></select>
+            </span>
+        </div>
         <div class="table-responsive" style="max-height: 420px">
             <table class="table table-sm table-hover pev-metrics" id="pev-session-table"></table>
         </div>
@@ -182,6 +188,9 @@
     const hasMetrics = !!DATA.session_metrics;
     const MARKERS = {onset_time: {symbol: 'triangle-right', label: 'onset'}, peak_time: {symbol: 'diamond', label: 'peak'}, offset_time: {symbol: 'triangle-left', label: 'offset'}};
     const SESSION_COLS = ['region', 'n_trials', 'amplitude_mean', 'amplitude_sd', 'peak_time_mean', 'onset_time_mean', 'offset_time_mean', 'auc_mean', 'duration_mean', 'trace_correlation'];
+    const RELIABILITY_COLS = ['epoch_correlation', 'response_fraction', 'variance_quench', 'signal_fraction', 'reliability_n'];
+    const RELIABILITY_GROUPS = [['', 'all trials'], ['sdt-hit', 'hit'], ['sdt-miss', 'miss'], ['sdt-false_alarm', 'false_alarm'], ['sdt-correct_rejection', 'correct_rejection'], ['stim-go', 'go stimulus'], ['stim-nogo', 'no-go stimulus']];
+    const hasReliability = hasMetrics && 'epoch_correlation' in DATA.session_metrics[0];
     const ATLAS_METRICS = ['amplitude_mean', 'peak_time_mean', 'onset_time_mean', 'offset_time_mean', 'auc_mean', 'duration_mean', 'amplitude_cv', 'trace_correlation'];
 
     const state = {types: new Set(TYPES), view: 'mean', split: false, markers: hasMetrics, marks: new Set(['onset_time', 'peak_time']), stat: 'mean', region: DATA.regions[0]};
@@ -388,10 +397,13 @@
 
     // ---------- metrics section ----------
     function renderSessionTable() {
-        const cols = SESSION_COLS.filter(c => c in DATA.session_metrics[0]);
+        // [column, header] pairs; reliability columns follow the selected trial group.
+        const group = hasReliability ? $('pev-session-group').value : '';
+        const cols = SESSION_COLS.filter(c => c in DATA.session_metrics[0]).map(c => [c, c]);
+        if (hasReliability) cols.push(...RELIABILITY_COLS.map(c => [group ? `${c}_${group}` : c, c]));
         const fmt = v => typeof v === 'number' ? (Number.isInteger(v) ? v : v.toFixed(3)) : (v ?? '');
-        $('pev-session-table').innerHTML = `<thead><tr>${cols.map(c => `<th>${c}</th>`).join('')}</tr></thead><tbody>` +
-            DATA.session_metrics.map(row => `<tr data-region="${row.region}" class="${row.region === state.region ? 'selected' : ''}">${cols.map(c => `<td>${fmt(row[c])}</td>`).join('')}</tr>`).join('') + '</tbody>';
+        $('pev-session-table').innerHTML = `<thead><tr>${cols.map(([, h]) => `<th>${h}</th>`).join('')}</tr></thead><tbody>` +
+            DATA.session_metrics.map(row => `<tr data-region="${row.region}" class="${row.region === state.region ? 'selected' : ''}">${cols.map(([c]) => `<td>${fmt(row[c])}</td>`).join('')}</tr>`).join('') + '</tbody>';
         $('pev-session-table').querySelectorAll('tbody tr').forEach(tr => tr.onclick = () => selectRegion(tr.dataset.region));
     }
     function renderMetricAtlas() {
@@ -423,6 +435,11 @@
         buildAtlas($('pev-atlas-metric'));
         $('pev-metric').innerHTML = ATLAS_METRICS.filter(m => m in DATA.session_metrics[0]).map(m => `<option value="${m}">${m}</option>`).join('');
         $('pev-metric').onchange = renderMetricAtlas;
+        if (hasReliability) {
+            $('pev-session-group-wrap').classList.replace('d-none', 'd-inline-flex');
+            $('pev-session-group').innerHTML = RELIABILITY_GROUPS.map(([g, label]) => `<option value="${g}">${label}</option>`).join('');
+            $('pev-session-group').onchange = renderSessionTable;
+        }
     }
 
     // ---------- render ----------

@@ -33,5 +33,6 @@ panel in the grid.
 When the `*_metrics.csv` and `*_metrics-session.csv` from `process metrics` sit next to the input, the
 report adds a metrics section: onset, peak and offset markers on the traces with the across-trial spread of
 each, per-trial box plots for the selected region, the atlas coloured by a session metric, and the session
-table. Peri-event files written without the trials columns have no trial types; pass the trials CSV with
+table. For go/no-go sessions the table also shows the reliability metrics, with a selector for the trial group
+they are taken over. Peri-event files written without the trials columns have no trial types; pass the trials CSV with
 `-t/--trials` to recover them.

@@ -23,8 +23,11 @@
 
 from __future__ import annotations
 
+import dataclasses
+import functools
 import os
 import typing
+import warnings
 from pathlib import Path
 
 import click
@@ -490,6 +493,74 @@ def _metrics_options(command: Callable[..., None]) -> Callable[..., None]:
     return command
 
 
+def _reliability_options(command: Callable[..., None]) -> Callable[..., None]:
+    """Reliability metric options, passed to the callback as one `reliability` argument.
+
+    Args:
+        command (Callable[..., None]): Command callback to decorate; takes a `reliability` keyword argument.
+
+    Returns:
+        Callable[..., None]: The callback with the options attached.
+    """
+    names = [field.name for field in dataclasses.fields(pm.ReliabilityOptions) if field.name != "min_trials"]
+
+    @functools.wraps(command)
+    def wrapper(*args: typing.Any, **kwargs: typing.Any) -> None:
+        kwargs["reliability"] = pm.ReliabilityOptions(**{name: kwargs.pop(name) for name in names})
+        command(*args, **kwargs)
+
+    options = [
+        click.option(
+            "--mask-response/--no-mask-response",
+            default=True,
+            show_default=True,
+            help="End cue-aligned reliability epochs at each trial's response; trials without one end at the"
+            " median response time.",
+        ),
+        click.option(
+            "--min-rt",
+            type=click.FloatRange(min=0),
+            default=0.2,
+            show_default=True,
+            help="Drop trials with a response time below this, in seconds, from the reliability metrics.",
+        ),
+        click.option(
+            "--response-sd",
+            type=float,
+            default=2.0,
+            show_default=True,
+            help="Baseline SD multiple a trial's mean epoch response must exceed for response_fraction.",
+        ),
+        click.option(
+            "--time-warp",
+            is_flag=True,
+            default=False,
+            help="Resample each reliability epoch onto a common 0-1 grid.",
+        ),
+        click.option(
+            "--cue-baseline",
+            type=(float, float),
+            default=(-1.0, 0.0),
+            show_default=True,
+            help="Baseline window START END relative to each trial's cue, for lever-aligned reliability metrics.",
+        ),
+    ]
+    for option in reversed(options):
+        wrapper = option(wrapper)
+    return wrapper
+
+
+def _echo_warnings(caught: list[warnings.WarningMessage]) -> None:
+    """Echo the user warnings recorded while computing metrics.
+
+    Args:
+        caught (list[warnings.WarningMessage]): Warnings recorded by `warnings.catch_warnings(record=True)`.
+    """
+    for warning in caught:
+        if issubclass(warning.category, UserWarning):
+            click.echo(f"Warning: {warning.message}")
+
+
 def _validate_metrics_options(smoothing: int, extrapolate_range: tuple[float, float]) -> None:
     """Reject metric options that `trial_metrics` would refuse.
 
@@ -589,6 +660,7 @@ def _write_metrics(trial_table: pd.DataFrame, session_table: pd.DataFrame, out_d
     help="Also write the response metrics of `process metrics`, joined with TRIALS_PATH. CSV input only.",
 )
 @_metrics_options
+@_reliability_options
 def perievent_cmd(
     recording_path: str,
     trials_path: str,
@@ -608,6 +680,7 @@ def perievent_cmd(
     extrapolate_range: tuple[float, float],
     smoothing: int,
     decay_fraction: float,
+    reliability: pm.ReliabilityOptions,
 ) -> None:
     """Extract per-trial windows around a behavioural event from a behaviour-aligned recording.
 
@@ -660,7 +733,8 @@ def perievent_cmd(
     if with_metrics and n_kept == 0:
         click.echo("No trials kept, skipping metrics.")
     elif with_metrics:
-        with timer.Timer(message="Extracting metrics"):
+        with timer.Timer(message="Extracting metrics"), warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", UserWarning)
             tables = pm.metrics_tables(
                 windows,
                 baseline=baseline,
@@ -672,7 +746,10 @@ def perievent_cmd(
                 extrapolate_range=extrapolate_range,
                 decay_fraction=decay_fraction,
                 smoothing=smoothing,
+                event=event,
+                reliability=reliability,
             )
+        _echo_warnings(caught)
         _write_metrics(*tables, out_dir, Path(outpath).stem.removesuffix("_perievent"))
 
 
@@ -839,6 +916,7 @@ def _perievent_csv(
     help="Trials CSV to join onto the per-trial table by trial_index, for peri-event files without trials columns.",
 )
 @_metrics_options
+@_reliability_options
 def metrics_cmd(
     path: str,
     out_dir: str,
@@ -852,13 +930,16 @@ def metrics_cmd(
     extrapolate_range: tuple[float, float],
     smoothing: int,
     decay_fraction: float,
+    reliability: pm.ReliabilityOptions,
 ) -> None:
     """Extract per-trial response metrics and per-session variability from peri-event traces.
 
     PATH is the long-format *_perievent.csv written by `process peri-event`. Writes <stem>_metrics.csv with onset
     time, peak time, amplitude, area under the curve, decay time, offset time and duration per trial per region,
     and <stem>_metrics-session.csv with the mean, SD and CV of each across trials per region, plus the mean
-    pairwise trial-trace correlation.
+    pairwise trial-trace correlation. For go/no-go sessions aligned to the cue, trial start or lever push, the
+    session table also has trial-to-trial reliability metrics over the cue-to-lever epoch, for all trials, per
+    sdt_type and per go/no-go stimulus.
     """  # noqa: DOC501
     import pandas as pd
 
@@ -878,7 +959,8 @@ def metrics_cmd(
         click.echo(f"Loading trials from {trials_path}...")
         trials = pd.read_csv(trials_path)
 
-    with timer.Timer(message="Extracting metrics"):
+    with timer.Timer(message="Extracting metrics"), warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", UserWarning)
         try:
             tables = pm.metrics_tables(
                 perievent,
@@ -892,9 +974,11 @@ def metrics_cmd(
                 extrapolate_range=extrapolate_range,
                 decay_fraction=decay_fraction,
                 smoothing=smoothing,
+                reliability=reliability,
             )
         except ValueError as error:
             msg = f"{path}: {error} Expected the columns written by `process peri-event`."
             raise click.ClickException(msg) from error
+    _echo_warnings(caught)
 
     _write_metrics(*tables, out_dir, Path(path).stem.removesuffix("_perievent"))

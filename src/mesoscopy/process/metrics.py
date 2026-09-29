@@ -23,11 +23,14 @@
 
 from __future__ import annotations
 
+import dataclasses
 import typing
 import warnings
 
 import numpy as np
 import numpy.typing as npt
+
+from mesoscopy.process import perievent as pev
 
 if typing.TYPE_CHECKING:
     import pandas as pd
@@ -41,6 +44,45 @@ PERIEVENT_COLUMNS = frozenset({"trial_index", "event_time", "time", "region", "F
 # Onset methods: `sd` thresholds at a multiple of the baseline SD, `peak` at a fraction of the amplitude, and
 # `extrapolate` fits a line to the rise and takes where it crosses the baseline.
 ONSET_METHODS = ("sd", "peak", "extrapolate")
+
+# Reliability metrics per trial group, in output column order.
+RELIABILITY_METRICS = (
+    "epoch_correlation",
+    "response_fraction",
+    "variance_quench",
+    "signal_fraction",
+    "reliability_n",
+)
+
+# Trial types of a go/no-go session, split by the stimulus shown.
+GO_TYPES = ("hit", "miss")
+NOGO_TYPES = ("false_alarm", "correct_rejection")
+
+# Trials columns the reliability metrics need.
+RELIABILITY_COLUMNS = frozenset({"cue_onset", "response_time", "sdt_type"})
+
+
+@dataclasses.dataclass(frozen=True)
+class ReliabilityOptions:
+    """Options for the trial-to-trial reliability metrics.
+
+    Attributes:
+        mask_response (bool): Mask cue-aligned epochs from each trial's response time. Defaults to True.
+        min_rt (float): Trials with a response time below this, in seconds, are dropped. Defaults to 0.2.
+        response_sd (float): Baseline SD multiple a trial's mean epoch response must exceed to count as a
+            response. Defaults to 2.0.
+        time_warp (bool): Resample each epoch onto a common 0-1 grid. Defaults to False.
+        cue_baseline (tuple[float, float]): Baseline window `[start, end)` relative to each trial's cue, for
+            lever-aligned windows. Defaults to `(-1.0, 0.0)`.
+        min_trials (int): Groups with fewer trials get NaN. Defaults to 10.
+    """
+
+    mask_response: bool = True
+    min_rt: float = 0.2
+    response_sd: float = 2.0
+    time_warp: bool = False
+    cue_baseline: tuple[float, float] = (-1.0, 0.0)
+    min_trials: int = 10
 
 
 def window_mask(
@@ -499,8 +541,14 @@ def metrics_tables(
     extrapolate_range: tuple[float, float] = (0.2, 0.8),
     decay_fraction: float = 0.5,
     smoothing: int = 1,
+    event: str | None = None,
+    reliability: ReliabilityOptions | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Per-trial and per-session metric tables from a long-format peri-event table.
+
+    For go/no-go sessions, the per-session table also gets the `reliability_metrics` columns. They are skipped
+    with a warning when the trials columns they need are missing, the session is not go/no-go, or the windows
+    are reward-aligned.
 
     Args:
         perievent (pd.DataFrame): Peri-event table with `trial_index`, `event_time`, `time`, `region` and `F`
@@ -520,11 +568,16 @@ def metrics_tables(
         extrapolate_range (tuple[float, float], optional): See `trial_metrics`. Defaults to `(0.2, 0.8)`.
         decay_fraction (float, optional): See `trial_metrics`. Defaults to 0.5.
         smoothing (int, optional): See `trial_metrics`. Defaults to 1.
+        event (str | None, optional): Event the windows are aligned to, one of `perievent.EVENTS`. Defaults to
+            the event matching `event_time`, via `infer_event`.
+        reliability (ReliabilityOptions | None, optional): Reliability metric options. Defaults to
+            `ReliabilityOptions()`.
 
     Returns:
         tuple[pd.DataFrame, pd.DataFrame]: The per-trial table, one row per trial per region with `trial_index`,
         `event_time`, `region`, the `trial_metrics` columns and then the per-trial columns of `perievent`, and the
-        per-session table, one row per region with `region` and the `session_metrics` columns.
+        per-session table, one row per region with `region`, the `session_metrics` columns and the
+        `reliability_metrics` columns.
 
     Raises:
         ValueError: If `perievent` lacks any of `PERIEVENT_COLUMNS`, has no rows, or has a column other than `time`,
@@ -556,6 +609,24 @@ def metrics_tables(
         raise ValueError(msg)
     events = trial_info[["trial_index", "event_time"]]
 
+    info = trial_info
+    if trials is not None:
+        info = join_trials(trial_info, trials.drop(columns=extra_columns, errors="ignore"))
+    reliability = reliability if reliability is not None else ReliabilityOptions()
+    event = event if event is not None else infer_event(info)
+    skip = _reliability_skip_reason(info, event)
+    if skip:
+        warnings.warn(f"Skipping reliability metrics: {skip}", stacklevel=2)
+    elif event == "response":
+        cue = info["cue_onset"].to_numpy(dtype=np.float64) - info["event_time"].to_numpy(dtype=np.float64)
+        uncovered = int((cue + reliability.cue_baseline[0] < time[0] - _TIME_TOLERANCE_S).sum())
+        if uncovered:
+            warnings.warn(
+                f"{uncovered} of {len(info)} trials have a pre-cue baseline outside the window; their response"
+                " fraction and variance quench baselines are NaN. Extract windows with a longer --pre.",
+                stacklevel=2,
+            )
+
     per_trial = []
     per_session = []
     for region in perievent["region"].unique():
@@ -581,7 +652,10 @@ def metrics_tables(
         metrics.insert(0, "region", region)
         per_trial.append(pd.concat([events, metrics], axis=1))
         correlation = trace_correlation(traces, time, *response)
-        per_session.append({"region": region, **session_metrics(metrics, correlation)})
+        summary = {"region": region, **session_metrics(metrics, correlation)}
+        if not skip:
+            summary |= reliability_metrics(traces, time, info, str(event), baseline, response, reliability)
+        per_session.append(summary)
 
     trial_table = pd.concat(per_trial, ignore_index=True)
     if extra_columns:
@@ -605,3 +679,353 @@ def join_trials(table: pd.DataFrame, trials: pd.DataFrame) -> pd.DataFrame:
     trials = trials.loc[:, ~trials.columns.str.startswith("Unnamed")].reset_index(drop=True)
     trials.index.name = "trial_index"
     return table.merge(trials.reset_index(), on="trial_index", how="left", suffixes=("", "_trial"))
+
+
+# Tolerance when comparing times, in seconds.
+_TIME_TOLERANCE_S = 1e-6
+
+
+def infer_event(trial_info: pd.DataFrame) -> str | None:
+    """Event the peri-event windows are aligned to, from which trials column `event_time` matches.
+
+    Args:
+        trial_info (pd.DataFrame): One row per trial with `event_time` and trials columns.
+
+    Returns:
+        str | None: One of `perievent.EVENTS`, or None when no trials column matches.
+    """
+    event_time = trial_info["event_time"].to_numpy(dtype=np.float64)
+    for event in pev.EVENTS:
+        try:
+            times, index = pev.event_times(trial_info, event)
+        except KeyError:
+            continue
+        if len(index) == len(trial_info) and np.allclose(times, event_time, rtol=0, atol=_TIME_TOLERANCE_S):
+            return event
+    return None
+
+
+def _reliability_skip_reason(trial_info: pd.DataFrame, event: str | None) -> str | None:
+    """Why the reliability metrics cannot be taken.
+
+    Returns:
+        str | None: The reason, or None when they can be taken.
+    """
+    missing = RELIABILITY_COLUMNS - set(trial_info.columns)
+    if missing:
+        return f"no {', '.join(sorted(missing))} column(s); pass the trials CSV."
+    if "protocol" in trial_info.columns and not trial_info["protocol"].eq("gonogo").all():
+        return "only go/no-go sessions are supported."
+    if event is None:
+        return "event_time matches no trials column, so the aligned event is unknown."
+    if event not in {"cue_onset", "trial_start", "response"}:
+        return f"not defined for {event}-aligned windows."
+    return None
+
+
+def reliability_epochs(
+    trial_info: pd.DataFrame,
+    event: str,
+    response: tuple[float, float],
+    mask_response: bool = True,
+    min_rt: float = 0.2,
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64], npt.NDArray[np.float64], npt.NDArray[np.bool_]]:
+    """Per-trial reliability epoch `[start, end)`, relative to the event.
+
+    Cue- and trial-start-aligned epochs run over the response window, ending at each trial's response when
+    `mask_response` is set; trials without a response end at the median response time of those with one.
+    Lever-aligned (`response`) epochs run from the cue to the lever push.
+
+    Args:
+        trial_info (pd.DataFrame): One row per trial with `event_time`, `cue_onset` and `response_time` columns.
+            `response_time` is seconds from the cue.
+        event (str): `cue_onset`, `trial_start` or `response`.
+        response (tuple[float, float]): Response window `[start, end]`, in seconds.
+        mask_response (bool, optional): End cue-aligned epochs at the response. Defaults to True.
+        min_rt (float, optional): Trials with a response time below this are dropped. Defaults to 0.2.
+
+    Returns:
+        tuple[npt.NDArray[np.float64], npt.NDArray[np.float64], npt.NDArray[np.float64], npt.NDArray[np.bool_]]:
+        Epoch start and end, the cue time, all relative to the event, and which trials are kept; each shape
+        `(n_trials,)`.
+
+    Raises:
+        ValueError: If `event` is not `cue_onset`, `trial_start` or `response`.
+    """
+    import pandas as pd
+
+    n_trials = len(trial_info)
+    response_time = pd.to_numeric(trial_info["response_time"], errors="coerce").to_numpy(dtype=np.float64)
+    responded = response_time >= 0
+    keep = ~(responded & (response_time < min_rt))
+    cue = trial_info["cue_onset"].to_numpy(dtype=np.float64) - trial_info["event_time"].to_numpy(dtype=np.float64)
+
+    if event == "response":
+        return cue, np.zeros(n_trials), cue, keep
+    if event not in {"cue_onset", "trial_start"}:
+        msg = f"Reliability epochs are not defined for {event!r}; expected cue_onset, trial_start or response."
+        raise ValueError(msg)
+
+    start = np.full(n_trials, float(response[0]))
+    # The response window end is inclusive.
+    window_end = np.nextafter(float(response[1]), np.inf)
+    if not mask_response:
+        return start, np.full(n_trials, window_end), cue, keep
+    timed = responded & keep
+    median_rt = float(np.median(response_time[timed])) if timed.any() else np.nan
+    end = np.minimum(cue + np.where(responded, response_time, median_rt), window_end)
+    return start, end, cue, keep
+
+
+def epoch_traces(
+    traces: npt.NDArray, time: npt.NDArray[np.float64], start: npt.NDArray[np.float64], end: npt.NDArray[np.float64]
+) -> npt.NDArray[np.float64]:
+    """Traces with every sample outside each trial's `[start, end)` set to NaN.
+
+    Args:
+        traces (npt.NDArray): Traces of shape `(n_trials, n_samples)`.
+        time (npt.NDArray[np.float64]): Sample times relative to the event, shape `(n_samples,)`.
+        start (npt.NDArray[np.float64]): Per-trial epoch start, shape `(n_trials,)`.
+        end (npt.NDArray[np.float64]): Per-trial epoch end, exclusive, shape `(n_trials,)`.
+
+    Returns:
+        npt.NDArray[np.float64]: Masked traces, same shape.
+    """
+    inside = (time[None, :] >= start[:, None]) & (time[None, :] < end[:, None])
+    return np.where(inside, np.asarray(traces, dtype=np.float64), np.nan)
+
+
+def anchored_window(
+    traces: npt.NDArray, time: npt.NDArray[np.float64], anchor: npt.NDArray[np.float64], start: float, end: float
+) -> npt.NDArray[np.float64]:
+    """Each trace sampled over `anchor + start <= t < anchor + end` at the recording's sample interval.
+
+    Args:
+        traces (npt.NDArray): Traces of shape `(n_trials, n_samples)`.
+        time (npt.NDArray[np.float64]): Sample times relative to the event, shape `(n_samples,)`.
+        anchor (npt.NDArray[np.float64]): Per-trial anchor time relative to the event, shape `(n_trials,)`.
+        start (float): Window start relative to the anchor, in seconds.
+        end (float): Window end relative to the anchor, in seconds. Exclusive.
+
+    Returns:
+        npt.NDArray[np.float64]: Linearly interpolated samples, shape `(n_trials, n_window)`. Rows are NaN where the
+        window is not within `time`.
+    """
+    values = np.asarray(traces, dtype=np.float64)
+    step = float(np.median(np.diff(time)))
+    offsets = start + step * np.arange(int(np.ceil((end - start) / step - _TIME_TOLERANCE_S)))
+    window = np.full((values.shape[0], offsets.size), np.nan)
+    for i in np.flatnonzero(~np.isnan(anchor)):
+        at = anchor[i] + offsets
+        if offsets.size and at[0] >= time[0] - _TIME_TOLERANCE_S and at[-1] <= time[-1] + _TIME_TOLERANCE_S:
+            window[i] = np.interp(at, time, values[i])
+    return window
+
+
+def warp_epochs(
+    epochs: npt.NDArray[np.float64],
+    time: npt.NDArray[np.float64],
+    start: npt.NDArray[np.float64],
+    end: npt.NDArray[np.float64],
+    n_samples: int,
+) -> npt.NDArray[np.float64]:
+    """Resample each epoch onto `n_samples` points spanning 0 (epoch start) to 1 (epoch end).
+
+    Args:
+        epochs (npt.NDArray[np.float64]): Masked traces from `epoch_traces`, shape `(n_trials, n_time)`.
+        time (npt.NDArray[np.float64]): Sample times relative to the event, shape `(n_time,)`.
+        start (npt.NDArray[np.float64]): Per-trial epoch start, shape `(n_trials,)`.
+        end (npt.NDArray[np.float64]): Per-trial epoch end, shape `(n_trials,)`.
+        n_samples (int): Points on the warped grid.
+
+    Returns:
+        npt.NDArray[np.float64]: Warped epochs, shape `(n_trials, n_samples)`. NaN beyond the samples a trial has,
+        and for trials with fewer than two samples.
+    """
+    grid = np.linspace(0.0, 1.0, n_samples)
+    warped = np.full((epochs.shape[0], n_samples), np.nan)
+    for i in range(epochs.shape[0]):
+        valid = ~np.isnan(epochs[i])
+        if valid.sum() < 2 or not end[i] > start[i]:  # noqa: PLR2004
+            continue
+        position = (time[valid] - start[i]) / (end[i] - start[i])
+        inside = (grid >= position[0] - _TIME_TOLERANCE_S) & (grid <= position[-1] + _TIME_TOLERANCE_S)
+        warped[i, inside] = np.interp(grid[inside], position, epochs[i, valid])
+    return warped
+
+
+def epoch_correlation(epochs: npt.NDArray[np.float64], min_samples: int = 3) -> float:
+    """Mean zero-lag Pearson correlation between every pair of trials, over the samples both have.
+
+    Args:
+        epochs (npt.NDArray[np.float64]): Masked traces of shape `(n_trials, n_samples)`.
+        min_samples (int, optional): Shared samples a pair needs. Defaults to 3.
+
+    Returns:
+        float: Mean over pairs with a defined correlation. NaN when there is none.
+    """
+    import pandas as pd
+
+    corr = pd.DataFrame(epochs.T).corr(min_periods=min_samples).to_numpy()
+    pairs = corr[np.triu_indices_from(corr, k=1)]
+    return float(np.nanmean(pairs)) if pairs.size and not np.all(np.isnan(pairs)) else float("nan")
+
+
+def response_fraction(
+    epochs: npt.NDArray[np.float64], baseline: npt.NDArray[np.float64], response_sd: float = 2.0
+) -> float:
+    """Fraction of trials whose mean epoch value exceeds their baseline mean by `response_sd` baseline SDs.
+
+    Args:
+        epochs (npt.NDArray[np.float64]): Masked traces of shape `(n_trials, n_samples)`.
+        baseline (npt.NDArray[np.float64]): Baseline samples of shape `(n_trials, n_baseline)`.
+        response_sd (float, optional): Baseline SD multiple. Defaults to 2.0.
+
+    Returns:
+        float: Fraction over trials with a defined epoch mean and baseline. NaN when there is none.
+    """
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        response = np.nanmean(epochs, axis=1) - np.nanmean(baseline, axis=1)
+        threshold = response_sd * np.nanstd(baseline, axis=1, ddof=1)
+    valid = ~np.isnan(response) & ~np.isnan(threshold)
+    return float(np.mean(response[valid] > threshold[valid])) if valid.any() else float("nan")
+
+
+def _across_trial_variance(values: npt.NDArray[np.float64]) -> float:
+    """Mean over samples of the across-trial variance.
+
+    Returns:
+        float: The mean, over samples with at least two trials. NaN when there are none.
+    """
+    enough = (~np.isnan(values)).sum(axis=0) >= 2  # noqa: PLR2004
+    if not enough.any():
+        return float("nan")
+    return float(np.mean(np.nanvar(values[:, enough], axis=0, ddof=1)))
+
+
+def variance_quench(epochs: npt.NDArray[np.float64], baseline: npt.NDArray[np.float64]) -> float:
+    """Across-trial variance over the epoch divided by across-trial variance over the baseline.
+
+    Args:
+        epochs (npt.NDArray[np.float64]): Masked traces of shape `(n_trials, n_samples)`.
+        baseline (npt.NDArray[np.float64]): Baseline samples of shape `(n_trials, n_baseline)`.
+
+    Returns:
+        float: The ratio; below 1 when variability drops after the event. NaN when either variance is undefined
+        or the baseline variance is zero.
+    """
+    epoch_variance = _across_trial_variance(epochs)
+    baseline_variance = _across_trial_variance(baseline)
+    return epoch_variance / baseline_variance if baseline_variance > 0 else float("nan")
+
+
+def signal_fraction(epochs: npt.NDArray[np.float64]) -> float:
+    """Fraction of single-trial variance explained by the trial-mean trace.
+
+    Args:
+        epochs (npt.NDArray[np.float64]): Masked traces of shape `(n_trials, n_samples)`.
+
+    Returns:
+        float: One minus the residual sum of squares about the trial mean over the total sum of squares, over
+        samples with at least two trials. NaN when there are none or the traces are constant.
+    """
+    enough = (~np.isnan(epochs)).sum(axis=0) >= 2  # noqa: PLR2004
+    values = epochs[:, enough]
+    if not values.size or np.all(np.isnan(values)):
+        return float("nan")
+    residual = np.nansum((values - np.nanmean(values, axis=0)) ** 2)
+    total = np.nansum((values - np.nanmean(values)) ** 2)
+    return float(1 - residual / total) if total > 0 else float("nan")
+
+
+def reliability_groups(trial_info: pd.DataFrame) -> dict[str, npt.NDArray[np.bool_]]:
+    """Trial groups for the reliability metrics, keyed by column suffix.
+
+    Args:
+        trial_info (pd.DataFrame): One row per trial with an `sdt_type` column.
+
+    Returns:
+        dict[str, npt.NDArray[np.bool_]]: `""` for all trials, `sdt-<type>` for each of `GO_TYPES` and
+        `NOGO_TYPES`, then `stim-go` and `stim-nogo`; each a mask of shape `(n_trials,)`.
+    """
+    sdt_type = trial_info["sdt_type"].to_numpy()
+    groups = {"": np.ones(len(trial_info), dtype=bool)}
+    for name in (*GO_TYPES, *NOGO_TYPES):
+        groups[f"sdt-{name}"] = sdt_type == name
+    groups["stim-go"] = np.isin(sdt_type, GO_TYPES)
+    groups["stim-nogo"] = np.isin(sdt_type, NOGO_TYPES)
+    return groups
+
+
+def _group_reliability(
+    epochs: npt.NDArray[np.float64], baseline: npt.NDArray[np.float64], options: ReliabilityOptions
+) -> dict[str, float | int]:
+    """Reliability metrics for one group.
+
+    Returns:
+        dict[str, float | int]: One value per `RELIABILITY_METRICS`, NaN below `options.min_trials` trials.
+    """
+    n_trials = epochs.shape[0]
+    if n_trials < options.min_trials:
+        return {**{name: float("nan") for name in RELIABILITY_METRICS[:-1]}, "reliability_n": n_trials}
+    return {
+        "epoch_correlation": epoch_correlation(epochs),
+        "response_fraction": response_fraction(epochs, baseline, options.response_sd),
+        "variance_quench": variance_quench(epochs, baseline),
+        "signal_fraction": signal_fraction(epochs),
+        "reliability_n": n_trials,
+    }
+
+
+def reliability_metrics(
+    traces: npt.NDArray,
+    time: npt.NDArray[np.float64],
+    trial_info: pd.DataFrame,
+    event: str,
+    baseline: tuple[float, float],
+    response: tuple[float, float],
+    options: ReliabilityOptions | None = None,
+) -> dict[str, float | int]:
+    """Trial-to-trial reliability of one region's response, for all trials and per trial group.
+
+    Metrics are taken over each trial's epoch from `reliability_epochs`: `epoch_correlation`, `response_fraction`,
+    `variance_quench` and `signal_fraction`, plus `reliability_n`, the trials used. The baseline is `baseline`
+    relative to the event, or `options.cue_baseline` relative to each trial's cue for lever-aligned windows. Groups
+    with fewer than `options.min_trials` trials get NaN.
+
+    Args:
+        traces (npt.NDArray): Traces of shape `(n_trials, n_samples)`, in the row order of `trial_info`.
+        time (npt.NDArray[np.float64]): Sample times relative to the event, shape `(n_samples,)`.
+        trial_info (pd.DataFrame): One row per trial with `event_time`, `cue_onset`, `response_time` and
+            `sdt_type` columns.
+        event (str): `cue_onset`, `trial_start` or `response`.
+        baseline (tuple[float, float]): Baseline window `[start, end)` relative to the event, for cue- and
+            trial-start-aligned windows.
+        response (tuple[float, float]): Response window `[start, end]`, for cue- and trial-start-aligned windows.
+        options (ReliabilityOptions | None, optional): Defaults to `ReliabilityOptions()`.
+
+    Returns:
+        dict[str, float | int]: `<metric>` for all trials, then `<metric>_<group>` for each `reliability_groups`
+        group, for each of `RELIABILITY_METRICS`.
+
+    Example:
+        >>> reliability_metrics(traces, time, trial_info, "cue_onset", baseline=(-1.0, 0.0), response=(0.0, 3.0))
+    """
+    options = options if options is not None else ReliabilityOptions()
+    start, end, cue, keep = reliability_epochs(trial_info, event, response, options.mask_response, options.min_rt)
+    epochs = epoch_traces(traces, time, start, end)
+    if options.time_warp:
+        lengths = (~np.isnan(epochs[keep])).sum(axis=1)
+        lengths = lengths[lengths >= 2]  # noqa: PLR2004
+        epochs = warp_epochs(epochs, time, start, end, int(np.median(lengths)) if lengths.size else 2)
+    if event == "response":
+        base = anchored_window(traces, time, cue, *options.cue_baseline)
+    else:
+        base = anchored_window(traces, time, np.zeros(len(cue)), *baseline)
+
+    summary: dict[str, float | int] = {}
+    for name, mask in reliability_groups(trial_info).items():
+        values = _group_reliability(epochs[mask & keep], base[mask & keep], options)
+        summary |= {(metric if not name else f"{metric}_{name}"): value for metric, value in values.items()}
+    return summary
