@@ -4,6 +4,10 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 ## Unreleased
 
+### Added
+
+- Trial-to-trial reliability metrics in the `<stem>_metrics-session.csv` written by `process metrics` and `process peri-event --with-metrics`, for go/no-go sessions: `epoch_correlation`, `response_fraction`, `variance_quench`, `signal_fraction` and `reliability_n`, for all trials and per `sdt_type` (`<metric>_sdt-<type>`) and go/no-go stimulus (`<metric>_stim-go`, `<metric>_stim-nogo`). Cue-aligned epochs end at each trial's response (`--no-mask-response` to disable), and lever-aligned epochs run from the cue to the push, with the baseline before the cue (`--cue-baseline`). Options `--min-rt`, `--response-sd` and `--time-warp`. The existing columns are unchanged. The peri-event report's session table shows the new columns with a trial-group selector ([#173](https://github.com/DuguidLab/mesoscopy/issues/173)).
+
 ### Fixed
 
 - `process peri-event --event response` wrongly aligned windows to `start_time + response_time`, which falls before the cue since `response_time` is measured from the cue and every trial starts with the ITI. The lever push is now taken at `cue_onset + response_time` ([#176](https://github.com/DuguidLab/mesoscopy/issues/176)).
