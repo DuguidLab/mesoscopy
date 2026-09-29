@@ -4,6 +4,10 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 ## Unreleased
 
+### Fixed
+
+- `process peri-event --event response` wrongly aligned windows to `start_time + response_time`, which falls before the cue since `response_time` is measured from the cue and every trial starts with the ITI. The lever push is now taken at `cue_onset + response_time` ([#176](https://github.com/DuguidLab/mesoscopy/issues/176)).
+
 ## [0.13.2] - 2026-09-23
 
 ### Added
