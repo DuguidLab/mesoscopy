@@ -45,6 +45,9 @@ Pearson correlation between trial traces over the response window) and, for each
 `<metric>_sd` and `<metric>_cv` across trials, ignoring trials where the metric is undefined. `onset_n`, `decay_n`
 and `offset_n` count the trials where each was found.
 
+For go/no-go sessions aligned to the cue, trial start or lever push, the session table also has the
+[reliability](#reliability) columns.
+
 Any metric is empty when it is undefined for that trial, for example a decay when the trace never falls back to
 the fraction, or an onset when the trace never crosses the threshold.
 
@@ -85,6 +88,47 @@ estimate that the `sd` onset threshold depends on.
 - Session CV is unstable for any metric whose mean sits near zero, which the extrapolated onset often does.
   Read the SD in that case.
 
+## Reliability
+
+How consistent a region's response is from trial to trial, over the part of each trial before the lever push, so
+that movement does not inflate it. Taken for go/no-go sessions only, and needs the `cue_onset`, `response_time` and
+`sdt_type` trials columns (carried over by `process peri-event`, or joined with `--trials`). Without them, or for
+reward-aligned windows, the columns are skipped with a warning.
+
+**Epoch.** The event the windows are aligned to is read from which trials column matches `event_time`.
+
+- Cue- or trial-start-aligned: the response window, ending at each trial's response. Misses and correct rejections
+  end at the median response time of the trials with a response. `--no-mask-response` uses the whole response
+  window.
+- Lever-aligned (`--event response`): from the cue to the lever push. The baseline is `--cue-baseline START END`
+  (default `-1 0`) before each trial's cue, so extract these windows with a `--pre` long enough to reach it (e.g.
+  `--pre 5`); trials whose baseline falls outside the window have no response fraction or variance quench
+  baseline, and a warning gives their count.
+
+Trials with a response time below `--min-rt` (default 0.2 s) are left out.
+
+**Metrics.**
+
+| Column | Meaning |
+| --- | --- |
+| `epoch_correlation` | Mean zero-lag Pearson correlation between every pair of trials, over the samples both have. How alike single trials are. |
+| `response_fraction` | Fraction of trials whose mean epoch value exceeds their baseline mean by `--response-sd` (default 2) baseline SDs. |
+| `variance_quench` | Across-trial variance over the epoch divided by that over the baseline. Below 1 when variability drops after the event. |
+| `signal_fraction` | Fraction of single-trial variance explained by the trial-mean trace. |
+| `reliability_n` | Trials used. |
+
+**Groups.** Each metric is taken over all trials (`<metric>`), per trial type (`<metric>_sdt-hit`,
+`_sdt-miss`, `_sdt-false_alarm`, `_sdt-correct_rejection`) and per stimulus (`<metric>_stim-go` for hits and
+misses, `<metric>_stim-nogo` for false alarms and correct rejections). Every column is always written; a group with
+fewer than 10 trials is empty.
+
+**Trial counts.** None of the metrics depends on the number of trials, but all are noisier with fewer, so read
+them alongside `reliability_n` when comparing groups.
+
+**Time warping.** Epochs end at different times. By default, trials are compared sample by sample on the shared
+time axis. `--time-warp` instead resamples each epoch onto a common grid from its start to its end, comparing the
+shape of the response regardless of response time.
+
 ## As a library
 
 ```python
@@ -97,4 +141,6 @@ per_trial, per_session = metrics.metrics_tables(perievent, smoothing=5)
 
 `metrics.trial_metrics` works on a `(n_trials, n_samples)` array for one region, and the per-metric functions
 (`peak`, `auc`, `onset_time`, `extrapolated_onset`, `offset_time`, `decay_time`, `trace_correlation`) are
-available on their own.
+available on their own. `metrics.reliability_metrics` takes the reliability columns for one region, with options
+in a `metrics.ReliabilityOptions`; `epoch_correlation`, `response_fraction`, `variance_quench` and
+`signal_fraction` work on masked `(n_trials, n_samples)` arrays from `reliability_epochs` and `epoch_traces`.

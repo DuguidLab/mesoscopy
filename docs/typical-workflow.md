@@ -96,7 +96,9 @@ mesoscopy process metrics /path/to/example-recording_regions_event-cueonset_peri
 writes `example-recording_regions_event-cueonset_metrics.csv` with the onset time, peak time, amplitude, area
 under the curve, decay time, offset time and duration of every trial in every region, with the trials columns
 carried over from the peri-event file, and `example-recording_regions_event-cueonset_metrics-session.csv` with the mean,
-SD and CV of each metric across trials per region, and the mean pairwise correlation between trial traces.
+SD and CV of each metric across trials per region, and the mean pairwise correlation between trial traces. For
+go/no-go sessions the session table also has trial-to-trial reliability metrics over the cue-to-lever epoch, for all
+trials, per trial type and per stimulus; see [Response metrics](how-to/metrics.md#reliability).
 
 Traces are baseline-subtracted with the mean over `--baseline START END` (default: all pre-event samples), and
 metrics are taken over `--response START END` (default: all post-event samples). Onset is the first
