@@ -192,6 +192,8 @@ def test_report_cmd_writes_perievent_report(perievent_csv, output_dir):
     assert payload["trial_index"] == [0, 1, 2, 3, 4]
     assert payload["event_time"] == [4.5, 9.5, 14.5, 19.5, 24.5]
     assert len(payload["session_metrics"]) == 3
+    assert "epoch_correlation_stim-go" in payload["session_metrics"][0]
+    assert 'id="pev-session-group"' in html
     assert {row["region"] for row in payload["trial_metrics"]} == set(REGIONS)
     assert set(payload["trial_metrics"][0]) == set(pevreport.TRIAL_METRIC_COLUMNS)
     assert "L_MOp1" in payload["atlas"]["paths"]
