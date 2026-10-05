@@ -2317,6 +2317,121 @@ class TestOffsetTime:
             pm.offset_time(_metrics_traces(), METRICS_GRID, np.zeros(4), np.zeros(4, dtype=np.int64), 3.0, 0)
 
 
+def _decay_time_loop(traces, time, peak_index, amplitude, end, fraction=0.5):
+    """The per-trial loop `metrics.decay_time` replaced."""
+    last = int(np.flatnonzero(time <= end)[-1])
+    decay = np.full(traces.shape[0], np.nan)
+    for i in np.flatnonzero((amplitude > 0) & (peak_index >= 0)):
+        after = traces[i, peak_index[i] + 1 : last + 1]
+        below = np.flatnonzero(after <= fraction * amplitude[i])
+        if below.size:
+            decay[i] = time[peak_index[i] + 1 + below[0]] - time[peak_index[i]]
+    return decay
+
+
+def _offset_time_loop(traces, time, threshold, peak_index, end, min_samples=3):
+    """The per-trial loop `metrics.offset_time` replaced."""
+    last = int(np.flatnonzero(time <= end)[-1])
+    offset = np.full(traces.shape[0], np.nan)
+    for i in np.flatnonzero(peak_index >= 0):
+        if not traces[i, peak_index[i]] > threshold[i]:
+            continue
+        after = traces[i, peak_index[i] + 1 : last + 1]
+        if after.size < min_samples:
+            continue
+        runs = np.lib.stride_tricks.sliding_window_view(after <= threshold[i], min_samples).all(axis=-1)
+        if runs.any():
+            offset[i] = time[peak_index[i] + 1 + int(np.argmax(runs))]
+    return offset
+
+
+def _extrapolated_onset_loop(traces, time, peak_index, amplitude, start, low=0.2, high=0.8):
+    """The per-trial loop `metrics.extrapolated_onset` replaced, fitting with `np.polyfit`."""
+    first = int(np.flatnonzero(time >= start)[0])
+    onset = np.full(traces.shape[0], np.nan)
+    for i in np.flatnonzero((amplitude > 0) & (peak_index >= 0)):
+        rise = traces[i, first : peak_index[i] + 1]
+        rise_time = time[first : peak_index[i] + 1]
+        below = np.flatnonzero(rise < low * amplitude[i])
+        begin = below[-1] + 1 if below.size else 0
+        above = np.flatnonzero(rise[begin:] > high * amplitude[i])
+        stop = begin + above[0] if above.size else len(rise)
+        if stop - begin < 2:
+            continue
+        slope, intercept = np.polyfit(rise_time[begin:stop], rise[begin:stop], 1)
+        if slope > 0:
+            onset[i] = -intercept / slope
+    return onset
+
+
+def _loop_inputs(seed):
+    """Noisy responses of random size, latency and width with NaN gaps, and peaks from `metrics.peak`.
+
+    Rows 0-4 are all NaN, 5-9 negative, 10-14 have a random peak index anywhere in the window and 15-19 a NaN
+    amplitude.
+    """
+    rng = np.random.default_rng(seed)
+    t = METRICS_GRID
+    n_trials = 300
+    latency = rng.uniform(0.0, 1.5, (n_trials, 1))
+    width = rng.uniform(0.1, 0.8, (n_trials, 1))
+    traces = rng.uniform(0.2, 2.0, (n_trials, 1)) * np.exp(-0.5 * ((t - latency - width) / width) ** 2)
+    traces += rng.uniform(0.01, 0.3, (n_trials, 1)) * rng.standard_normal(traces.shape)
+    traces[rng.random(traces.shape) < 0.03] = np.nan
+    traces[:5] = np.nan
+    traces[5:10] *= -1
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        amplitude, _, index = pm.peak(traces, t, 0.0, 3.0)
+    index[10:15] = rng.integers(0, len(t), 5)
+    amplitude[15:20] = np.nan
+    return traces, t, index, amplitude
+
+
+class TestMatchesLoops:
+    """The array versions of the post-peak and rise searches give the per-trial loops' results."""
+
+    @pytest.mark.parametrize("seed", range(5))
+    def test_decay_time(self, seed):
+        traces, t, index, amplitude = _loop_inputs(seed)
+        found = {}
+        for end, fraction in [(3.0, 0.5), (1.2, 0.1), (2.0, 0.9), (-1.0, 0.5)]:
+            expected = _decay_time_loop(traces, t, index, amplitude, end, fraction)
+            np.testing.assert_array_equal(pm.decay_time(traces, t, index, amplitude, end, fraction), expected)
+            found[end, fraction] = np.isfinite(expected).sum()
+        # Most traces decay over the whole window; many have no decay to 10% before 1.2 s, and none before -1 s.
+        assert found[3.0, 0.5] > 250
+        assert 20 < found[1.2, 0.1] < 250
+        assert found[-1.0, 0.5] == 0
+
+    @pytest.mark.parametrize("seed", range(5))
+    def test_offset_time(self, seed):
+        traces, t, index, amplitude = _loop_inputs(seed)
+        threshold = 0.2 * amplitude
+        threshold[20:25] = np.nan
+        for end, min_samples in [(3.0, 3), (1.5, 1), (3.0, 7), (0.1, 3), (3.0, len(t) + 1)]:
+            expected = _offset_time_loop(traces, t, threshold, index, end, min_samples)
+            np.testing.assert_array_equal(pm.offset_time(traces, t, threshold, index, end, min_samples), expected)
+        assert 100 < np.isfinite(_offset_time_loop(traces, t, threshold, index, 3.0)).sum() < len(traces) - 20
+
+    @pytest.mark.parametrize("seed", range(5))
+    def test_extrapolated_onset(self, seed):
+        traces, t, index, amplitude = _loop_inputs(seed)
+        for start, low, high in [(0.0, 0.2, 0.8), (0.5, 0.1, 0.5), (-0.5, 0.3, 0.9)]:
+            expected = _extrapolated_onset_loop(traces, t, index, amplitude, start, low, high)
+            np.testing.assert_allclose(
+                pm.extrapolated_onset(traces, t, index, amplitude, start, low, high), expected, rtol=1e-9, atol=1e-9
+            )
+        assert 100 < np.isfinite(_extrapolated_onset_loop(traces, t, index, amplitude, 0.0)).sum() < len(traces) - 20
+
+    def test_no_trials(self):
+        t = METRICS_GRID
+        traces, index, values = np.empty((0, len(t))), np.empty(0, dtype=np.int64), np.empty(0)
+        assert pm.decay_time(traces, t, index, values, 3.0).shape == (0,)
+        assert pm.offset_time(traces, t, values, index, 3.0).shape == (0,)
+        assert pm.extrapolated_onset(traces, t, index, values, 0.0).shape == (0,)
+
+
 class TestTraceCorrelation:
     def test_identical_and_opposite(self):
         trace = _metrics_traces()[0]
