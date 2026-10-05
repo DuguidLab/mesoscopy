@@ -487,6 +487,14 @@ def _metrics_options(command: Callable[..., None]) -> Callable[..., None]:
             show_default=True,
             help="Amplitude fraction the trace must fall to after the peak.",
         ),
+        click.option(
+            "--min-trials",
+            type=click.IntRange(min=1),
+            default=10,
+            show_default=True,
+            help="Trial groups with fewer trials get empty session and reliability metrics. The all-trials session"
+            " metrics are always taken.",
+        ),
     ]
     for option in reversed(options):
         command = option(command)
@@ -502,7 +510,7 @@ def _reliability_options(command: Callable[..., None]) -> Callable[..., None]:
     Returns:
         Callable[..., None]: The callback with the options attached.
     """
-    names = [field.name for field in dataclasses.fields(pm.ReliabilityOptions) if field.name != "min_trials"]
+    names = [field.name for field in dataclasses.fields(pm.ReliabilityOptions)]
 
     @functools.wraps(command)
     def wrapper(*args: typing.Any, **kwargs: typing.Any) -> None:
@@ -680,6 +688,7 @@ def perievent_cmd(
     extrapolate_range: tuple[float, float],
     smoothing: int,
     decay_fraction: float,
+    min_trials: int,
     reliability: pm.ReliabilityOptions,
 ) -> None:
     """Extract per-trial windows around a behavioural event from a behaviour-aligned recording.
@@ -748,6 +757,7 @@ def perievent_cmd(
                 smoothing=smoothing,
                 event=event,
                 reliability=reliability,
+                min_trials=min_trials,
             )
         _echo_warnings(caught)
         _write_metrics(*tables, out_dir, Path(outpath).stem.removesuffix("_perievent"))
@@ -930,16 +940,17 @@ def metrics_cmd(
     extrapolate_range: tuple[float, float],
     smoothing: int,
     decay_fraction: float,
+    min_trials: int,
     reliability: pm.ReliabilityOptions,
 ) -> None:
     """Extract per-trial response metrics and per-session variability from peri-event traces.
 
     PATH is the long-format *_perievent.csv written by `process peri-event`. Writes <stem>_metrics.csv with onset
     time, peak time, amplitude, area under the curve, decay time, offset time and duration per trial per region,
-    and <stem>_metrics-session.csv with the mean, SD and CV of each across trials per region, plus the mean
-    pairwise trial-trace correlation. For go/no-go sessions aligned to the cue, trial start or lever push, the
-    session table also has trial-to-trial reliability metrics over the cue-to-lever epoch, for all trials, per
-    sdt_type and per go/no-go stimulus.
+    and <stem>_metrics-session.csv with the mean, SD and CV of each across trials, plus the mean pairwise
+    trial-trace correlation, per region and trial group. Go/no-go sessions are grouped by sdt_type, go/no-go
+    stimulus and lever push, as well as all trials. For go/no-go sessions aligned to the cue, trial start or lever
+    push, the session table also has trial-to-trial reliability metrics over the cue-to-lever epoch.
     """  # noqa: DOC501
     import pandas as pd
 
@@ -975,6 +986,7 @@ def metrics_cmd(
                 decay_fraction=decay_fraction,
                 smoothing=smoothing,
                 reliability=reliability,
+                min_trials=min_trials,
             )
         except ValueError as error:
             msg = f"{path}: {error} Expected the columns written by `process peri-event`."
