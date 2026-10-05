@@ -282,7 +282,7 @@ def extrapolated_onset(
 
     Returns:
         npt.NDArray[np.float64]: Onset time per trial, shape `(n_trials,)`. NaN for trials whose amplitude is not
-        positive, whose rise has fewer than two samples, or whose fitted slope is not positive.
+        positive, whose rise has fewer than two samples or a NaN sample, or whose fitted slope is not positive.
 
     Raises:
         ValueError: If `low` and `high` are not within `(0, 1)` with `low < high`.
@@ -292,20 +292,32 @@ def extrapolated_onset(
         raise ValueError(msg)
 
     values = np.asarray(traces, dtype=np.float64)
+    peak_index = np.asarray(peak_index)
+    amplitude = np.asarray(amplitude, dtype=np.float64)
     first = int(np.flatnonzero(time >= start)[0])
     onset = np.full(values.shape[0], np.nan)
-    for i in np.flatnonzero((amplitude > 0) & (peak_index >= 0)):
-        rise = values[i, first : peak_index[i] + 1]
-        rise_time = time[first : peak_index[i] + 1]
-        below = np.flatnonzero(rise < low * amplitude[i])
-        begin = below[-1] + 1 if below.size else 0
-        above = np.flatnonzero(rise[begin:] > high * amplitude[i])
-        stop = begin + above[0] if above.size else len(rise)
-        if stop - begin < 2:  # noqa: PLR2004
-            continue
-        slope, intercept = np.polyfit(rise_time[begin:stop], rise[begin:stop], 1)
-        if slope > 0:
-            onset[i] = -intercept / slope
+    rows = np.flatnonzero((amplitude > 0) & (peak_index >= 0))
+    if not rows.size:
+        return onset
+
+    values, peak_at, height = values[rows], peak_index[rows, None], amplitude[rows, None]
+    sample = np.arange(values.shape[1])
+    rise = (sample >= first) & (sample <= peak_at)
+    begin = np.where(rise & (values < low * height), sample, first - 1).max(axis=1) + 1
+    above = (sample >= begin[:, None]) & (sample <= peak_at) & (values > high * height)
+    stop = np.where(above.any(axis=1), above.argmax(axis=1), peak_at[:, 0] + 1)
+    fit = (sample >= begin[:, None]) & (sample < stop[:, None])
+    count = fit.sum(axis=1)
+
+    # Least-squares line through the rise; a NaN sample in it gives a NaN onset.
+    with np.errstate(invalid="ignore", divide="ignore"):
+        mean_time = np.where(fit, time, 0.0).sum(axis=1) / count
+        mean_value = np.where(fit, values, 0.0).sum(axis=1) / count
+        time_dev = np.where(fit, time - mean_time[:, None], 0.0)
+        value_dev = np.where(fit, values - mean_value[:, None], 0.0)
+        slope = (time_dev * value_dev).sum(axis=1) / (time_dev**2).sum(axis=1)
+        fitted = (count >= 2) & (slope > 0)  # noqa: PLR2004
+        onset[rows[fitted]] = (mean_time - mean_value / slope)[fitted]
     return onset
 
 
@@ -340,18 +352,20 @@ def offset_time(
 
     values = np.asarray(traces, dtype=np.float64)
     threshold = np.asarray(threshold, dtype=np.float64)
+    peak_index = np.asarray(peak_index)
     last = int(np.flatnonzero(time <= end)[-1])
     offset = np.full(values.shape[0], np.nan)
-    for i in np.flatnonzero(peak_index >= 0):
-        if not values[i, peak_index[i]] > threshold[i]:
-            continue
-        after = values[i, peak_index[i] + 1 : last + 1]
-        if after.size < min_samples:
-            continue
-        below = after <= threshold[i]
-        runs = np.lib.stride_tricks.sliding_window_view(below, min_samples).all(axis=-1)
-        if runs.any():
-            offset[i] = time[peak_index[i] + 1 + int(np.argmax(runs))]
+    rows = np.flatnonzero(peak_index >= 0)
+    if not rows.size or values.shape[1] < min_samples:
+        return offset
+
+    values, peak_at, threshold = values[rows], peak_index[rows], threshold[rows]
+    sample = np.arange(values.shape[1])
+    # NaN comparisons are False, so a NaN sample or threshold breaks any run.
+    below = (sample > peak_at[:, None]) & (sample <= last) & (values <= threshold[:, None])
+    runs = np.lib.stride_tricks.sliding_window_view(below, min_samples, axis=1).all(axis=-1)
+    found = (values[np.arange(rows.size), peak_at] > threshold) & runs.any(axis=1)
+    offset[rows[found]] = time[runs.argmax(axis=1)[found]]
     return offset
 
 
@@ -385,13 +399,19 @@ def decay_time(
         raise ValueError(msg)
 
     values = np.asarray(traces, dtype=np.float64)
+    peak_index = np.asarray(peak_index)
+    amplitude = np.asarray(amplitude, dtype=np.float64)
     last = int(np.flatnonzero(time <= end)[-1])
     decay = np.full(values.shape[0], np.nan)
-    for i in np.flatnonzero((amplitude > 0) & (peak_index >= 0)):
-        after = values[i, peak_index[i] + 1 : last + 1]
-        below = np.flatnonzero(after <= fraction * amplitude[i])
-        if below.size:
-            decay[i] = time[peak_index[i] + 1 + below[0]] - time[peak_index[i]]
+    rows = np.flatnonzero((amplitude > 0) & (peak_index >= 0))
+    if not rows.size:
+        return decay
+
+    peak_at = peak_index[rows]
+    sample = np.arange(values.shape[1])
+    fallen = (sample > peak_at[:, None]) & (sample <= last) & (values[rows] <= fraction * amplitude[rows, None])
+    found = fallen.any(axis=1)
+    decay[rows[found]] = time[fallen.argmax(axis=1)[found]] - time[peak_at[found]]
     return decay
 
 
