@@ -207,6 +207,9 @@ def report_payload(path: str, trials_path: str | None = None) -> tuple[dict, lis
     if trial_metrics_path.exists() and session_metrics_path.exists():
         trial_metrics = pd.read_csv(trial_metrics_path)
         session_metrics = pd.read_csv(session_metrics_path)
+        if "group" not in session_metrics.columns:
+            # Session tables written before trial-group rows cover all trials.
+            session_metrics.insert(1, "group", "all")
         keep = [column for column in TRIAL_METRIC_COLUMNS if column in trial_metrics.columns]
         trial_metrics = trial_metrics[keep]
     else:
