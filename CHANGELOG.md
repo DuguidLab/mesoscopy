@@ -4,6 +4,14 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 ## Unreleased
 
+### Added
+
+- Trial groups for the session metrics of go/no-go sessions: the across-trial summaries and `trace_correlation` in `<stem>_metrics-session.csv` are now taken per `sdt_type`, per go/no-go stimulus and per lever push (`resp-push` for hits and false alarms, `resp-nopush` for misses and correct rejections), as well as over all trials, and the reliability metrics gain the lever-push groups. `--min-trials` (default 10) on `process metrics` and `process peri-event --with-metrics` sets the trials a group needs; the all-trials summaries are always taken ([#183](https://github.com/DuguidLab/mesoscopy/issues/183)).
+
+### Changed
+
+- `<stem>_metrics-session.csv` has one row per region and trial group, with a `group` column (`all`, `sdt-hit`, ..., `resp-nopush`), instead of one row per region with `_<group>` suffixed reliability columns. The peri-event report's trial-group selector now picks the session table rows and the atlas colouring, and session tables without a `group` column are read as all trials. `metrics.reliability_groups` is renamed `metrics.trial_groups`, keys all trials as `all` and adds the lever-push groups; `metrics.reliability_metrics` returns the metrics per group; `ReliabilityOptions.min_trials` is replaced by the `min_trials` argument of `metrics.metrics_tables` and `metrics.reliability_metrics` ([#183](https://github.com/DuguidLab/mesoscopy/issues/183)).
+
 ## [0.14.0] - 2026-09-29
 
 ### Added
