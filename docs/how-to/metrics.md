@@ -40,16 +40,34 @@ metrics baseline window. Metrics are not computed for HDF5 peri-event windows.
 The trials table columns (`sdt_type`, `outcome`, `response_time`, ...) follow, carried over from the peri-event file.
 For a peri-event file without them, `--trials` joins a trials CSV by row index.
 
-`<stem>_metrics-session.csv` has one row per region with `n_trials`, `trace_correlation` (the mean pairwise
-Pearson correlation between trial traces over the response window) and, for each metric above, `<metric>_mean`,
-`<metric>_sd` and `<metric>_cv` across trials, ignoring trials where the metric is undefined. `onset_n`, `decay_n`
-and `offset_n` count the trials where each was found.
+`<stem>_metrics-session.csv` has one row per region and [trial group](#trial-groups), with `region`, `group`,
+`n_trials`, `trace_correlation` (the mean pairwise Pearson correlation between trial traces over the response
+window) and, for each metric above, `<metric>_mean`, `<metric>_sd` and `<metric>_cv` across trials, ignoring
+trials where the metric is undefined. `onset_n`, `decay_n` and `offset_n` count the trials where each was found.
 
 For go/no-go sessions aligned to the cue, trial start or lever push, the session table also has the
 [reliability](#reliability) columns.
 
 Any metric is empty when it is undefined for that trial, for example a decay when the trace never falls back to
 the fraction, or an onset when the trace never crosses the threshold.
+
+## Trial groups
+
+For go/no-go sessions, the session metrics are taken over all trials and over groups of trials, one row each:
+
+| `group` | Trials |
+| --- | --- |
+| `all` | Every trial. |
+| `sdt-hit`, `sdt-miss`, `sdt-false_alarm`, `sdt-correct_rejection` | One trial type. |
+| `stim-go`, `stim-nogo` | By the stimulus shown: hits and misses, or false alarms and correct rejections. |
+| `resp-push`, `resp-nopush` | By whether the lever was pushed: hits and false alarms, or misses and correct rejections. |
+
+The groups come from the `sdt_type` trials column, carried over by `process peri-event` or joined with `--trials`.
+Without it, or for sessions other than go/no-go, the session table has the `all` rows only, with a warning.
+
+Every group gets a row. A group with fewer than `--min-trials` (default 10) trials keeps its trial counts
+(`n_trials`, `onset_n`, `decay_n`, `offset_n` and `reliability_n`) and is otherwise empty. The `all` row's
+across-trial summaries are always taken; its reliability columns follow the same minimum.
 
 ## Metrics
 
@@ -105,7 +123,7 @@ reward-aligned windows, the columns are skipped with a warning.
   `--pre 5`); trials whose baseline falls outside the window have no response fraction or variance quench
   baseline, and a warning gives their count.
 
-Trials with a response time below `--min-rt` (default 0.2 s) are left out.
+Trials with a response time below `--min-rt` (default 0.2 s) are left out of the reliability metrics.
 
 **Metrics.**
 
@@ -117,10 +135,7 @@ Trials with a response time below `--min-rt` (default 0.2 s) are left out.
 | `signal_fraction` | Fraction of single-trial variance explained by the trial-mean trace. |
 | `reliability_n` | Trials used. |
 
-**Groups.** Each metric is taken over all trials (`<metric>`), per trial type (`<metric>_sdt-hit`,
-`_sdt-miss`, `_sdt-false_alarm`, `_sdt-correct_rejection`) and per stimulus (`<metric>_stim-go` for hits and
-misses, `<metric>_stim-nogo` for false alarms and correct rejections). Every column is always written; a group with
-fewer than 10 trials is empty.
+**Groups.** Each metric is taken for every [trial group](#trial-groups), on that group's row of the session table.
 
 **Trial counts.** None of the metrics depends on the number of trials, but all are noisier with fewer, so read
 them alongside `reliability_n` when comparing groups.
@@ -141,6 +156,7 @@ per_trial, per_session = metrics.metrics_tables(perievent, smoothing=5)
 
 `metrics.trial_metrics` works on a `(n_trials, n_samples)` array for one region, and the per-metric functions
 (`peak`, `auc`, `onset_time`, `extrapolated_onset`, `offset_time`, `decay_time`, `trace_correlation`) are
-available on their own. `metrics.reliability_metrics` takes the reliability columns for one region, with options
-in a `metrics.ReliabilityOptions`; `epoch_correlation`, `response_fraction`, `variance_quench` and
-`signal_fraction` work on masked `(n_trials, n_samples)` arrays from `reliability_epochs` and `epoch_traces`.
+available on their own. `metrics.trial_groups` splits a trials table into the trial groups.
+`metrics.reliability_metrics` takes the reliability columns for one region, per trial group, with options in a
+`metrics.ReliabilityOptions`; `epoch_correlation`, `response_fraction`, `variance_quench` and `signal_fraction` work
+on masked `(n_trials, n_samples)` arrays from `reliability_epochs` and `epoch_traces`.
