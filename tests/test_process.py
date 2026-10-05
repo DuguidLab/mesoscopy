@@ -2754,6 +2754,22 @@ def test_perievent_cmd_with_metrics(perievent_regions_csv, perievent_trials_csv,
     pd.testing.assert_frame_equal(trial, expected, check_dtype=False)
 
 
+def test_perievent_cmd_with_metrics_min_trials(perievent_regions_csv, perievent_trials_csv, output_dir):
+    result = CliRunner().invoke(
+        mesoscopy.cli,
+        args=(
+            f"process peri-event {perievent_regions_csv} {perievent_trials_csv} -o {output_dir} --with-metrics"
+            " --min-trials 2"
+        ),
+    )
+    assert result.exit_code == 0, result.output
+    session = pd.read_csv(pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_metrics-session.csv")
+    push = session[session["group"] == "resp-push"]
+    # The two lever pushes meet the lowered minimum.
+    assert push["n_trials"].tolist() == [2, 2]
+    assert push["amplitude_mean"].notna().all()
+
+
 def test_perievent_cmd_with_metrics_rejects_h5(perievent_h5, perievent_trials_csv, output_dir):
     result = CliRunner().invoke(
         mesoscopy.cli, args=f"process peri-event {perievent_h5} {perievent_trials_csv} -o {output_dir} --with-metrics"
