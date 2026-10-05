@@ -549,9 +549,9 @@ def metrics_tables(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Per-trial and per-session metric tables from a long-format peri-event table.
 
-    The per-session table has a row for all trials and, for go/no-go sessions with an `sdt_type` column, one for
-    each `trial_groups` group; other sessions get the all-trials rows only, with a warning. For go/no-go sessions,
-    the per-session table also gets the `reliability_metrics` columns. They are skipped with a warning when the
+    For go/no-go sessions with an `sdt_type` column, the per-session table has a row per region for each
+    `trial_groups` group; other sessions get the `all` rows only, with a warning. For go/no-go sessions, the
+    per-session table also gets the `reliability_metrics` columns. They are skipped with a warning when the
     trials columns they need are missing, the session is not go/no-go, or the windows are reward-aligned.
 
     Args:

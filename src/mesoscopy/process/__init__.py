@@ -492,8 +492,8 @@ def _metrics_options(command: Callable[..., None]) -> Callable[..., None]:
             type=click.IntRange(min=1),
             default=10,
             show_default=True,
-            help="Trial groups with fewer trials get empty session and reliability metrics. The all-trials session"
-            " metrics are always taken.",
+            help="Trial groups with fewer trials get empty session summaries and reliability metrics. The all-trials"
+            " summaries are always taken.",
         ),
     ]
     for option in reversed(options):
