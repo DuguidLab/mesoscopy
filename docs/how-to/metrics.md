@@ -67,7 +67,8 @@ Without it, or for sessions other than go/no-go, the session table has the `all`
 
 Every group gets a row. A group with fewer than `--min-trials` (default 10) trials keeps its trial counts
 (`n_trials`, `onset_n`, `decay_n`, `offset_n` and `reliability_n`) and is otherwise empty. The `all` row's
-across-trial summaries are always taken; its reliability columns follow the same minimum.
+across-trial summaries are always taken; its reliability columns follow the same minimum. For the reliability
+columns the minimum applies to `reliability_n`, the trials left after `--min-rt`.
 
 ## Metrics
 
