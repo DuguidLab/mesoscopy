@@ -12,6 +12,10 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 - `<stem>_metrics-session.csv` has one row per region and trial group, with a `group` column (`all`, `sdt-hit`, ..., `resp-nopush`), instead of one row per region with `_<group>` suffixed reliability columns. The peri-event report's trial-group selector now picks the session table rows and the atlas colouring, and session tables without a `group` column are read as all trials. `metrics.reliability_groups` is renamed `metrics.trial_groups`, keys all trials as `all` and adds the lever-push groups; `metrics.reliability_metrics` returns the metrics per group; `ReliabilityOptions.min_trials` is replaced by the `min_trials` argument of `metrics.metrics_tables` and `metrics.reliability_metrics` ([#183](https://github.com/DuguidLab/mesoscopy/issues/183)).
 
+### Performance
+
+- `metrics.decay_time`, `metrics.offset_time` and `metrics.extrapolated_onset` work on whole arrays instead of looping over trials. ([#183](https://github.com/DuguidLab/mesoscopy/issues/183)).
+
 ## [0.14.0] - 2026-09-29
 
 ### Added
