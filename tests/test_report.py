@@ -191,8 +191,11 @@ def test_report_cmd_writes_perievent_report(perievent_csv, output_dir):
     assert payload["sdt_type"] == ["hit", "miss", "hit", "correct_rejection", "unlabelled"]
     assert payload["trial_index"] == [0, 1, 2, 3, 4]
     assert payload["event_time"] == [4.5, 9.5, 14.5, 19.5, 24.5]
-    assert len(payload["session_metrics"]) == 3
-    assert "epoch_correlation_stim-go" in payload["session_metrics"][0]
+    # One row per region and trial group, with the reliability metrics.
+    assert len(payload["session_metrics"]) == 3 * 9
+    assert payload["session_metrics"][0]["group"] == "all"
+    assert {"resp-push", "resp-nopush"} <= {row["group"] for row in payload["session_metrics"]}
+    assert "epoch_correlation" in payload["session_metrics"][0]
     assert 'id="pev-session-group"' in html
     assert {row["region"] for row in payload["trial_metrics"]} == set(REGIONS)
     assert set(payload["trial_metrics"][0]) == set(pevreport.TRIAL_METRIC_COLUMNS)
@@ -218,6 +221,22 @@ def test_report_without_metrics_warns_and_omits_section(perievent_csv, tmp_path)
     assert payload["session_metrics"] is None
     assert 'id="pev-metric"' not in html
     assert 'id="pev-markers"' not in html
+
+
+def test_report_reads_session_table_without_groups(perievent_csv, tmp_path):
+    """Session tables written before trial-group rows are read as all trials."""
+    alone = tmp_path / pathlib.Path(perievent_csv).name
+    shutil.copy(perievent_csv, alone)
+    trial_path, session_path = pevreport.metrics_paths(perievent_csv)
+    shutil.copy(trial_path, tmp_path / trial_path.name)
+    session = pd.read_csv(session_path)
+    session[session["group"] == "all"].drop(columns="group").to_csv(tmp_path / session_path.name, index=False)
+
+    payload, warnings = pevreport.report_payload(str(alone))
+
+    assert not warnings
+    assert [row["group"] for row in payload["session_metrics"]] == ["all"] * len(REGIONS)
+    assert [row["region"] for row in payload["session_metrics"]] == REGIONS
 
 
 def test_report_without_sdt_type_warns_unless_trials_given(perievent_dir, perievent_csv, tmp_path):

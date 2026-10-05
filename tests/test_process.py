@@ -2494,6 +2494,7 @@ class TestMetricsTables:
         assert list(per_trial.columns[:3]) == ["trial_index", "event_time", "region"]
         assert len(per_trial) == 3 * len(PERIEVENT_REGIONS)
         assert per_session["region"].tolist() == PERIEVENT_REGIONS
+        assert per_session["group"].tolist() == ["all", "all"]
         assert per_session["n_trials"].tolist() == [3, 3]
         first = per_trial.iloc[0]
         assert first["onset_time"] == pytest.approx(0.24)
@@ -2609,8 +2610,10 @@ def test_metrics_cmd(metrics_perievent_csv, output_dir):
     assert trial["peak_time"].iloc[1] == 0.0
 
     session = pd.read_csv(session_path)
-    assert list(session.columns[:3]) == ["region", "n_trials", "trace_correlation"]
+    assert list(session.columns[:4]) == ["region", "group", "n_trials", "trace_correlation"]
     assert session["region"].tolist() == PERIEVENT_REGIONS
+    # Without sdt_type there are no trial groups.
+    assert session["group"].tolist() == ["all", "all"]
     assert session["n_trials"].tolist() == [3, 3]
     assert session["onset_n"].tolist() == [2, 2]
     assert session["decay_n"].tolist() == [1, 1]
@@ -2656,7 +2659,10 @@ def test_metrics_cmd_extrapolate_and_smooth(metrics_perievent_csv, output_dir):
     assert first["offset_time"] == pytest.approx(1.72, abs=0.05)  # return to 0.3 of the amplitude
 
 
-@pytest.mark.parametrize(("option", "hint"), [("--smooth 4", "odd"), ("--extrapolate-range 0.8 0.2", "LOW < HIGH")])
+@pytest.mark.parametrize(
+    ("option", "hint"),
+    [("--smooth 4", "odd"), ("--extrapolate-range 0.8 0.2", "LOW < HIGH"), ("--min-trials 0", "--min-trials")],
+)
 def test_metrics_cmd_rejects_bad_options(metrics_perievent_csv, output_dir, option, hint):
     result = CliRunner().invoke(mesoscopy.cli, args=f"process metrics {metrics_perievent_csv} -o {output_dir} {option}")
     assert result.exit_code == 2
@@ -2736,7 +2742,8 @@ def test_perievent_cmd_with_metrics(perievent_regions_csv, perievent_trials_csv,
     session = pd.read_csv(pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_metrics-session.csv")
     assert trial["trial_index"].tolist() == [1, 2, 3, 4] * len(PERIEVENT_REGIONS)
     assert trial["sdt_type"].tolist()[:4] == ["hit", "miss", "false_alarm", "correct_rejection"]
-    assert session["region"].tolist() == PERIEVENT_REGIONS
+    assert session[session["group"] == "all"]["region"].tolist() == PERIEVENT_REGIONS
+    assert session[session["group"] == "resp-push"]["n_trials"].tolist() == [2, 2]
     # The peri-event --baseline is the metrics baseline, so the baseline mean is already zero.
     np.testing.assert_allclose(trial["baseline_mean"], 0.0, atol=1e-6)
 
@@ -2995,46 +3002,58 @@ class TestReliabilityMeasures:
         assert np.isnan(pm.variance_quench(epochs, np.zeros((200, 25))))
 
 
-class TestReliabilityGroups:
+class TestTrialGroups:
     def test_groups(self):
-        groups = pm.reliability_groups(_gonogo_info())
+        groups = pm.trial_groups(_gonogo_info())
         assert list(groups) == [
-            "",
+            "all",
             "sdt-hit",
             "sdt-miss",
             "sdt-false_alarm",
             "sdt-correct_rejection",
             "stim-go",
             "stim-nogo",
+            "resp-push",
+            "resp-nopush",
         ]
-        assert groups[""].sum() == 36
+        assert groups["all"].sum() == 36
         assert groups["sdt-hit"].sum() == 12
         assert groups["stim-go"].sum() == 18
         assert groups["stim-nogo"].sum() == 18
+        # Hits and false alarms push the lever; misses and correct rejections do not.
+        np.testing.assert_array_equal(groups["resp-push"], groups["sdt-hit"] | groups["sdt-false_alarm"])
+        np.testing.assert_array_equal(groups["resp-nopush"], groups["sdt-miss"] | groups["sdt-correct_rejection"])
+        assert groups["resp-push"].sum() == 24
+        assert groups["resp-nopush"].sum() == 12
 
 
 class TestReliabilityMetrics:
-    def test_columns_and_min_trials(self):
+    def test_groups_and_min_trials(self):
         info = _gonogo_info()
-        summary = pm.reliability_metrics(
-            _gonogo_traces(len(info)), METRICS_GRID, info, "cue_onset", (-1.0, 0.0), (0.0, 3.0)
-        )
-        groups = ["", "_sdt-hit", "_sdt-miss", "_sdt-false_alarm", "_sdt-correct_rejection", "_stim-go", "_stim-nogo"]
-        assert list(summary) == [f"{metric}{group}" for group in groups for metric in pm.RELIABILITY_METRICS]
-        assert summary["reliability_n"] == 36
-        assert summary["reliability_n_sdt-miss"] == 6
+        traces = _gonogo_traces(len(info))
+        args = (traces, METRICS_GRID, info, "cue_onset", (-1.0, 0.0), (0.0, 3.0))
+        summary = pm.reliability_metrics(*args)
+        assert list(summary) == list(pm.trial_groups(info))
+        assert all(list(values) == list(pm.RELIABILITY_METRICS) for values in summary.values())
+        assert summary["all"]["reliability_n"] == 36
+        assert summary["sdt-miss"]["reliability_n"] == 6
+        assert summary["resp-push"]["reliability_n"] == 24
+        assert summary["resp-nopush"]["reliability_n"] == 12
         # Six misses are below the default 10-trial minimum.
-        assert np.isnan(summary["epoch_correlation_sdt-miss"])
-        assert summary["epoch_correlation"] > 0.5
-        assert summary["epoch_correlation_sdt-hit"] > 0.5
-        assert 0 < summary["signal_fraction"] <= 1
+        assert np.isnan(summary["sdt-miss"]["epoch_correlation"])
+        assert summary["all"]["epoch_correlation"] > 0.5
+        assert summary["sdt-hit"]["epoch_correlation"] > 0.5
+        assert 0 < summary["all"]["signal_fraction"] <= 1
+        lowered = pm.reliability_metrics(*args, min_trials=5)
+        assert np.isfinite(lowered["sdt-miss"]["epoch_correlation"])
+        assert lowered["all"]["epoch_correlation"] == summary["all"]["epoch_correlation"]
 
     def test_masking_changes_epochs(self):
         info = _gonogo_info()
         traces = _gonogo_traces(len(info))
         args = (traces, METRICS_GRID, info, "cue_onset", (-1.0, 0.0), (0.0, 3.0))
-        masked = pm.reliability_metrics(*args)
-        unmasked = pm.reliability_metrics(*args, pm.ReliabilityOptions(mask_response=False))
+        masked = pm.reliability_metrics(*args)["all"]
+        unmasked = pm.reliability_metrics(*args, pm.ReliabilityOptions(mask_response=False))["all"]
         assert masked["epoch_correlation"] != unmasked["epoch_correlation"]
         # Unmasked over the whole response window, epoch correlation is the trace correlation.
         assert unmasked["epoch_correlation"] == pytest.approx(pm.trace_correlation(traces, METRICS_GRID, 0.0, 3.0))
@@ -3045,9 +3064,9 @@ class TestReliabilityMetrics:
         summary = pm.reliability_metrics(
             _gonogo_traces(len(info)), METRICS_GRID, info, "cue_onset", (-1.0, 0.0), (0.0, 3.0), options
         )
-        assert summary["reliability_n_sdt-hit"] == 8
+        assert summary["sdt-hit"]["reliability_n"] == 8
         # Two false alarms are also faster than 0.65 s.
-        assert summary["reliability_n"] == 36 - 6
+        assert summary["all"]["reliability_n"] == 36 - 6
 
     def test_time_warp(self):
         info = _gonogo_info()
@@ -3060,7 +3079,7 @@ class TestReliabilityMetrics:
             (0.0, 3.0),
             pm.ReliabilityOptions(time_warp=True),
         )
-        assert np.isfinite(summary["epoch_correlation"])
+        assert np.isfinite(summary["all"]["epoch_correlation"])
 
     def test_lever_baseline_before_cue(self):
         info = _gonogo_info("response")
@@ -3073,7 +3092,7 @@ class TestReliabilityMetrics:
             (-1.0, 0.0),
             (0.0, 3.0),
             pm.ReliabilityOptions(cue_baseline=(-0.5, 0.0)),
-        )
+        )["all"]
         assert summary["reliability_n"] == 24
         assert np.isfinite(summary["variance_quench"])
         # With a baseline reaching before the window, every trial's baseline is NaN.
@@ -3085,7 +3104,7 @@ class TestReliabilityMetrics:
             (-1.0, 0.0),
             (0.0, 3.0),
             pm.ReliabilityOptions(cue_baseline=(-2.0, 0.0)),
-        )
+        )["all"]
         assert np.isnan(uncovered["variance_quench"])
         assert np.isnan(uncovered["response_fraction"])
         assert uncovered["epoch_correlation"] == pytest.approx(summary["epoch_correlation"])
@@ -3094,23 +3113,74 @@ class TestReliabilityMetrics:
 class TestMetricsTablesReliability:
     def test_gonogo_session(self):
         _, per_session = pm.metrics_tables(_gonogo_perievent())
-        assert per_session["region"].tolist() == PERIEVENT_REGIONS
-        assert "epoch_correlation_stim-nogo" in per_session.columns
-        signal, noise = per_session["epoch_correlation"]
+        groups = list(pm.trial_groups(_gonogo_info()))
+        assert per_session["region"].tolist() == [region for region in PERIEVENT_REGIONS for _ in groups]
+        assert per_session["group"].tolist() == groups * len(PERIEVENT_REGIONS)
+        assert list(per_session.columns[:4]) == ["region", "group", "n_trials", "trace_correlation"]
+        assert list(per_session.columns[-5:]) == list(pm.RELIABILITY_METRICS)
+        signal, noise = per_session[per_session["group"] == "all"]["epoch_correlation"]
         assert signal > 0.5
         assert abs(noise) < 0.1
 
-    def test_old_columns_unchanged(self):
+    def test_reliability_only_adds_columns(self):
         perievent = _gonogo_perievent()
         _, with_reliability = pm.metrics_tables(perievent)
         with pytest.warns(UserWarning, match="Skipping reliability"):
-            _, without = pm.metrics_tables(perievent.drop(columns="sdt_type"))
+            _, without = pm.metrics_tables(perievent.drop(columns="response_time"))
         pd.testing.assert_frame_equal(with_reliability[without.columns], without)
+
+    def test_group_summaries(self):
+        _, per_session = pm.metrics_tables(_gonogo_perievent())
+        info = _gonogo_info()
+        traces = _gonogo_traces(len(info))
+        hits = (info["sdt_type"] == "hit").to_numpy()
+        metrics = pm.trial_metrics(traces[hits], METRICS_GRID, (-1.0, 0.0), (0.0, 3.0))
+        expected = pm.session_metrics(metrics, pm.trace_correlation(traces[hits], METRICS_GRID, 0.0, 3.0))
+        row = per_session[(per_session["region"] == PERIEVENT_REGIONS[0]) & (per_session["group"] == "sdt-hit")]
+        assert row.iloc[0][list(expected)].tolist() == pytest.approx(list(expected.values()), nan_ok=True)
+
+    def test_min_trials(self):
+        perievent = _gonogo_perievent()
+        _, per_session = pm.metrics_tables(perievent)
+        misses = per_session[per_session["group"] == "sdt-miss"]
+        # Six misses are below the default 10-trial minimum: the counts stay, the estimates are empty.
+        assert misses["n_trials"].tolist() == [6, 6]
+        assert misses["onset_n"].notna().all()
+        assert misses[["trace_correlation", "amplitude_mean", "amplitude_sd", "epoch_correlation"]].isna().all().all()
+
+        _, lowered = pm.metrics_tables(perievent, min_trials=5)
+        assert lowered[lowered["group"] == "sdt-miss"][["amplitude_mean", "epoch_correlation"]].notna().all().all()
+
+        # The all-trials summaries are always taken; their reliability metrics follow the minimum.
+        _, strict = pm.metrics_tables(perievent, min_trials=100)
+        everything = strict[strict["group"] == "all"]
+        pd.testing.assert_frame_equal(
+            everything[["n_trials", "trace_correlation", "amplitude_mean"]],
+            per_session[per_session["group"] == "all"][["n_trials", "trace_correlation", "amplitude_mean"]],
+        )
+        assert everything["epoch_correlation"].isna().all()
+
+    def test_without_sdt_type_only_all_trials(self):
+        perievent = _gonogo_perievent()
+        _, grouped = pm.metrics_tables(perievent)
+        with (
+            pytest.warns(UserWarning, match="Skipping reliability"),
+            pytest.warns(UserWarning, match="Skipping trial groups: no sdt_type column"),
+        ):
+            _, plain = pm.metrics_tables(perievent.drop(columns="sdt_type"))
+        assert plain["region"].tolist() == PERIEVENT_REGIONS
+        assert plain["group"].tolist() == ["all", "all"]
+        everything = grouped[grouped["group"] == "all"].reset_index(drop=True)
+        pd.testing.assert_frame_equal(everything[plain.columns], plain)
 
     def test_lever_aligned(self):
         _, per_session = pm.metrics_tables(_gonogo_perievent("response"), baseline=(-1.0, 0.0))
-        assert per_session["reliability_n"].tolist() == [24, 24]
-        assert per_session["reliability_n_sdt-miss"].tolist() == [0, 0]
+        by_group = per_session.set_index(["group", "region"])
+        assert by_group.loc["all", "reliability_n"].tolist() == [24, 24]
+        assert by_group.loc["sdt-miss", "reliability_n"].tolist() == [0, 0]
+        # Only trials with a lever push have a lever-aligned window.
+        assert by_group.loc["resp-push", "n_trials"].tolist() == [24, 24]
+        assert by_group.loc["resp-nopush", "n_trials"].tolist() == [0, 0]
 
     def test_lever_baseline_outside_window_warns(self):
         with pytest.warns(UserWarning, match="pre-cue baseline outside the window"):
@@ -3141,6 +3211,16 @@ class TestMetricsTablesReliability:
         with pytest.warns(UserWarning, match="not defined for reward"):
             _, per_session = pm.metrics_tables(_gonogo_perievent(), event="reward")
         assert "epoch_correlation" not in per_session.columns
+        # Trial groups do not depend on the aligned event.
+        assert per_session["group"].unique().tolist() == list(pm.trial_groups(_gonogo_info()))
+
+    def test_groups_skipped_for_other_protocols(self):
+        with (
+            pytest.warns(UserWarning, match="Skipping reliability metrics: only go/no-go"),
+            pytest.warns(UserWarning, match="Skipping trial groups: only go/no-go"),
+        ):
+            _, per_session = pm.metrics_tables(_gonogo_perievent().assign(protocol="2afc"))
+        assert per_session["group"].tolist() == ["all", "all"]
 
 
 def test_metrics_cmd_reliability(output_dir, tmp_path):
@@ -3164,12 +3244,25 @@ def test_metrics_cmd_reliability(output_dir, tmp_path):
         ),
     )[1]
     pd.testing.assert_frame_equal(session, expected, check_dtype=False)
-    assert session["reliability_n"].tolist() == [36, 36]
+    assert session[session["group"] == "all"]["reliability_n"].tolist() == [36, 36]
+
+
+def test_metrics_cmd_min_trials(output_dir, tmp_path):
+    path = tmp_path / "ses-01_regions_event-cueonset_perievent.csv"
+    _gonogo_perievent().to_csv(path, index=False)
+    result = CliRunner().invoke(mesoscopy.cli, args=f"process metrics {path} -o {output_dir} --min-trials 5")
+    assert result.exit_code == 0, result.output
+    session = pd.read_csv(pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_metrics-session.csv")
+    expected = pm.metrics_tables(pd.read_csv(path), min_trials=5)[1]
+    pd.testing.assert_frame_equal(session, expected, check_dtype=False)
+    # Six misses meet the lowered minimum.
+    assert session[session["group"] == "sdt-miss"]["amplitude_mean"].notna().all()
 
 
 def test_metrics_cmd_reliability_skipped_warns(metrics_perievent_csv, output_dir):
     result = CliRunner().invoke(mesoscopy.cli, args=f"process metrics {metrics_perievent_csv} -o {output_dir}")
     assert result.exit_code == 0, result.output
+    assert "Warning: Skipping trial groups: no sdt_type column" in result.output
     assert "Warning: Skipping reliability metrics: no cue_onset, response_time, sdt_type column(s)" in result.output
 
 
