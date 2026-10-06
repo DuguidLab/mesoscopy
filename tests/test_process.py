@@ -11,6 +11,7 @@ import pytest
 import scipy.ndimage as ndi
 import scipy.stats as sst
 from click.testing import CliRunner
+from sklearn.feature_selection import mutual_info_regression
 
 import mesoscopy
 from mesoscopy import io
@@ -3640,6 +3641,7 @@ def test_perievent_cmd_with_metrics_bootstrap(perievent_regions_csv, perievent_t
 
 
 CONNECTIVITY_REGIONS = ["L_MOp", "R_MOp", "L_SSp-ul"]
+CONNECTIVITY_PAIRS = [("L_MOp", "R_MOp"), ("L_MOp", "L_SSp-ul"), ("R_MOp", "L_SSp-ul")]
 
 
 def _connectivity_cube(seed=0):
@@ -3673,7 +3675,8 @@ def _connectivity_perievent(cube=None):
 
 def _post_event_samples(end=3.0):
     """Samples of the grid within `[0, end]`."""
-    return int(((METRICS_GRID >= 0) & (METRICS_GRID <= np.nextafter(end, np.inf))).sum())
+    grid = METRICS_GRID
+    return int(((grid >= 0) & (grid <= np.nextafter(end, np.inf))).sum())
 
 
 class TestPerieventTrials:
@@ -3791,6 +3794,80 @@ class TestPartialCorrelation:
         assert np.isnan(pc.partial_correlation(samples[:1])).all()
 
 
+class TestMutualInformation:
+    @staticmethod
+    def _gaussian(rho, n, scale=(1.0, 1.0), seed=0):
+        rng = np.random.default_rng(seed)
+        return rng.multivariate_normal([0.0, 0.0], [[1.0, rho], [rho, 1.0]], n) * np.asarray(scale)
+
+    @pytest.mark.parametrize(
+        ("rho", "n", "scale"), [(0.3, 500, (1.0, 1.0)), (0.6, 2000, (0.3, 7.0)), (-0.9, 1000, (5.0, 0.1))]
+    )
+    def test_matches_sklearn(self, rho, n, scale):
+        z = self._gaussian(rho, n, scale)
+        expected = mutual_info_regression(z[:, [0]], z[:, 1], n_neighbors=3, random_state=0)[0] / np.log(2)
+        assert pc.mutual_information(z[:, 0], z[:, 1]) == pytest.approx(expected, abs=0.005)
+
+    def test_gaussian_analytic(self):
+        z = self._gaussian(0.8, 20000)
+        assert pc.mutual_information(z[:, 0], z[:, 1]) == pytest.approx(-0.5 * np.log2(1 - 0.8**2), abs=0.05)
+
+    def test_independent_near_zero(self):
+        z = self._gaussian(0.0, 2000)
+        assert abs(pc.mutual_information(z[:, 0], z[:, 1])) < 0.05
+
+    def test_nonlinear_dependence(self):
+        rng = np.random.default_rng(0)
+        x = rng.uniform(-1.0, 1.0, 3000)
+        y = x**2 + 0.05 * rng.standard_normal(3000)
+        assert abs(np.corrcoef(x, y)[0, 1]) < 0.1
+        assert pc.mutual_information(x, y) > 1.0
+
+    def test_symmetric_and_affine_invariant(self):
+        z = self._gaussian(0.5, 500)
+        mi = pc.mutual_information(z[:, 0], z[:, 1])
+        assert pc.mutual_information(z[:, 1], z[:, 0]) == pytest.approx(mi)
+        # Rescaling moves a few samples across neighbour boundaries, which shifts the estimate by ~1e-4 bits.
+        assert pc.mutual_information(3.0 * z[:, 0] + 1.0, -z[:, 1]) == pytest.approx(mi, abs=0.01)
+
+    def test_neighbours(self):
+        z = self._gaussian(0.6, 2000)
+        assert pc.mutual_information(z[:, 0], z[:, 1], k=10) == pytest.approx(
+            pc.mutual_information(z[:, 0], z[:, 1]), abs=0.05
+        )
+
+    def test_undefined(self):
+        z = self._gaussian(0.5, 50)
+        assert np.isnan(pc.mutual_information(z[:3, 0], z[:3, 1]))
+        assert np.isnan(pc.mutual_information(np.ones(50), z[:, 1]))
+        assert np.isnan(pc.mutual_information(np.where(np.arange(50) == 7, np.nan, z[:, 0]), z[:, 1]))
+
+    def test_ties_are_finite(self):
+        rng = np.random.default_rng(0)
+        x = np.repeat([0.0, 1.0], 50)
+        assert np.isfinite(pc.mutual_information(x, rng.standard_normal(100)))
+        assert np.isfinite(pc.mutual_information(x, x))
+
+
+class TestMutualInformationMatrix:
+    def test_matches_pairs(self):
+        samples = np.random.default_rng(0).standard_normal((200, 4)) @ np.random.default_rng(1).standard_normal((4, 4))
+        matrix = pc.mutual_information_matrix(samples)
+        assert np.isnan(np.diag(matrix)).all()
+        for i in range(4):
+            for j in range(i + 1, 4):
+                assert matrix[i, j] == pc.mutual_information(samples[:, i], samples[:, j])
+                assert matrix[j, i] == matrix[i, j]
+
+    def test_nan_column(self):
+        samples = np.random.default_rng(0).standard_normal((100, 3))
+        samples[:, 1] = np.nan
+        matrix = pc.mutual_information_matrix(samples, k=5)
+        assert np.isnan(matrix[1]).all()
+        assert np.isnan(matrix[:, 1]).all()
+        assert matrix[0, 2] == pc.mutual_information(samples[:, 0], samples[:, 2], k=5)
+
+
 class TestLaggedCorrelation:
     def test_delayed_copy_peaks_at_its_lag(self):
         first = np.random.default_rng(0).standard_normal((4, 30))
@@ -3876,8 +3953,6 @@ class TestEpochBounds:
 
 
 class TestConnectivityTable:
-    PAIRS = [("L_MOp", "R_MOp"), ("L_MOp", "L_SSp-ul"), ("R_MOp", "L_SSp-ul")]
-
     @staticmethod
     def _row(table, pair, group):
         return table[(table["region_a"] == pair[0]) & (table["region_b"] == pair[1]) & (table["group"] == group)].iloc[
@@ -3888,19 +3963,23 @@ class TestConnectivityTable:
         table = pc.connectivity_table(_connectivity_perievent())
         groups = list(pm.trial_groups(_gonogo_info()))
         assert list(table.columns) == list(pc.TABLE_COLUMNS)
-        assert list(zip(table["region_a"], table["region_b"], strict=True)) == [p for p in self.PAIRS for _ in groups]
-        assert table["group"].tolist() == groups * len(self.PAIRS)
+        assert list(zip(table["region_a"], table["region_b"], strict=True)) == [
+            p for p in CONNECTIVITY_PAIRS for _ in groups
+        ]
+        assert table["group"].tolist() == groups * len(CONNECTIVITY_PAIRS)
         assert len(table) == 27
 
     def test_shared_response_versus_residual(self):
-        row = self._row(pc.connectivity_table(_connectivity_perievent()), self.PAIRS[0], "all")
+        row = self._row(pc.connectivity_table(_connectivity_perievent()), CONNECTIVITY_PAIRS[0], "all")
         assert row["r"] > 0.8
         assert abs(row["r_residual"]) < 0.15
         assert row["r_trials_avg"] > 0.8
+        assert row["mi"] > 0.5
+        assert abs(row["mi_residual"]) < 0.1
         assert row["n_trials"] == 36
 
     def test_lag_of_delayed_copy(self):
-        row = self._row(pc.connectivity_table(_connectivity_perievent()), self.PAIRS[1], "all")
+        row = self._row(pc.connectivity_table(_connectivity_perievent()), CONNECTIVITY_PAIRS[1], "all")
         assert row["lag"] == pytest.approx(0.08)
         assert row["r_lag"] == pytest.approx(1.0)
         assert row["r"] < row["r_lag"]
@@ -3977,6 +4056,22 @@ class TestConnectivityTable:
         joined = pc.connectivity_table(perievent.drop(columns=columns), trials=trials)
         pd.testing.assert_frame_equal(joined, pc.connectivity_table(perievent))
 
+    def test_without_mutual_info(self):
+        perievent = _connectivity_perievent()
+        skipped = pc.connectivity_table(perievent, mutual_info=False)
+        assert skipped[["mi", "mi_residual"]].isna().all().all()
+        others = [column for column in pc.TABLE_COLUMNS if column not in {"mi", "mi_residual"}]
+        pd.testing.assert_frame_equal(skipped[others], pc.connectivity_table(perievent)[others])
+
+    def test_mi_neighbours(self):
+        perievent = _connectivity_perievent()
+        default = pc.connectivity_table(perievent)
+        wider = pc.connectivity_table(perievent, mi_neighbours=10)
+        assert not np.allclose(default["mi"].dropna(), wider["mi"].dropna())
+        assert wider[wider["group"] == "all"]["mi"].tolist() == pytest.approx(
+            default[default["group"] == "all"]["mi"].tolist(), abs=0.1
+        )
+
     def test_invalid_table(self):
         with pytest.raises(ValueError, match="lacks the F column"):
             pc.connectivity_table(_connectivity_perievent().drop(columns="F"))
@@ -4020,6 +4115,23 @@ def test_connectivity_cmd_options(output_dir, tmp_path):
     assert table["lag"].abs().max() <= 0.2 + 1e-9
 
 
+def test_connectivity_cmd_mutual_info_options(output_dir, tmp_path):
+    path = tmp_path / "ses-01_regions_event-cueonset_perievent.csv"
+    _connectivity_perievent().to_csv(path, index=False)
+    result = CliRunner().invoke(mesoscopy.cli, args=f"process connectivity {path} -o {output_dir} --mi-neighbours 5")
+    assert result.exit_code == 0, result.output
+    table = pd.read_csv(pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_connectivity.csv")
+    expected = pc.connectivity_table(pd.read_csv(path), mi_neighbours=5)
+    pd.testing.assert_frame_equal(table, expected, check_dtype=False)
+    assert table[table["group"] == "all"]["mi"].notna().all()
+
+    result = CliRunner().invoke(mesoscopy.cli, args=f"process connectivity {path} -o {output_dir} --no-mi")
+    assert result.exit_code == 0, result.output
+    table = pd.read_csv(pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_connectivity.csv")
+    assert table[["mi", "mi_residual"]].isna().all().all()
+    assert table["r"].notna().sum() == expected["r"].notna().sum()
+
+
 def test_connectivity_cmd_joins_trials(output_dir, tmp_path):
     perievent = _connectivity_perievent()
     columns = [column for column in perievent.columns if column not in pm.PERIEVENT_COLUMNS]
@@ -4031,7 +4143,9 @@ def test_connectivity_cmd_joins_trials(output_dir, tmp_path):
     assert result.exit_code == 0, result.output
     assert "Warning" not in result.output
     table = pd.read_csv(pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_connectivity.csv")
-    pd.testing.assert_frame_equal(table, pc.connectivity_table(perievent), check_dtype=False)
+    expected = pc.connectivity_table(pd.read_csv(path), trials=pd.read_csv(trials_path))
+    pd.testing.assert_frame_equal(table, expected, check_dtype=False)
+    assert table["n_trials"].tolist() == pc.connectivity_table(perievent)["n_trials"].tolist()
 
 
 def test_connectivity_cmd_warns_without_trials_columns(metrics_perievent_csv, output_dir):
