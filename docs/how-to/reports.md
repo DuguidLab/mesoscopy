@@ -36,3 +36,8 @@ each, per-trial box plots for the selected region, the atlas coloured by a sessi
 table. The atlas and the session table follow the [trial group](metrics.md#trial-groups) chosen above the table,
 and for go/no-go sessions the table also shows the reliability metrics. Peri-event files written without the trials
 columns have no trial types; pass the trials CSV with `-t/--trials` to recover them.
+
+When the `*_connectivity.csv` from `process connectivity` sits next to the input, the report adds a
+[connectivity](connectivity.md) section. It shows the chosen metric for the chosen trial group as a region by
+region heatmap, and the trial group follows the selector above the session table. Click a cell to select its row
+region in the rest of the report.

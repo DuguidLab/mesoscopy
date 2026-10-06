@@ -32,6 +32,9 @@ file.
 Groups with fewer than `--min-trials` trials (default 10) keep their `n_trials` and are otherwise empty. The `all`
 rows are always filled. A session without the `sdt_type` column gets the `all` rows only.
 
+Keep the table next to the peri-event file and `mesoscopy report` on that file shows it as a heatmap, one metric
+and trial group at a time. See [Reports](reports.md#peri-event-report).
+
 ## Epoch
 
 Each trial contributes the samples between the cue and its response. Misses and correct rejections end at the
