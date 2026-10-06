@@ -27,6 +27,14 @@
         Metrics
     </a> </li>
 {% endif %}
+{% if has_connectivity %}
+<li class="nav-item"> <a class="nav-link d-flex align-items-center gap-2" href="#connectivity">
+        <svg class="bi" aria-hidden="true">
+            <use xlink:href="#graph-up"></use>
+        </svg>
+        Connectivity
+    </a> </li>
+{% endif %}
 {% endblock %}
 
 {% block content %}
@@ -66,6 +74,9 @@
         <div class="col-md-4 mb-1"><strong>Regions:</strong> {{ n_regions }}</div>
         <div class="col-md-4 mb-1"><strong>Trial types:</strong> {{ "sdt_type" if has_types else "not available" }}</div>
         <div class="col-md-4 mb-1"><strong>Metrics:</strong> {{ "present" if has_metrics else "not found" }}</div>
+    </div>
+    <div class="row mb-1">
+        <div class="col-md-4 mb-1"><strong>Connectivity:</strong> {{ "present" if has_connectivity else "not found" }}</div>
     </div>
 </div>
 
@@ -163,6 +174,25 @@
     </div>
 </div>
 {% endif %}
+{% if has_connectivity %}
+<div class="row mb-3">
+    <h2 id="connectivity">Connectivity <small class="text-secondary fs-6" id="pev-conn-subtitle"></small></h2>
+    <div class="col-12">
+        <div class="d-flex align-items-center gap-3 flex-wrap mb-1">
+            <div class="d-flex align-items-center gap-2">
+                <span class="fw-semibold">Metric</span>
+                <select id="pev-conn-metric" class="form-select form-select-sm w-auto"></select>
+            </div>
+            <div class="d-flex align-items-center gap-2">
+                <span class="fw-semibold">Trial group</span>
+                <select id="pev-conn-group" class="form-select form-select-sm w-auto"></select>
+            </div>
+            <span class="small text-secondary">Click a cell to select its row region.</span>
+        </div>
+        <div id="pev-conn-heatmap" style="height: 680px"></div>
+    </div>
+</div>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}
@@ -189,6 +219,25 @@
     const GROUP_LABELS = {'all': 'all trials', 'sdt-hit': 'hit', 'sdt-miss': 'miss', 'sdt-false_alarm': 'false_alarm', 'sdt-correct_rejection': 'correct_rejection', 'stim-go': 'go stimulus', 'stim-nogo': 'no-go stimulus', 'resp-push': 'lever push', 'resp-nopush': 'no lever push'};
     const GROUPS = hasMetrics ? [...new Set(DATA.session_metrics.map(r => r.group))] : [];
     const ATLAS_METRICS = ['amplitude_mean', 'peak_time_mean', 'onset_time_mean', 'offset_time_mean', 'auc_mean', 'duration_mean', 'amplitude_cv', 'trace_correlation'];
+    const hasConn = !!DATA.connectivity;
+    // Connectivity cubes per group, (metric, region, region) float32, with one colour range per metric over every group.
+    const CONN = hasConn ? (() => {
+        const c = DATA.connectivity, cubes = {}, range = {};
+        for (const g of c.groups) cubes[g] = new Float32Array(Uint8Array.from(atob(c.values[g]), ch => ch.charCodeAt(0)).buffer);
+        c.metrics.forEach((metric, m) => {
+            const all = [];
+            for (const g of c.groups) for (let k = m * nR * nR; k < (m + 1) * nR * nR; k++) { const v = cubes[g][k]; if (!Number.isNaN(v)) all.push(v); }
+            all.sort((a, b) => a - b);
+            const lo = all[0] ?? 0, hi = all[all.length - 1] ?? 0, lim = Math.max(Math.abs(lo), Math.abs(hi)) || 1;
+            // Mutual information saturates at the 99th percentile, so a few near-identical pairs do not flatten the rest.
+            const cap = all.length ? all[Math.floor(0.99 * (all.length - 1))] : 0;
+            range[metric] = metric.startsWith('mi') ? {zmin: 0, zmax: cap > 0 ? cap : 1, colorscale: 'Viridis', reversescale: false}
+                : metric === 'lag' ? {zmin: -lim, zmax: lim, colorscale: 'RdBu', reversescale: false}
+                : {zmin: -1, zmax: 1, colorscale: 'RdBu', reversescale: false};
+        });
+        const matrix = (g, m) => DATA.regions.map((_, i) => DATA.regions.map((__, j) => { const v = cubes[g][(m * nR + i) * nR + j]; return Number.isNaN(v) ? null : v; }));
+        return {...c, matrix, range};
+    })() : null;
 
     const state = {types: new Set(TYPES), view: 'mean', split: false, markers: hasMetrics, marks: new Set(['onset_time', 'peak_time']), stat: 'mean', region: DATA.regions[0]};
     const ri = Object.fromEntries(DATA.regions.map((r, i) => [r, i]));
@@ -431,12 +480,36 @@
         metrics.forEach((m, k) => { lay[`xaxis${k + 1}`] = {showticklabels: false, title: {text: m, font: {size: 11}}}; lay[`yaxis${k + 1}`] = {tickfont: {size: 9}}; });
         Plotly.react('pev-trial-metrics', traces, lay, CFG);
     }
+    // ---------- connectivity section ----------
+    function renderConnectivity() {
+        const metric = $('pev-conn-metric').value, group = $('pev-conn-group').value;
+        const counts = CONN.counts[group], r = CONN.range[metric], sel = ri[state.region];
+        $('pev-conn-subtitle').textContent = `${metric}, ${GROUP_LABELS[group] ?? group}, ${counts.n_trials} trials, ${counts.n_samples} samples`;
+        const trace = {type: 'heatmap', x: DATA.regions, y: DATA.regions, z: CONN.matrix(group, CONN.metrics.indexOf(metric)), zmin: r.zmin, zmax: r.zmax,
+            colorscale: r.colorscale, reversescale: r.reversescale, hoverongaps: false, xgap: 1, ygap: 1,
+            colorbar: {title: {text: metric}, thickness: 12, tickfont: {size: 10}}, hovertemplate: '%{y} and %{x}<br>' + metric + ' = %{z:.3f}<extra></extra>'};
+        // Outline the selected region's row and column.
+        const band = (x0, x1, y0, y1) => ({type: 'rect', xref: 'x', yref: 'y', x0, x1, y0, y1, line: {color: fg(), width: 1}});
+        const shapes = sel === undefined ? [] : [band(-0.5, nR - 0.5, sel - 0.5, sel + 0.5), band(sel - 0.5, sel + 0.5, -0.5, nR - 0.5)];
+        const lay = {margin: {l: 10, r: 10, t: 10, b: 10}, shapes,
+            xaxis: {tickfont: {size: 8}, tickangle: -60, automargin: true, constrain: 'domain'},
+            yaxis: {tickfont: {size: 8}, autorange: 'reversed', automargin: true, scaleanchor: 'x', constrain: 'domain'},
+            paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: {color: fg()}};
+        Plotly.react('pev-conn-heatmap', [trace], lay, CFG);
+    }
+    const syncGroup = (from, to, known) => { if (to && known.includes(from.value)) to.value = from.value; };
     if (hasMetrics) {
         buildAtlas($('pev-atlas-metric'));
         $('pev-metric').innerHTML = ATLAS_METRICS.filter(m => m in DATA.session_metrics[0]).map(m => `<option value="${m}">${m}</option>`).join('');
         $('pev-metric').onchange = renderMetricAtlas;
         $('pev-session-group').innerHTML = GROUPS.map(g => `<option value="${g}">${GROUP_LABELS[g] ?? g}</option>`).join('');
-        $('pev-session-group').onchange = () => { renderSessionTable(); renderMetricAtlas(); };
+        $('pev-session-group').onchange = () => { if (hasConn) syncGroup($('pev-session-group'), $('pev-conn-group'), CONN.groups); renderSessionTable(); renderMetricAtlas(); if (hasConn) renderConnectivity(); };
+    }
+    if (hasConn) {
+        $('pev-conn-metric').innerHTML = CONN.metrics.map(m => `<option value="${m}">${m}</option>`).join('');
+        $('pev-conn-metric').onchange = renderConnectivity;
+        $('pev-conn-group').innerHTML = CONN.groups.map(g => `<option value="${g}">${GROUP_LABELS[g] ?? g}</option>`).join('');
+        $('pev-conn-group').onchange = () => { if (hasMetrics) { syncGroup($('pev-conn-group'), $('pev-session-group'), GROUPS); renderSessionTable(); renderMetricAtlas(); } renderConnectivity(); };
     }
 
     // ---------- render ----------
@@ -452,8 +525,10 @@
             Plotly.react(el, tracesFor(i, true), layout(true, name), CFG);
         });
         if (hasMetrics) { renderSessionTable(); renderMetricAtlas(); renderTrialMetrics(); }
+        if (hasConn) renderConnectivity();
     }
     render();
+    if (hasConn) $('pev-conn-heatmap').on('plotly_click', ev => selectRegion(ev.points[0].y));
     const setSticky = () => document.documentElement.style.setProperty('--pev-sticky', `${48 + document.querySelector('.pev-controls').offsetHeight + 8}px`);
     setSticky();
     window.addEventListener('resize', setSticky);

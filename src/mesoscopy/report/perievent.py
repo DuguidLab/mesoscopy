@@ -44,6 +44,9 @@ TRIAL_METRIC_COLUMNS = [
     "duration",
 ]
 
+# Connectivity metrics embedded for the pair heatmap, in `process connectivity` column order.
+CONNECTIVITY_METRICS = ["r", "r_residual", "r_trials_avg", "mi", "mi_residual", "partial_r", "lag", "r_lag"]
+
 UNLABELLED = "unlabelled"
 
 
@@ -177,6 +180,50 @@ def metrics_paths(path: str) -> tuple[Path, Path]:
     return parent / f"{stem}_metrics.csv", parent / f"{stem}_metrics-session.csv"
 
 
+def connectivity_path(path: str) -> Path:
+    """Path of the connectivity table `process connectivity` writes next to a peri-event CSV.
+
+    Args:
+        path (str): `*_perievent.csv` path.
+
+    Returns:
+        Path: `<stem>_connectivity.csv`, whether or not it exists.
+    """
+    stem = Path(path).with_suffix("").name.removesuffix("_perievent")
+    return Path(path).parent / f"{stem}_connectivity.csv"
+
+
+def connectivity_payload(table: pd.DataFrame, regions: list[str]) -> dict:
+    """Pack a connectivity table as one float32 cube per trial group, for the pair heatmap.
+
+    Args:
+        table (pd.DataFrame): Table written by `process connectivity`.
+        regions (list[str]): Regions on the heatmap axes, in order. Pairs with other regions are left out.
+
+    Returns:
+        dict: `metrics`, the `CONNECTIVITY_METRICS` the table has values for; `groups` in table order; `counts`, the
+            `n_trials` and `n_samples` of each group; and `values`, one packed `(n_metrics, n_regions, n_regions)`
+            cube per group, NaN on the diagonal and for missing pairs.
+    """
+    metrics = [metric for metric in CONNECTIVITY_METRICS if metric in table.columns and table[metric].notna().any()]
+    index = {region: i for i, region in enumerate(regions)}
+    known = table[table["region_a"].isin(index) & table["region_b"].isin(index)]
+    groups = list(table["group"].unique())
+    counts = {}
+    values = {}
+    for group in groups:
+        rows = known[known["group"] == group]
+        a = rows["region_a"].map(index).to_numpy(dtype=int)
+        b = rows["region_b"].map(index).to_numpy(dtype=int)
+        cube = np.full((len(metrics), len(regions), len(regions)), np.nan, dtype=np.float32)
+        for m, metric in enumerate(metrics):
+            cube[m, a, b] = cube[m, b, a] = rows[metric].to_numpy(dtype=np.float32)
+        first = table[table["group"] == group].iloc[0]
+        counts[group] = {"n_trials": int(first["n_trials"]), "n_samples": int(first["n_samples"])}
+        values[group] = pack_float32(cube)
+    return {"metrics": metrics, "groups": groups, "counts": counts, "values": values}
+
+
 def _records(table: pd.DataFrame) -> list[dict]:
     return table.astype(object).where(table.notna(), None).to_dict(orient="records")
 
@@ -215,6 +262,12 @@ def report_payload(path: str, trials_path: str | None = None) -> tuple[dict, lis
     else:
         warnings.append(f"No metrics tables found next to {Path(path).name}; the metrics section is omitted.")
 
+    connectivity = None
+    if connectivity_path(path).exists():
+        connectivity = connectivity_payload(pd.read_csv(connectivity_path(path)), regions)
+    else:
+        warnings.append(f"No connectivity table found next to {Path(path).name}; the connectivity section is omitted.")
+
     event = Path(path).name.rsplit("_event-", 1)[-1].removesuffix("_perievent.csv") if "_event-" in path else None
     payload = {
         "regions": regions,
@@ -228,5 +281,6 @@ def report_payload(path: str, trials_path: str | None = None) -> tuple[dict, lis
         "atlas": {"shape": list(resources.atlas_shape()), "paths": atlas_outlines()},
         "trial_metrics": None if trial_metrics is None else _records(trial_metrics),
         "session_metrics": None if session_metrics is None else _records(session_metrics),
+        "connectivity": connectivity,
     }
     return payload, warnings
