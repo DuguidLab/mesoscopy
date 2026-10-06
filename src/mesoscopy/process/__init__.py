@@ -492,8 +492,8 @@ def _metrics_options(command: Callable[..., None]) -> Callable[..., None]:
             type=click.IntRange(min=1),
             default=10,
             show_default=True,
-            help="Trial groups with fewer trials get empty session summaries and reliability metrics. The all-trials"
-            " summaries are always taken.",
+            help="Trial groups with fewer trials get empty session summaries, reliability and mean-trace metrics. The"
+            " all-trials session summaries are always taken.",
         ),
     ]
     for option in reversed(options):
@@ -558,6 +558,51 @@ def _reliability_options(command: Callable[..., None]) -> Callable[..., None]:
     return wrapper
 
 
+def _bootstrap_options(command: Callable[..., None]) -> Callable[..., None]:
+    """Bootstrap options, passed to the callback as one `bootstrap` argument.
+
+    Args:
+        command (Callable[..., None]): Command callback to decorate; takes a `bootstrap` keyword argument.
+
+    Returns:
+        Callable[..., None]: The callback with the options attached.
+    """
+    names = [field.name for field in dataclasses.fields(pm.BootstrapOptions)]
+
+    @functools.wraps(command)
+    def wrapper(*args: typing.Any, **kwargs: typing.Any) -> None:
+        kwargs["bootstrap"] = pm.BootstrapOptions(**{name: kwargs.pop(name) for name in names})
+        command(*args, **kwargs)
+
+    options = [
+        click.option(
+            "--bootstrap",
+            "n_resamples",
+            type=click.IntRange(min=0),
+            default=10000,
+            show_default=True,
+            help="Resamples of each trial group for the mean-trace metrics and their intervals. 0 skips them.",
+        ),
+        click.option(
+            "--ci",
+            type=click.FloatRange(0, 100, min_open=True, max_open=True),
+            default=95.0,
+            show_default=True,
+            help="Width of the mean-trace metric intervals, in percent.",
+        ),
+        click.option(
+            "--seed",
+            type=int,
+            default=42,
+            show_default=True,
+            help="Random seed for the bootstrap resamples.",
+        ),
+    ]
+    for option in reversed(options):
+        wrapper = option(wrapper)
+    return wrapper
+
+
 def _echo_warnings(caught: list[warnings.WarningMessage]) -> None:
     """Echo the user warnings recorded while computing metrics.
 
@@ -587,21 +632,26 @@ def _validate_metrics_options(smoothing: int, extrapolate_range: tuple[float, fl
         raise click.BadParameter(msg, param_hint="--extrapolate-range")
 
 
-def _write_metrics(trial_table: pd.DataFrame, session_table: pd.DataFrame, out_dir: str, stem: str) -> None:
-    """Write the per-trial and per-session metric tables and echo their paths.
+def _write_metrics(tables: pm.MetricsTables, out_dir: str, stem: str) -> None:
+    """Write the metric tables and echo their paths.
 
     Args:
-        trial_table (pd.DataFrame): Per-trial metrics, from `metrics.metrics_tables`.
-        session_table (pd.DataFrame): Per-session metrics, from `metrics.metrics_tables`.
+        tables (pm.MetricsTables): Tables from `metrics.metrics_tables`; the bootstrap tables are skipped when None.
         out_dir (str): Output directory.
         stem (str): Output filename stem, without `_perievent`.
     """
-    trial_path = out_dir + os.sep + stem + "_metrics.csv"
-    session_path = out_dir + os.sep + stem + "_metrics-session.csv"
-    trial_table.to_csv(trial_path, index=False)
-    session_table.to_csv(session_path, index=False)
-    click.echo(f"Saved per-trial metrics at {trial_path}")
-    click.echo(f"Saved per-session metrics at {session_path}")
+    outputs = [
+        (tables.per_trial, "_metrics.csv", "per-trial metrics"),
+        (tables.per_session, "_metrics-session.csv", "per-session metrics"),
+        (tables.boot, "_metrics-boot.csv", "bootstrapped mean-trace metrics"),
+        (tables.boot_traces, "_traces-boot.csv", "bootstrapped mean traces"),
+    ]
+    for table, suffix, description in outputs:
+        if table is None:
+            continue
+        path = out_dir + os.sep + stem + suffix
+        table.to_csv(path, index=False)
+        click.echo(f"Saved {description} at {path}")
 
 
 @process_cmd.command("peri-event")
@@ -669,6 +719,7 @@ def _write_metrics(trial_table: pd.DataFrame, session_table: pd.DataFrame, out_d
 )
 @_metrics_options
 @_reliability_options
+@_bootstrap_options
 def perievent_cmd(
     recording_path: str,
     trials_path: str,
@@ -690,6 +741,7 @@ def perievent_cmd(
     decay_fraction: float,
     min_trials: int,
     reliability: pm.ReliabilityOptions,
+    bootstrap: pm.BootstrapOptions,
 ) -> None:
     """Extract per-trial windows around a behavioural event from a behaviour-aligned recording.
 
@@ -758,9 +810,10 @@ def perievent_cmd(
                 event=event,
                 reliability=reliability,
                 min_trials=min_trials,
+                bootstrap=bootstrap,
             )
         _echo_warnings(caught)
-        _write_metrics(*tables, out_dir, Path(outpath).stem.removesuffix("_perievent"))
+        _write_metrics(tables, out_dir, Path(outpath).stem.removesuffix("_perievent"))
 
 
 def _perievent_h5(
@@ -927,6 +980,7 @@ def _perievent_csv(
 )
 @_metrics_options
 @_reliability_options
+@_bootstrap_options
 def metrics_cmd(
     path: str,
     out_dir: str,
@@ -942,6 +996,7 @@ def metrics_cmd(
     decay_fraction: float,
     min_trials: int,
     reliability: pm.ReliabilityOptions,
+    bootstrap: pm.BootstrapOptions,
 ) -> None:
     """Extract per-trial response metrics and per-session variability from peri-event traces.
 
@@ -951,6 +1006,10 @@ def metrics_cmd(
     trial-trace correlation, per region and trial group. Go/no-go sessions are grouped by sdt_type, go/no-go
     stimulus and lever push, as well as all trials. For go/no-go sessions aligned to the cue, trial start or lever
     push, the session table also has trial-to-trial reliability metrics over the cue-to-lever epoch.
+
+    Also writes <stem>_metrics-boot.csv with the same metrics taken from the trial-mean trace of each region and
+    trial group, with bootstrap percentile intervals from resampling the trials, and <stem>_traces-boot.csv with
+    the mean traces and their intervals. --bootstrap 0 skips both.
     """  # noqa: DOC501
     import pandas as pd
 
@@ -987,10 +1046,11 @@ def metrics_cmd(
                 smoothing=smoothing,
                 reliability=reliability,
                 min_trials=min_trials,
+                bootstrap=bootstrap,
             )
         except ValueError as error:
             msg = f"{path}: {error} Expected the columns written by `process peri-event`."
             raise click.ClickException(msg) from error
     _echo_warnings(caught)
 
-    _write_metrics(*tables, out_dir, Path(path).stem.removesuffix("_perievent"))
+    _write_metrics(tables, out_dir, Path(path).stem.removesuffix("_perievent"))
