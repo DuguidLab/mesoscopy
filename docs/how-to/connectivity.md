@@ -1,0 +1,81 @@
+# Connectivity
+
+`mesoscopy process connectivity` measures how pairs of regions covary while the animal responds to the cue. It
+works on the per-trial windows written by `process peri-event`, the same `_perievent.csv` that `process metrics`
+takes.
+
+```bash
+mesoscopy process connectivity /path/to/recording_smoothed_regions_event-cueonset_perievent.csv
+```
+
+A peri-event file written from a `_regions.csv` already carries the trials columns. If yours does not, pass the
+trials CSV with `--trials`.
+
+## Output
+
+The command writes `<stem>_connectivity.csv` with one row per pair of regions and
+[trial group](metrics.md#trial-groups). Each pair appears once, in the order the regions appear in the peri-event
+file.
+
+| Column | Meaning |
+| --- | --- |
+| `region_a`, `region_b` | The pair. |
+| `group` | The trial group, as in the session metrics. |
+| `r` | The Pearson correlation between the two regions over every epoch sample of the group's trials. |
+| `r_residual` | The same correlation after the group's mean response is subtracted from every trial. This is the noise correlation. |
+| `r_trials_avg` | The correlation within each trial, averaged across trials as Fisher z. |
+| `mi`, `mi_residual` | The mutual information between the two regions in bits, over the same samples as `r` and `r_residual`. |
+| `partial_r` | The partial correlation between the two regions, given every other region. |
+| `lag`, `r_lag` | The lag of the peak cross-correlation within `--max-lag` (default 0.5 s), in seconds, and the correlation at that lag. A positive lag means `region_b` follows `region_a`. |
+| `n_trials`, `n_samples` | The trials used and the samples pooled across them. |
+
+Groups with fewer than `--min-trials` trials (default 10) keep their `n_trials` and are otherwise empty. The `all`
+rows are always filled. A session without the `sdt_type` column gets the `all` rows only.
+
+Keep the table next to the peri-event file and `mesoscopy report` on that file shows it as a heatmap, one metric
+and trial group at a time. See [Reports](reports.md#peri-event-report).
+
+## Epoch
+
+Each trial contributes the samples between the cue and its response. Misses and correct rejections end at the
+median response time of the trials that did respond, and lever-aligned windows run from the cue to the push.
+`--response START END` bounds the epoch (default all post-event samples), and trials with a response time below
+`--min-rt` (default 0.2 s) are left out. This is the same epoch the [reliability](metrics.md#reliability) metrics
+use. Pass `--no-mask-response` to use the whole response window instead.
+
+The epoch needs the `cue_onset` and `response_time` trials columns. Without them the command falls back to the
+whole response window and warns.
+
+## Reading the table
+
+`r` is high whenever both regions respond to the cue, whether or not they fluctuate together from moment to
+moment. `r_residual` strips out each group's mean response first, so it keeps only the moment-to-moment
+covariation. On z-scored recordings the mean response is a small part of the epoch variance, and the two come out
+close.
+
+`r_trials_avg` is taken within trials, so trials sitting at different levels do not pull it down.
+
+`mi` captures dependence of any shape, where `r` captures linear dependence only. A Gaussian pair has
+`-0.5 * log2(1 - r²)` bits, so a `mi` well above that marks a non-linear relation. Independent regions land near
+zero, on either side of it. The estimator is the Kraskov-Stögbauer-Grassberger nearest-neighbour method with
+`--mi-neighbours` (default 3) neighbours. It is the slowest part of the command. Pass `--no-mi` to skip it.
+
+`partial_r` removes what a pair shares with every other region, including the global signal. A pair with a strong
+`r` and a `partial_r` near zero is coupled through the rest of the cortex.
+
+`lag` moves in steps of the sample interval. A lag sitting at `--max-lag` means the peak lies beyond it.
+
+## As a library
+
+```python
+import pandas as pd
+from mesoscopy.process import connectivity
+
+perievent = pd.read_csv("recording_smoothed_regions_event-cueonset_perievent.csv")
+table = connectivity.connectivity_table(perievent)
+```
+
+`connectivity.pair_metrics` returns the matrices of one trial group from a masked `(n_trials, n_samples,
+n_regions)` array, built by `connectivity.epoch_cube` from the per-trial bounds of `connectivity.epoch_bounds`.
+`correlation_matrix`, `residual_epochs`, `trial_correlation`, `mutual_information`, `partial_correlation`,
+`lagged_correlation` and `peak_lag` work on their own.

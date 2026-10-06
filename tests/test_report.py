@@ -73,6 +73,10 @@ def perievent_dir(tmp_path_factory):
         args=f"process peri-event {regions_path} {trials_path} -o {data} --with-metrics --pre 1 --post 2",
     )
     assert result.exit_code == 0, result.output
+    result = CliRunner().invoke(
+        mesoscopy.cli, args=f"process connectivity {data / f'{STEM}_perievent.csv'} -o {data} --min-trials 1"
+    )
+    assert result.exit_code == 0, result.output
     return data
 
 
@@ -166,6 +170,40 @@ def test_metrics_paths():
     assert session == pathlib.Path("/data/ses-01_regions_event-cueonset_metrics-session.csv")
 
 
+def test_connectivity_path():
+    path = pevreport.connectivity_path("/data/ses-01_regions_event-cueonset_perievent.csv")
+    assert path == pathlib.Path("/data/ses-01_regions_event-cueonset_connectivity.csv")
+
+
+class TestConnectivityPayload:
+    def test_packs_symmetric_cubes(self, perievent_csv):
+        table = pd.read_csv(pevreport.connectivity_path(perievent_csv))
+        payload = pevreport.connectivity_payload(table, REGIONS)
+        assert payload["metrics"] == pevreport.CONNECTIVITY_METRICS
+        assert payload["groups"] == list(table["group"].unique())
+        assert payload["counts"]["all"] == {"n_trials": 5, "n_samples": int(table["n_samples"].iloc[0])}
+        cube = pevreport.unpack_float32(payload["values"]["all"], (8, 3, 3))
+        rows = table[table["group"] == "all"].set_index(["region_a", "region_b"])
+        for m, metric in enumerate(payload["metrics"]):
+            assert np.isnan(np.diag(cube[m])).all()
+            np.testing.assert_allclose(cube[m], cube[m].T, equal_nan=True)
+            assert cube[m, 0, 2] == pytest.approx(rows.loc[(REGIONS[0], REGIONS[2]), metric], rel=1e-6, nan_ok=True)
+
+    def test_skips_empty_metrics(self, perievent_csv):
+        table = pd.read_csv(pevreport.connectivity_path(perievent_csv))
+        table[["mi", "mi_residual"]] = np.nan
+        payload = pevreport.connectivity_payload(table, REGIONS)
+        assert payload["metrics"] == [m for m in pevreport.CONNECTIVITY_METRICS if not m.startswith("mi")]
+        assert pevreport.unpack_float32(payload["values"]["all"], (6, 3, 3)).shape == (6, 3, 3)
+
+    def test_ignores_unknown_regions(self, perievent_csv):
+        table = pd.read_csv(pevreport.connectivity_path(perievent_csv))
+        payload = pevreport.connectivity_payload(table, REGIONS[:2])
+        cube = pevreport.unpack_float32(payload["values"]["all"], (8, 2, 2))
+        expected = table[(table["group"] == "all") & (table["region_b"] == REGIONS[1])]["r"].iloc[0]
+        assert cube[0, 0, 1] == pytest.approx(expected, rel=1e-6)
+
+
 def _payload(html: str) -> dict:
     start = html.index('<script id="pev-data" type="application/json">') + len(
         '<script id="pev-data" type="application/json">'
@@ -200,6 +238,10 @@ def test_report_cmd_writes_perievent_report(perievent_csv, output_dir):
     assert {row["region"] for row in payload["trial_metrics"]} == set(REGIONS)
     assert set(payload["trial_metrics"][0]) == set(pevreport.TRIAL_METRIC_COLUMNS)
     assert "L_MOp1" in payload["atlas"]["paths"]
+    assert 'id="pev-conn-metric"' in html
+    assert payload["connectivity"]["metrics"] == pevreport.CONNECTIVITY_METRICS
+    assert payload["connectivity"]["groups"][0] == "all"
+    assert set(payload["connectivity"]["values"]) == set(payload["connectivity"]["groups"])
 
     cube = pevreport.unpack_float32(payload["traces"], tuple(payload["shape"]))
     table = pd.read_csv(perievent_csv)
@@ -215,12 +257,33 @@ def test_report_without_metrics_warns_and_omits_section(perievent_csv, tmp_path)
 
     assert result.exit_code == 0, result.output
     assert "No metrics tables" in result.output
+    assert "No connectivity table" in result.output
     html = (tmp_path / f"{STEM}_perievent_report.html").read_text(encoding="utf-8")
     payload = _payload(html)
     assert payload["trial_metrics"] is None
     assert payload["session_metrics"] is None
+    assert payload["connectivity"] is None
     assert 'id="pev-metric"' not in html
     assert 'id="pev-markers"' not in html
+    assert 'id="pev-conn-metric"' not in html
+
+
+def test_report_with_connectivity_only(perievent_csv, tmp_path):
+    alone = tmp_path / pathlib.Path(perievent_csv).name
+    shutil.copy(perievent_csv, alone)
+    connectivity = pevreport.connectivity_path(perievent_csv)
+    shutil.copy(connectivity, tmp_path / connectivity.name)
+
+    result = CliRunner().invoke(mesoscopy.cli, args=f"report {alone} -o {tmp_path}")
+
+    assert result.exit_code == 0, result.output
+    assert "No metrics tables" in result.output
+    assert "No connectivity table" not in result.output
+    html = (tmp_path / f"{STEM}_perievent_report.html").read_text(encoding="utf-8")
+    assert _payload(html)["session_metrics"] is None
+    assert _payload(html)["connectivity"]["groups"][0] == "all"
+    assert 'id="pev-conn-group"' in html
+    assert 'id="pev-session-group"' not in html
 
 
 def test_report_reads_session_table_without_groups(perievent_csv, tmp_path):
@@ -234,7 +297,7 @@ def test_report_reads_session_table_without_groups(perievent_csv, tmp_path):
 
     payload, warnings = pevreport.report_payload(str(alone))
 
-    assert not warnings
+    assert warnings == [f"No connectivity table found next to {alone.name}; the connectivity section is omitted."]
     assert [row["group"] for row in payload["session_metrics"]] == ["all"] * len(REGIONS)
     assert [row["region"] for row in payload["session_metrics"]] == REGIONS
 

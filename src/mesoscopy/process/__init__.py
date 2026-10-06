@@ -34,6 +34,7 @@ import click
 import h5py
 import numpy as np
 
+import mesoscopy.process.connectivity as pc
 import mesoscopy.process.metrics as pm
 import mesoscopy.process.perievent as pev
 from mesoscopy import io
@@ -1054,3 +1055,133 @@ def metrics_cmd(
     _echo_warnings(caught)
 
     _write_metrics(tables, out_dir, Path(path).stem.removesuffix("_perievent"))
+
+
+@process_cmd.command("connectivity")
+@click.argument(
+    "path",
+    type=click.Path(exists=True, dir_okay=False),
+)
+@click.option(
+    "-o",
+    "--out_dir",
+    type=click.Path(dir_okay=True),
+    default="./",
+    help="Output directory for the connectivity table.",
+)
+@click.option(
+    "--response",
+    type=(float, float),
+    default=None,
+    help="Response window START END, seconds relative to the event, end inclusive. Defaults to all post-event samples.",
+)
+@click.option(
+    "-t",
+    "--trials",
+    "trials_path",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Trials CSV to join by trial_index, for peri-event files without trials columns.",
+)
+@click.option(
+    "--min-trials",
+    type=click.IntRange(min=1),
+    default=10,
+    show_default=True,
+    help="Trial groups with fewer trials get empty metrics. The all-trials metrics are always taken.",
+)
+@click.option(
+    "--mask-response/--no-mask-response",
+    default=True,
+    show_default=True,
+    help="End cue-aligned epochs at each trial's response; trials without one end at the median response time.",
+)
+@click.option(
+    "--min-rt",
+    type=click.FloatRange(min=0),
+    default=0.2,
+    show_default=True,
+    help="Drop trials with a response time below this, in seconds.",
+)
+@click.option(
+    "--max-lag",
+    type=click.FloatRange(min=0),
+    default=0.5,
+    show_default=True,
+    help="Largest lag searched for the peak cross-correlation, in seconds.",
+)
+@click.option(
+    "--mi-neighbours",
+    type=click.IntRange(min=1),
+    default=3,
+    show_default=True,
+    help="Neighbours for the mutual information estimator.",
+)
+@click.option(
+    "--mi/--no-mi",
+    "mutual_info",
+    default=True,
+    show_default=True,
+    help="Estimate the mutual information of each pair, the slowest part.",
+)
+def connectivity_cmd(
+    path: str,
+    out_dir: str,
+    response: tuple[float, float] | None,
+    trials_path: str | None,
+    min_trials: int,
+    mask_response: bool,
+    min_rt: float,
+    max_lag: float,
+    mi_neighbours: int,
+    mutual_info: bool,
+) -> None:
+    """Measure pairwise connectivity between regions over the cue-to-response epoch of peri-event traces.
+
+    PATH is the long-format *_perievent.csv written by `process peri-event`. Writes <stem>_connectivity.csv with
+    one row per region pair and trial group: the Pearson correlation of the pooled epoch samples, the same after
+    removing the group's mean response, the mean of the per-trial correlations, the mutual information of the
+    pooled samples and of the residuals in bits, the partial correlation given every other region, and the lag
+    and value of the peak cross-correlation. Epochs run from the cue to each trial's response, as for the
+    reliability metrics of `process metrics`; without the cue_onset and response_time columns the whole response
+    window is used. Go/no-go sessions are grouped by sdt_type, go/no-go stimulus and lever push, as well as all
+    trials.
+    """  # noqa: DOC501
+    import pandas as pd
+
+    if not Path(out_dir).exists():
+        click.echo(f"Creating output directory {out_dir}...")
+        Path(out_dir).mkdir(parents=True)
+
+    click.echo(f"Loading peri-event traces from {path}...")
+    perievent = pd.read_csv(path)
+    if perievent.empty:
+        msg = f"{path} has no rows; `process peri-event` kept no trials."
+        raise click.ClickException(msg)
+    trials = None
+    if trials_path is not None:
+        click.echo(f"Loading trials from {trials_path}...")
+        trials = pd.read_csv(trials_path)
+
+    with timer.Timer(message="Extracting connectivity"), warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", UserWarning)
+        try:
+            table = pc.connectivity_table(
+                perievent,
+                response=response,
+                trials=trials,
+                mask_response=mask_response,
+                min_rt=min_rt,
+                min_trials=min_trials,
+                max_lag=max_lag,
+                mi_neighbours=mi_neighbours,
+                mutual_info=mutual_info,
+            )
+        except ValueError as error:
+            msg = f"{path}: {error} Expected the columns written by `process peri-event`."
+            raise click.ClickException(msg) from error
+    _echo_warnings(caught)
+
+    output = out_dir + os.sep + Path(path).stem.removesuffix("_perievent") + "_connectivity.csv"
+    table.to_csv(output, index=False)
+    click.echo(f"Saved connectivity metrics at {output}")

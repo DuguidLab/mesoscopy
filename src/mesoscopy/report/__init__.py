@@ -55,7 +55,8 @@ def report_cmd(path: str, out_dir: str, trials: str | None) -> str:
     """Generate an HTML report for a mesoscopy processing step.
 
     PATH is a *_preprocessed.h5, *_registered.h5 or *_perievent.csv file. Peri-event reports pick up the
-    *_metrics.csv and *_metrics-session.csv written by `process metrics` next to the input when present.
+    *_metrics.csv and *_metrics-session.csv written by `process metrics` and the *_connectivity.csv written by
+    `process connectivity` next to the input when present.
 
     Args:
         path (str): Path to the input file.
@@ -236,7 +237,7 @@ def generate_registration_report(path: str, out_dir: str = ".") -> str:
 
 
 def generate_perievent_report(path: str, out_dir: str = ".", trials_path: str | None = None) -> str:
-    """Generate a peri-event report from a `*_perievent.csv` and any metrics tables next to it.
+    """Generate a peri-event report from a `*_perievent.csv` and any metrics or connectivity tables next to it.
 
     Args:
         path (str): Path to the peri-event CSV.
@@ -267,6 +268,7 @@ def generate_perievent_report(path: str, out_dir: str = ".", trials_path: str | 
         "window": (payload["time"][0], payload["time"][-1]),
         "has_types": payload["sdt_type"] is not None,
         "has_metrics": payload["session_metrics"] is not None,
+        "has_connectivity": payload["connectivity"] is not None,
         "payload": payload,
     }
 
