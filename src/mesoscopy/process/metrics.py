@@ -38,6 +38,9 @@ if typing.TYPE_CHECKING:
 # Per-trial metrics summarised per session, in output column order.
 METRICS = ("onset_time", "peak_time", "amplitude", "auc", "decay_time", "offset_time", "duration")
 
+# Columns of the bootstrapped mean-trace metrics, in output order.
+BOOT_COLUMNS = tuple(f"boot_{name}{stat}" for name in METRICS for stat in ("", "_ci_low", "_ci_high", "_n"))
+
 # Columns of the long-format peri-event table written by `process peri-event`.
 PERIEVENT_COLUMNS = frozenset({"trial_index", "event_time", "time", "region", "F"})
 
@@ -85,6 +88,53 @@ class ReliabilityOptions:
     response_sd: float = 2.0
     time_warp: bool = False
     cue_baseline: tuple[float, float] = (-1.0, 0.0)
+
+
+@dataclasses.dataclass(frozen=True)
+class BootstrapOptions:
+    """Options for the bootstrapped mean-trace metrics.
+
+    Attributes:
+        n_resamples (int): Resamples of the trials; 0 skips the mean-trace metrics. Defaults to 10000.
+        ci (float): Width of the percentile intervals, in percent. Defaults to 95.0.
+        seed (int | None): Seed for the resamples; None draws a fresh one. Defaults to 42.
+    """
+
+    n_resamples: int = 10000
+    ci: float = 95.0
+    seed: int | None = 42
+
+    def __post_init__(self) -> None:
+        """Check the options.
+
+        Raises:
+            ValueError: If `n_resamples` is negative or `ci` is not within `(0, 100)`.
+        """
+        if self.n_resamples < 0:
+            msg = f"n_resamples must be at least 0, got {self.n_resamples}."
+            raise ValueError(msg)
+        if not 0 < self.ci < 100:  # noqa: PLR2004
+            msg = f"ci must be within (0, 100), got {self.ci}."
+            raise ValueError(msg)
+
+
+@dataclasses.dataclass(frozen=True)
+class MetricsTables:
+    """Metric tables from a peri-event table, from `metrics_tables`.
+
+    Attributes:
+        per_trial (pd.DataFrame): One row per trial per region, written to `<stem>_metrics.csv`.
+        per_session (pd.DataFrame): One row per region per trial group, written to `<stem>_metrics-session.csv`.
+        boot (pd.DataFrame | None): Mean-trace metrics with bootstrap intervals, one row per region per trial
+            group, written to `<stem>_metrics-boot.csv`. None when the bootstrap is skipped.
+        boot_traces (pd.DataFrame | None): Mean traces with bootstrap intervals, one row per sample per region per
+            trial group, written to `<stem>_traces-boot.csv`. None when the bootstrap is skipped.
+    """
+
+    per_trial: pd.DataFrame
+    per_session: pd.DataFrame
+    boot: pd.DataFrame | None = None
+    boot_traces: pd.DataFrame | None = None
 
 
 def window_mask(
@@ -551,6 +601,106 @@ def session_metrics(metrics: pd.DataFrame, correlation: float) -> dict[str, floa
     return summary
 
 
+def resample_counts(n_trials: int, n_resamples: int, seed: int | None = None) -> npt.NDArray[np.float64]:
+    """How often each trial is drawn in each resample of the trials, drawn with replacement.
+
+    Args:
+        n_trials (int): Trials to resample, at least 1.
+        n_resamples (int): Resamples to draw.
+        seed (int | None, optional): Seed for `np.random.default_rng`. Defaults to None.
+
+    Returns:
+        npt.NDArray[np.float64]: Counts of shape `(n_resamples, n_trials)`; each row sums to `n_trials`.
+    """
+    draws = np.random.default_rng(seed).integers(0, n_trials, size=(n_resamples, n_trials))
+    flat = (draws + n_trials * np.arange(n_resamples)[:, None]).ravel()
+    return np.bincount(flat, minlength=n_resamples * n_trials).reshape(n_resamples, n_trials).astype(np.float64)
+
+
+def _percentiles(values: npt.NDArray[np.float64], q: list[float]) -> npt.NDArray[np.float64]:
+    """Percentiles over the first axis, ignoring NaNs.
+
+    Returns:
+        npt.NDArray[np.float64]: One row per percentile; NaN where every value is NaN.
+    """
+    if not np.isnan(values).any():
+        return np.percentile(values, q, axis=0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        return np.nanpercentile(values, q, axis=0)
+
+
+def bootstrap_metrics(
+    traces: npt.NDArray,
+    time: npt.NDArray[np.float64],
+    baseline: tuple[float, float],
+    response: tuple[float, float],
+    counts: npt.NDArray[np.float64],
+    ci: float = 95.0,
+    **options: typing.Any,
+) -> tuple[dict[str, float | int], npt.NDArray[np.float64], npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    """Response metrics of the trial-mean trace, with bootstrap percentile intervals.
+
+    Each trace is baseline-subtracted with its mean over the baseline window, and the traces are averaged, ignoring
+    NaNs. The `trial_metrics` of that mean trace are the estimates. Each resample's mean trace, weighting every
+    trial by how often it was drawn, gives one value per metric, and the interval spans the central `ci` percent of
+    the values where the metric is defined.
+
+    Args:
+        traces (npt.NDArray): Traces of shape `(n_trials, n_samples)`.
+        time (npt.NDArray[np.float64]): Sample times relative to the event, shape `(n_samples,)`.
+        baseline (tuple[float, float]): Baseline window `[start, end)`, in seconds.
+        response (tuple[float, float]): Response window `[start, end]`, in seconds.
+        counts (npt.NDArray[np.float64]): Draws of each trial per resample, shape `(n_resamples, n_trials)`, from
+            `resample_counts`.
+        ci (float, optional): Interval width, in percent. Defaults to 95.0.
+        **options (typing.Any): Other `trial_metrics` arguments, such as `onset` and `smoothing`.
+
+    Returns:
+        tuple[dict[str, float | int], npt.NDArray[np.float64], npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+        `boot_<metric>`, `boot_<metric>_ci_low`, `boot_<metric>_ci_high` and `boot_<metric>_n`, the resamples
+        where the metric is defined, for each of `METRICS`; then the mean trace and the low and high ends of its
+        pointwise interval, each shape `(n_samples,)`.
+
+    Raises:
+        ValueError: If `ci` is not within `(0, 100)`.
+
+    Example:
+        >>> counts = resample_counts(len(traces), 10000, seed=42)
+        >>> summary, mean, low, high = bootstrap_metrics(traces, time, (-1.0, 0.0), (0.0, 3.0), counts, smoothing=5)
+        >>> summary["boot_onset_time"], summary["boot_onset_time_ci_low"], summary["boot_onset_time_ci_high"]
+    """
+    if not 0 < ci < 100:  # noqa: PLR2004
+        msg = f"ci must be within (0, 100), got {ci}."
+        raise ValueError(msg)
+
+    baseline_mean, _ = baseline_stats(traces, time, *baseline)
+    subtracted = np.asarray(traces, dtype=np.float64) - baseline_mean[:, None]
+    present = ~np.isnan(subtracted)
+    filled = np.where(present, subtracted, 0.0)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        mean = filled.sum(axis=0) / present.sum(axis=0)
+        if present.all():
+            resampled = (counts @ filled) / subtracted.shape[0]
+        else:
+            resampled = (counts @ filled) / (counts @ present.astype(np.float64))
+
+    tail = (100 - ci) / 2
+    estimates = trial_metrics(mean[None, :], time, baseline, response, **options)
+    resampled_metrics = trial_metrics(resampled, time, baseline, response, **options)
+    summary: dict[str, float | int] = {}
+    for name in METRICS:
+        values = resampled_metrics[name].to_numpy(dtype=np.float64)
+        defined = values[~np.isnan(values)]
+        low, high = np.percentile(defined, [tail, 100 - tail]) if defined.size else (np.nan, np.nan)
+        summary[f"boot_{name}"] = float(estimates[name].iloc[0])
+        summary[f"boot_{name}_ci_low"] = float(low)
+        summary[f"boot_{name}_ci_high"] = float(high)
+        summary[f"boot_{name}_n"] = int(defined.size)
+    band_low, band_high = _percentiles(resampled, [tail, 100 - tail])
+    return summary, mean, band_low, band_high
+
+
 def metrics_tables(
     perievent: pd.DataFrame,
     baseline: tuple[float, float] | None = None,
@@ -566,13 +716,17 @@ def metrics_tables(
     event: str | None = None,
     reliability: ReliabilityOptions | None = None,
     min_trials: int = 10,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Per-trial and per-session metric tables from a long-format peri-event table.
+    bootstrap: BootstrapOptions | None = None,
+) -> MetricsTables:
+    """Per-trial, per-session and bootstrapped mean-trace metric tables from a long-format peri-event table.
 
-    For go/no-go sessions with an `sdt_type` column, the per-session table has a row per region for each
-    `trial_groups` group; other sessions get the `all` rows only, with a warning. For go/no-go sessions, the
+    For go/no-go sessions with an `sdt_type` column, the per-session and bootstrap tables have a row per region for
+    each `trial_groups` group; other sessions get the `all` rows only, with a warning. For go/no-go sessions, the
     per-session table also gets the `reliability_metrics` columns. They are skipped with a warning when the
     trials columns they need are missing, the session is not go/no-go, or the windows are reward-aligned.
+
+    The bootstrap tables hold the `bootstrap_metrics` of each region and trial group. Every region of a group
+    uses the same resamples of the group's trials, from `resample_counts`.
 
     Args:
         perievent (pd.DataFrame): Peri-event table with `trial_index`, `event_time`, `time`, `region` and `F`
@@ -596,14 +750,18 @@ def metrics_tables(
             the event matching `event_time`, via `infer_event`.
         reliability (ReliabilityOptions | None, optional): Reliability metric options. Defaults to
             `ReliabilityOptions()`.
-        min_trials (int, optional): Trial groups with fewer trials get NaN session summaries and reliability
-            metrics; the all-trials session summaries are always taken. Defaults to 10.
+        min_trials (int, optional): Trial groups with fewer trials get NaN session summaries, reliability metrics
+            and mean-trace metrics, and no mean trace; the all-trials session summaries are always taken. Defaults
+            to 10.
+        bootstrap (BootstrapOptions | None, optional): Bootstrap options. Defaults to `BootstrapOptions()`.
 
     Returns:
-        tuple[pd.DataFrame, pd.DataFrame]: The per-trial table, one row per trial per region with `trial_index`,
-        `event_time`, `region`, the `trial_metrics` columns and then the per-trial columns of `perievent`, and the
-        per-session table, one row per region per trial group with `region`, `group`, the `session_metrics`
-        columns and the `reliability_metrics` columns.
+        MetricsTables: The per-trial table, one row per trial per region with `trial_index`, `event_time`,
+        `region`, the `trial_metrics` columns and then the per-trial columns of `perievent`; the per-session table,
+        one row per region per trial group with `region`, `group`, the `session_metrics` columns and the
+        `reliability_metrics` columns; the bootstrap table, one row per region per trial group with `region`,
+        `group`, `n_trials` and `BOOT_COLUMNS`; and the mean traces, one row per sample per region per trial group
+        with `region`, `group`, `n_trials`, `time`, `mean`, `ci_low` and `ci_high`.
 
     Raises:
         ValueError: If `perievent` lacks any of `PERIEVENT_COLUMNS`, has no rows, or has a column other than `time`,
@@ -611,7 +769,8 @@ def metrics_tables(
 
     Example:
         >>> perievent = pd.read_csv("ses-01_regions_event-cueonset_perievent.csv")
-        >>> per_trial, per_session = metrics_tables(perievent, smoothing=5)
+        >>> tables = metrics_tables(perievent, smoothing=5)
+        >>> tables.boot[["region", "group", "boot_onset_time", "boot_onset_time_ci_low", "boot_onset_time_ci_high"]]
     """
     import pandas as pd
 
@@ -656,9 +815,26 @@ def metrics_tables(
                 " fraction and variance quench baselines are NaN. Extract windows with a longer --pre.",
                 stacklevel=2,
             )
+    bootstrap = bootstrap if bootstrap is not None else BootstrapOptions()
+    counts = {
+        name: resample_counts(int(mask.sum()), bootstrap.n_resamples, bootstrap.seed)
+        for name, mask in groups.items()
+        if bootstrap.n_resamples and mask.sum() >= min_trials
+    }
+    options: dict[str, typing.Any] = {
+        "onset": onset,
+        "onset_sd": onset_sd,
+        "onset_fraction": onset_fraction,
+        "onset_min_samples": onset_min_samples,
+        "extrapolate_range": extrapolate_range,
+        "decay_fraction": decay_fraction,
+        "smoothing": smoothing,
+    }
 
     per_trial = []
     per_session = []
+    boot: list[dict[str, typing.Any]] = []
+    boot_traces = []
     for region in perievent["region"].unique():
         traces = (
             perievent[perievent["region"] == region]
@@ -666,19 +842,7 @@ def metrics_tables(
             .reindex(index=events["trial_index"], columns=time)
             .to_numpy(dtype=np.float64)
         )
-        metrics = trial_metrics(
-            traces,
-            time,
-            baseline,
-            response,
-            onset=onset,
-            onset_sd=onset_sd,
-            onset_fraction=onset_fraction,
-            onset_min_samples=onset_min_samples,
-            extrapolate_range=extrapolate_range,
-            decay_fraction=decay_fraction,
-            smoothing=smoothing,
-        )
+        metrics = trial_metrics(traces, time, baseline, response, **options)
         metrics.insert(0, "region", region)
         per_trial.append(pd.concat([events, metrics], axis=1))
         group_reliability: dict[str, dict[str, float | int]] = {}
@@ -694,12 +858,34 @@ def metrics_tables(
                 summary |= {key: float("nan") for key in summary if key.endswith(("_mean", "_sd", "_cv"))}
             per_session.append({"region": region, "group": name, **summary, **group_reliability.get(name, {})})
 
+            if not bootstrap.n_resamples:
+                continue
+            row = {"region": region, "group": name, "n_trials": int(mask.sum())}
+            if name not in counts:
+                boot.append(row)
+                continue
+            boot_summary, mean, low, high = bootstrap_metrics(
+                traces[mask], time, baseline, response, counts[name], bootstrap.ci, **options
+            )
+            boot.append(row | boot_summary)
+            boot_traces.append(pd.DataFrame({**row, "time": time, "mean": mean, "ci_low": low, "ci_high": high}))
+
     trial_table = pd.concat(per_trial, ignore_index=True)
     if extra_columns:
         trial_table = trial_table.merge(trial_info[["trial_index", *extra_columns]], on="trial_index", how="left")
     if trials is not None:
         trial_table = join_trials(trial_table, trials.drop(columns=extra_columns, errors="ignore"))
-    return trial_table, pd.DataFrame(per_session)
+    session_table = pd.DataFrame(per_session)
+    if not bootstrap.n_resamples:
+        return MetricsTables(trial_table, session_table)
+
+    boot_table = pd.DataFrame(boot, columns=["region", "group", "n_trials", *BOOT_COLUMNS])
+    # Resample counts stay integers, empty for groups below `min_trials`.
+    resample_columns = [column for column in BOOT_COLUMNS if column.endswith("_n")]
+    boot_table[resample_columns] = boot_table[resample_columns].astype("Int64")
+    trace_columns = ["region", "group", "n_trials", "time", "mean", "ci_low", "ci_high"]
+    trace_table = pd.concat(boot_traces, ignore_index=True) if boot_traces else pd.DataFrame(columns=trace_columns)
+    return MetricsTables(trial_table, session_table, boot_table, trace_table)
 
 
 def join_trials(table: pd.DataFrame, trials: pd.DataFrame) -> pd.DataFrame:
