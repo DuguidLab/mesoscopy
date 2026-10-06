@@ -38,6 +38,9 @@ if typing.TYPE_CHECKING:
 # Per-trial metrics summarised per session, in output column order.
 METRICS = ("onset_time", "peak_time", "amplitude", "auc", "decay_time", "offset_time", "duration")
 
+# Columns of the bootstrapped mean-trace metrics, in output order.
+BOOT_COLUMNS = tuple(f"boot_{name}{stat}" for name in METRICS for stat in ("", "_ci_low", "_ci_high", "_n"))
+
 # Columns of the long-format peri-event table written by `process peri-event`.
 PERIEVENT_COLUMNS = frozenset({"trial_index", "event_time", "time", "region", "F"})
 
@@ -58,6 +61,10 @@ RELIABILITY_METRICS = (
 GO_TYPES = ("hit", "miss")
 NOGO_TYPES = ("false_alarm", "correct_rejection")
 
+# Trial types of a go/no-go session, split by whether the lever was pushed.
+PUSH_TYPES = ("hit", "false_alarm")
+NOPUSH_TYPES = ("miss", "correct_rejection")
+
 # Trials columns the reliability metrics need.
 RELIABILITY_COLUMNS = frozenset({"cue_onset", "response_time", "sdt_type"})
 
@@ -74,7 +81,6 @@ class ReliabilityOptions:
         time_warp (bool): Resample each epoch onto a common 0-1 grid. Defaults to False.
         cue_baseline (tuple[float, float]): Baseline window `[start, end)` relative to each trial's cue, for
             lever-aligned windows. Defaults to `(-1.0, 0.0)`.
-        min_trials (int): Groups with fewer trials get NaN. Defaults to 10.
     """
 
     mask_response: bool = True
@@ -82,7 +88,53 @@ class ReliabilityOptions:
     response_sd: float = 2.0
     time_warp: bool = False
     cue_baseline: tuple[float, float] = (-1.0, 0.0)
-    min_trials: int = 10
+
+
+@dataclasses.dataclass(frozen=True)
+class BootstrapOptions:
+    """Options for the bootstrapped mean-trace metrics.
+
+    Attributes:
+        n_resamples (int): Resamples of the trials; 0 skips the mean-trace metrics. Defaults to 10000.
+        ci (float): Width of the percentile intervals, in percent. Defaults to 95.0.
+        seed (int | None): Seed for the resamples; None draws a fresh one. Defaults to 42.
+    """
+
+    n_resamples: int = 10000
+    ci: float = 95.0
+    seed: int | None = 42
+
+    def __post_init__(self) -> None:
+        """Check the options.
+
+        Raises:
+            ValueError: If `n_resamples` is negative or `ci` is not within `(0, 100)`.
+        """
+        if self.n_resamples < 0:
+            msg = f"n_resamples must be at least 0, got {self.n_resamples}."
+            raise ValueError(msg)
+        if not 0 < self.ci < 100:  # noqa: PLR2004
+            msg = f"ci must be within (0, 100), got {self.ci}."
+            raise ValueError(msg)
+
+
+@dataclasses.dataclass(frozen=True)
+class MetricsTables:
+    """Metric tables from a peri-event table, from `metrics_tables`.
+
+    Attributes:
+        per_trial (pd.DataFrame): One row per trial per region, written to `<stem>_metrics.csv`.
+        per_session (pd.DataFrame): One row per region per trial group, written to `<stem>_metrics-session.csv`.
+        boot (pd.DataFrame | None): Mean-trace metrics with bootstrap intervals, one row per region per trial
+            group, written to `<stem>_metrics-boot.csv`. None when the bootstrap is skipped.
+        boot_traces (pd.DataFrame | None): Mean traces with bootstrap intervals, one row per sample per region per
+            trial group, written to `<stem>_traces-boot.csv`. None when the bootstrap is skipped.
+    """
+
+    per_trial: pd.DataFrame
+    per_session: pd.DataFrame
+    boot: pd.DataFrame | None = None
+    boot_traces: pd.DataFrame | None = None
 
 
 def window_mask(
@@ -280,7 +332,7 @@ def extrapolated_onset(
 
     Returns:
         npt.NDArray[np.float64]: Onset time per trial, shape `(n_trials,)`. NaN for trials whose amplitude is not
-        positive, whose rise has fewer than two samples, or whose fitted slope is not positive.
+        positive, whose rise has fewer than two samples or a NaN sample, or whose fitted slope is not positive.
 
     Raises:
         ValueError: If `low` and `high` are not within `(0, 1)` with `low < high`.
@@ -290,20 +342,32 @@ def extrapolated_onset(
         raise ValueError(msg)
 
     values = np.asarray(traces, dtype=np.float64)
+    peak_index = np.asarray(peak_index)
+    amplitude = np.asarray(amplitude, dtype=np.float64)
     first = int(np.flatnonzero(time >= start)[0])
     onset = np.full(values.shape[0], np.nan)
-    for i in np.flatnonzero((amplitude > 0) & (peak_index >= 0)):
-        rise = values[i, first : peak_index[i] + 1]
-        rise_time = time[first : peak_index[i] + 1]
-        below = np.flatnonzero(rise < low * amplitude[i])
-        begin = below[-1] + 1 if below.size else 0
-        above = np.flatnonzero(rise[begin:] > high * amplitude[i])
-        stop = begin + above[0] if above.size else len(rise)
-        if stop - begin < 2:  # noqa: PLR2004
-            continue
-        slope, intercept = np.polyfit(rise_time[begin:stop], rise[begin:stop], 1)
-        if slope > 0:
-            onset[i] = -intercept / slope
+    rows = np.flatnonzero((amplitude > 0) & (peak_index >= 0))
+    if not rows.size:
+        return onset
+
+    values, peak_at, height = values[rows], peak_index[rows, None], amplitude[rows, None]
+    sample = np.arange(values.shape[1])
+    rise = (sample >= first) & (sample <= peak_at)
+    begin = np.where(rise & (values < low * height), sample, first - 1).max(axis=1) + 1
+    above = (sample >= begin[:, None]) & (sample <= peak_at) & (values > high * height)
+    stop = np.where(above.any(axis=1), above.argmax(axis=1), peak_at[:, 0] + 1)
+    fit = (sample >= begin[:, None]) & (sample < stop[:, None])
+    count = fit.sum(axis=1)
+
+    # Least-squares line through the rise; a NaN sample in it gives a NaN onset.
+    with np.errstate(invalid="ignore", divide="ignore"):
+        mean_time = np.where(fit, time, 0.0).sum(axis=1) / count
+        mean_value = np.where(fit, values, 0.0).sum(axis=1) / count
+        time_dev = np.where(fit, time - mean_time[:, None], 0.0)
+        value_dev = np.where(fit, values - mean_value[:, None], 0.0)
+        slope = (time_dev * value_dev).sum(axis=1) / (time_dev**2).sum(axis=1)
+        fitted = (count >= 2) & (slope > 0)  # noqa: PLR2004
+        onset[rows[fitted]] = (mean_time - mean_value / slope)[fitted]
     return onset
 
 
@@ -338,18 +402,20 @@ def offset_time(
 
     values = np.asarray(traces, dtype=np.float64)
     threshold = np.asarray(threshold, dtype=np.float64)
+    peak_index = np.asarray(peak_index)
     last = int(np.flatnonzero(time <= end)[-1])
     offset = np.full(values.shape[0], np.nan)
-    for i in np.flatnonzero(peak_index >= 0):
-        if not values[i, peak_index[i]] > threshold[i]:
-            continue
-        after = values[i, peak_index[i] + 1 : last + 1]
-        if after.size < min_samples:
-            continue
-        below = after <= threshold[i]
-        runs = np.lib.stride_tricks.sliding_window_view(below, min_samples).all(axis=-1)
-        if runs.any():
-            offset[i] = time[peak_index[i] + 1 + int(np.argmax(runs))]
+    rows = np.flatnonzero(peak_index >= 0)
+    if not rows.size or values.shape[1] < min_samples:
+        return offset
+
+    values, peak_at, threshold = values[rows], peak_index[rows], threshold[rows]
+    sample = np.arange(values.shape[1])
+    # NaN comparisons are False, so a NaN sample or threshold breaks any run.
+    below = (sample > peak_at[:, None]) & (sample <= last) & (values <= threshold[:, None])
+    runs = np.lib.stride_tricks.sliding_window_view(below, min_samples, axis=1).all(axis=-1)
+    found = (values[np.arange(rows.size), peak_at] > threshold) & runs.any(axis=1)
+    offset[rows[found]] = time[runs.argmax(axis=1)[found]]
     return offset
 
 
@@ -383,13 +449,19 @@ def decay_time(
         raise ValueError(msg)
 
     values = np.asarray(traces, dtype=np.float64)
+    peak_index = np.asarray(peak_index)
+    amplitude = np.asarray(amplitude, dtype=np.float64)
     last = int(np.flatnonzero(time <= end)[-1])
     decay = np.full(values.shape[0], np.nan)
-    for i in np.flatnonzero((amplitude > 0) & (peak_index >= 0)):
-        after = values[i, peak_index[i] + 1 : last + 1]
-        below = np.flatnonzero(after <= fraction * amplitude[i])
-        if below.size:
-            decay[i] = time[peak_index[i] + 1 + below[0]] - time[peak_index[i]]
+    rows = np.flatnonzero((amplitude > 0) & (peak_index >= 0))
+    if not rows.size:
+        return decay
+
+    peak_at = peak_index[rows]
+    sample = np.arange(values.shape[1])
+    fallen = (sample > peak_at[:, None]) & (sample <= last) & (values[rows] <= fraction * amplitude[rows, None])
+    found = fallen.any(axis=1)
+    decay[rows[found]] = time[fallen.argmax(axis=1)[found]] - time[peak_at[found]]
     return decay
 
 
@@ -529,6 +601,106 @@ def session_metrics(metrics: pd.DataFrame, correlation: float) -> dict[str, floa
     return summary
 
 
+def resample_counts(n_trials: int, n_resamples: int, seed: int | None = None) -> npt.NDArray[np.float64]:
+    """How often each trial is drawn in each resample of the trials, drawn with replacement.
+
+    Args:
+        n_trials (int): Trials to resample, at least 1.
+        n_resamples (int): Resamples to draw.
+        seed (int | None, optional): Seed for `np.random.default_rng`. Defaults to None.
+
+    Returns:
+        npt.NDArray[np.float64]: Counts of shape `(n_resamples, n_trials)`; each row sums to `n_trials`.
+    """
+    draws = np.random.default_rng(seed).integers(0, n_trials, size=(n_resamples, n_trials))
+    flat = (draws + n_trials * np.arange(n_resamples)[:, None]).ravel()
+    return np.bincount(flat, minlength=n_resamples * n_trials).reshape(n_resamples, n_trials).astype(np.float64)
+
+
+def _percentiles(values: npt.NDArray[np.float64], q: list[float]) -> npt.NDArray[np.float64]:
+    """Percentiles over the first axis, ignoring NaNs.
+
+    Returns:
+        npt.NDArray[np.float64]: One row per percentile; NaN where every value is NaN.
+    """
+    if not np.isnan(values).any():
+        return np.percentile(values, q, axis=0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        return np.nanpercentile(values, q, axis=0)
+
+
+def bootstrap_metrics(
+    traces: npt.NDArray,
+    time: npt.NDArray[np.float64],
+    baseline: tuple[float, float],
+    response: tuple[float, float],
+    counts: npt.NDArray[np.float64],
+    ci: float = 95.0,
+    **options: typing.Any,
+) -> tuple[dict[str, float | int], npt.NDArray[np.float64], npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    """Response metrics of the trial-mean trace, with bootstrap percentile intervals.
+
+    Each trace is baseline-subtracted with its mean over the baseline window, and the traces are averaged, ignoring
+    NaNs. The `trial_metrics` of that mean trace are the estimates. Each resample's mean trace, weighting every
+    trial by how often it was drawn, gives one value per metric, and the interval spans the central `ci` percent of
+    the values where the metric is defined.
+
+    Args:
+        traces (npt.NDArray): Traces of shape `(n_trials, n_samples)`.
+        time (npt.NDArray[np.float64]): Sample times relative to the event, shape `(n_samples,)`.
+        baseline (tuple[float, float]): Baseline window `[start, end)`, in seconds.
+        response (tuple[float, float]): Response window `[start, end]`, in seconds.
+        counts (npt.NDArray[np.float64]): Draws of each trial per resample, shape `(n_resamples, n_trials)`, from
+            `resample_counts`.
+        ci (float, optional): Interval width, in percent. Defaults to 95.0.
+        **options (typing.Any): Other `trial_metrics` arguments, such as `onset` and `smoothing`.
+
+    Returns:
+        tuple[dict[str, float | int], npt.NDArray[np.float64], npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+        `boot_<metric>`, `boot_<metric>_ci_low`, `boot_<metric>_ci_high` and `boot_<metric>_n`, the resamples
+        where the metric is defined, for each of `METRICS`; then the mean trace and the low and high ends of its
+        pointwise interval, each shape `(n_samples,)`.
+
+    Raises:
+        ValueError: If `ci` is not within `(0, 100)`.
+
+    Example:
+        >>> counts = resample_counts(len(traces), 10000, seed=42)
+        >>> summary, mean, low, high = bootstrap_metrics(traces, time, (-1.0, 0.0), (0.0, 3.0), counts, smoothing=5)
+        >>> summary["boot_onset_time"], summary["boot_onset_time_ci_low"], summary["boot_onset_time_ci_high"]
+    """
+    if not 0 < ci < 100:  # noqa: PLR2004
+        msg = f"ci must be within (0, 100), got {ci}."
+        raise ValueError(msg)
+
+    baseline_mean, _ = baseline_stats(traces, time, *baseline)
+    subtracted = np.asarray(traces, dtype=np.float64) - baseline_mean[:, None]
+    present = ~np.isnan(subtracted)
+    filled = np.where(present, subtracted, 0.0)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        mean = filled.sum(axis=0) / present.sum(axis=0)
+        if present.all():
+            resampled = (counts @ filled) / subtracted.shape[0]
+        else:
+            resampled = (counts @ filled) / (counts @ present.astype(np.float64))
+
+    tail = (100 - ci) / 2
+    estimates = trial_metrics(mean[None, :], time, baseline, response, **options)
+    resampled_metrics = trial_metrics(resampled, time, baseline, response, **options)
+    summary: dict[str, float | int] = {}
+    for name in METRICS:
+        values = resampled_metrics[name].to_numpy(dtype=np.float64)
+        defined = values[~np.isnan(values)]
+        low, high = np.percentile(defined, [tail, 100 - tail]) if defined.size else (np.nan, np.nan)
+        summary[f"boot_{name}"] = float(estimates[name].iloc[0])
+        summary[f"boot_{name}_ci_low"] = float(low)
+        summary[f"boot_{name}_ci_high"] = float(high)
+        summary[f"boot_{name}_n"] = int(defined.size)
+    band_low, band_high = _percentiles(resampled, [tail, 100 - tail])
+    return summary, mean, band_low, band_high
+
+
 def metrics_tables(
     perievent: pd.DataFrame,
     baseline: tuple[float, float] | None = None,
@@ -543,12 +715,18 @@ def metrics_tables(
     smoothing: int = 1,
     event: str | None = None,
     reliability: ReliabilityOptions | None = None,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Per-trial and per-session metric tables from a long-format peri-event table.
+    min_trials: int = 10,
+    bootstrap: BootstrapOptions | None = None,
+) -> MetricsTables:
+    """Per-trial, per-session and bootstrapped mean-trace metric tables from a long-format peri-event table.
 
-    For go/no-go sessions, the per-session table also gets the `reliability_metrics` columns. They are skipped
-    with a warning when the trials columns they need are missing, the session is not go/no-go, or the windows
-    are reward-aligned.
+    For go/no-go sessions with an `sdt_type` column, the per-session and bootstrap tables have a row per region for
+    each `trial_groups` group; other sessions get the `all` rows only, with a warning. For go/no-go sessions, the
+    per-session table also gets the `reliability_metrics` columns. They are skipped with a warning when the
+    trials columns they need are missing, the session is not go/no-go, or the windows are reward-aligned.
+
+    The bootstrap tables hold the `bootstrap_metrics` of each region and trial group. Every region of a group
+    uses the same resamples of the group's trials, from `resample_counts`.
 
     Args:
         perievent (pd.DataFrame): Peri-event table with `trial_index`, `event_time`, `time`, `region` and `F`
@@ -572,12 +750,18 @@ def metrics_tables(
             the event matching `event_time`, via `infer_event`.
         reliability (ReliabilityOptions | None, optional): Reliability metric options. Defaults to
             `ReliabilityOptions()`.
+        min_trials (int, optional): Trial groups with fewer trials get NaN session summaries, reliability metrics
+            and mean-trace metrics, and no mean trace; the all-trials session summaries are always taken. Defaults
+            to 10.
+        bootstrap (BootstrapOptions | None, optional): Bootstrap options. Defaults to `BootstrapOptions()`.
 
     Returns:
-        tuple[pd.DataFrame, pd.DataFrame]: The per-trial table, one row per trial per region with `trial_index`,
-        `event_time`, `region`, the `trial_metrics` columns and then the per-trial columns of `perievent`, and the
-        per-session table, one row per region with `region`, the `session_metrics` columns and the
-        `reliability_metrics` columns.
+        MetricsTables: The per-trial table, one row per trial per region with `trial_index`, `event_time`,
+        `region`, the `trial_metrics` columns and then the per-trial columns of `perievent`; the per-session table,
+        one row per region per trial group with `region`, `group`, the `session_metrics` columns and the
+        `reliability_metrics` columns; the bootstrap table, one row per region per trial group with `region`,
+        `group`, `n_trials` and `BOOT_COLUMNS`; and the mean traces, one row per sample per region per trial group
+        with `region`, `group`, `n_trials`, `time`, `mean`, `ci_low` and `ci_high`.
 
     Raises:
         ValueError: If `perievent` lacks any of `PERIEVENT_COLUMNS`, has no rows, or has a column other than `time`,
@@ -585,7 +769,8 @@ def metrics_tables(
 
     Example:
         >>> perievent = pd.read_csv("ses-01_regions_event-cueonset_perievent.csv")
-        >>> per_trial, per_session = metrics_tables(perievent, smoothing=5)
+        >>> tables = metrics_tables(perievent, smoothing=5)
+        >>> tables.boot[["region", "group", "boot_onset_time", "boot_onset_time_ci_low", "boot_onset_time_ci_high"]]
     """
     import pandas as pd
 
@@ -612,6 +797,10 @@ def metrics_tables(
     info = trial_info
     if trials is not None:
         info = join_trials(trial_info, trials.drop(columns=extra_columns, errors="ignore"))
+    group_skip = _group_skip_reason(info)
+    if group_skip:
+        warnings.warn(f"Skipping trial groups: {group_skip}", stacklevel=2)
+    groups = {"all": np.ones(len(info), dtype=bool)} if group_skip else trial_groups(info)
     reliability = reliability if reliability is not None else ReliabilityOptions()
     event = event if event is not None else infer_event(info)
     skip = _reliability_skip_reason(info, event)
@@ -626,9 +815,26 @@ def metrics_tables(
                 " fraction and variance quench baselines are NaN. Extract windows with a longer --pre.",
                 stacklevel=2,
             )
+    bootstrap = bootstrap if bootstrap is not None else BootstrapOptions()
+    counts = {
+        name: resample_counts(int(mask.sum()), bootstrap.n_resamples, bootstrap.seed)
+        for name, mask in groups.items()
+        if bootstrap.n_resamples and mask.sum() >= min_trials
+    }
+    options: dict[str, typing.Any] = {
+        "onset": onset,
+        "onset_sd": onset_sd,
+        "onset_fraction": onset_fraction,
+        "onset_min_samples": onset_min_samples,
+        "extrapolate_range": extrapolate_range,
+        "decay_fraction": decay_fraction,
+        "smoothing": smoothing,
+    }
 
     per_trial = []
     per_session = []
+    boot: list[dict[str, typing.Any]] = []
+    boot_traces = []
     for region in perievent["region"].unique():
         traces = (
             perievent[perievent["region"] == region]
@@ -636,33 +842,50 @@ def metrics_tables(
             .reindex(index=events["trial_index"], columns=time)
             .to_numpy(dtype=np.float64)
         )
-        metrics = trial_metrics(
-            traces,
-            time,
-            baseline,
-            response,
-            onset=onset,
-            onset_sd=onset_sd,
-            onset_fraction=onset_fraction,
-            onset_min_samples=onset_min_samples,
-            extrapolate_range=extrapolate_range,
-            decay_fraction=decay_fraction,
-            smoothing=smoothing,
-        )
+        metrics = trial_metrics(traces, time, baseline, response, **options)
         metrics.insert(0, "region", region)
         per_trial.append(pd.concat([events, metrics], axis=1))
-        correlation = trace_correlation(traces, time, *response)
-        summary = {"region": region, **session_metrics(metrics, correlation)}
+        group_reliability: dict[str, dict[str, float | int]] = {}
         if not skip:
-            summary |= reliability_metrics(traces, time, info, str(event), baseline, response, reliability)
-        per_session.append(summary)
+            group_reliability = reliability_metrics(
+                traces, time, info, str(event), baseline, response, reliability, min_trials
+            )
+        for name, mask in groups.items():
+            enough = name == "all" or int(mask.sum()) >= min_trials
+            correlation = trace_correlation(traces[mask], time, *response) if enough else float("nan")
+            summary = session_metrics(metrics[mask], correlation)
+            if not enough:
+                summary |= {key: float("nan") for key in summary if key.endswith(("_mean", "_sd", "_cv"))}
+            per_session.append({"region": region, "group": name, **summary, **group_reliability.get(name, {})})
+
+            if not bootstrap.n_resamples:
+                continue
+            row = {"region": region, "group": name, "n_trials": int(mask.sum())}
+            if name not in counts:
+                boot.append(row)
+                continue
+            boot_summary, mean, low, high = bootstrap_metrics(
+                traces[mask], time, baseline, response, counts[name], bootstrap.ci, **options
+            )
+            boot.append(row | boot_summary)
+            boot_traces.append(pd.DataFrame({**row, "time": time, "mean": mean, "ci_low": low, "ci_high": high}))
 
     trial_table = pd.concat(per_trial, ignore_index=True)
     if extra_columns:
         trial_table = trial_table.merge(trial_info[["trial_index", *extra_columns]], on="trial_index", how="left")
     if trials is not None:
         trial_table = join_trials(trial_table, trials.drop(columns=extra_columns, errors="ignore"))
-    return trial_table, pd.DataFrame(per_session)
+    session_table = pd.DataFrame(per_session)
+    if not bootstrap.n_resamples:
+        return MetricsTables(trial_table, session_table)
+
+    boot_table = pd.DataFrame(boot, columns=["region", "group", "n_trials", *BOOT_COLUMNS])
+    # Resample counts stay integers, empty for groups below `min_trials`.
+    resample_columns = [column for column in BOOT_COLUMNS if column.endswith("_n")]
+    boot_table[resample_columns] = boot_table[resample_columns].astype("Int64")
+    trace_columns = ["region", "group", "n_trials", "time", "mean", "ci_low", "ci_high"]
+    trace_table = pd.concat(boot_traces, ignore_index=True) if boot_traces else pd.DataFrame(columns=trace_columns)
+    return MetricsTables(trial_table, session_table, boot_table, trace_table)
 
 
 def join_trials(table: pd.DataFrame, trials: pd.DataFrame) -> pd.DataFrame:
@@ -702,6 +925,19 @@ def infer_event(trial_info: pd.DataFrame) -> str | None:
             continue
         if len(index) == len(trial_info) and np.allclose(times, event_time, rtol=0, atol=_TIME_TOLERANCE_S):
             return event
+    return None
+
+
+def _group_skip_reason(trial_info: pd.DataFrame) -> str | None:
+    """Why the trials cannot be split into `trial_groups`.
+
+    Returns:
+        str | None: The reason, or None when they can be.
+    """
+    if "sdt_type" not in trial_info.columns:
+        return "no sdt_type column; pass the trials CSV."
+    if "protocol" in trial_info.columns and not trial_info["protocol"].eq("gonogo").all():
+        return "only go/no-go sessions are supported."
     return None
 
 
@@ -939,35 +1175,38 @@ def signal_fraction(epochs: npt.NDArray[np.float64]) -> float:
     return float(1 - residual / total) if total > 0 else float("nan")
 
 
-def reliability_groups(trial_info: pd.DataFrame) -> dict[str, npt.NDArray[np.bool_]]:
-    """Trial groups for the reliability metrics, keyed by column suffix.
+def trial_groups(trial_info: pd.DataFrame) -> dict[str, npt.NDArray[np.bool_]]:
+    """Trial groups of a go/no-go session, keyed by the `group` value of the per-session table.
 
     Args:
         trial_info (pd.DataFrame): One row per trial with an `sdt_type` column.
 
     Returns:
-        dict[str, npt.NDArray[np.bool_]]: `""` for all trials, `sdt-<type>` for each of `GO_TYPES` and
-        `NOGO_TYPES`, then `stim-go` and `stim-nogo`; each a mask of shape `(n_trials,)`.
+        dict[str, npt.NDArray[np.bool_]]: `all` for all trials, `sdt-<type>` for each of `GO_TYPES` and
+        `NOGO_TYPES`, `stim-go` and `stim-nogo` by the stimulus shown, then `resp-push` and `resp-nopush` by
+        whether the lever was pushed; each a mask of shape `(n_trials,)`.
     """
     sdt_type = trial_info["sdt_type"].to_numpy()
-    groups = {"": np.ones(len(trial_info), dtype=bool)}
+    groups = {"all": np.ones(len(trial_info), dtype=bool)}
     for name in (*GO_TYPES, *NOGO_TYPES):
         groups[f"sdt-{name}"] = sdt_type == name
     groups["stim-go"] = np.isin(sdt_type, GO_TYPES)
     groups["stim-nogo"] = np.isin(sdt_type, NOGO_TYPES)
+    groups["resp-push"] = np.isin(sdt_type, PUSH_TYPES)
+    groups["resp-nopush"] = np.isin(sdt_type, NOPUSH_TYPES)
     return groups
 
 
 def _group_reliability(
-    epochs: npt.NDArray[np.float64], baseline: npt.NDArray[np.float64], options: ReliabilityOptions
+    epochs: npt.NDArray[np.float64], baseline: npt.NDArray[np.float64], options: ReliabilityOptions, min_trials: int
 ) -> dict[str, float | int]:
     """Reliability metrics for one group.
 
     Returns:
-        dict[str, float | int]: One value per `RELIABILITY_METRICS`, NaN below `options.min_trials` trials.
+        dict[str, float | int]: One value per `RELIABILITY_METRICS`, NaN below `min_trials` trials.
     """
     n_trials = epochs.shape[0]
-    if n_trials < options.min_trials:
+    if n_trials < min_trials:
         return {**{name: float("nan") for name in RELIABILITY_METRICS[:-1]}, "reliability_n": n_trials}
     return {
         "epoch_correlation": epoch_correlation(epochs),
@@ -986,13 +1225,14 @@ def reliability_metrics(
     baseline: tuple[float, float],
     response: tuple[float, float],
     options: ReliabilityOptions | None = None,
-) -> dict[str, float | int]:
-    """Trial-to-trial reliability of one region's response, for all trials and per trial group.
+    min_trials: int = 10,
+) -> dict[str, dict[str, float | int]]:
+    """Trial-to-trial reliability of one region's response, per trial group.
 
     Metrics are taken over each trial's epoch from `reliability_epochs`: `epoch_correlation`, `response_fraction`,
     `variance_quench` and `signal_fraction`, plus `reliability_n`, the trials used. The baseline is `baseline`
     relative to the event, or `options.cue_baseline` relative to each trial's cue for lever-aligned windows. Groups
-    with fewer than `options.min_trials` trials get NaN.
+    with fewer than `min_trials` trials get NaN.
 
     Args:
         traces (npt.NDArray): Traces of shape `(n_trials, n_samples)`, in the row order of `trial_info`.
@@ -1004,13 +1244,14 @@ def reliability_metrics(
             trial-start-aligned windows.
         response (tuple[float, float]): Response window `[start, end]`, for cue- and trial-start-aligned windows.
         options (ReliabilityOptions | None, optional): Defaults to `ReliabilityOptions()`.
+        min_trials (int, optional): Groups with fewer trials get NaN. Defaults to 10.
 
     Returns:
-        dict[str, float | int]: `<metric>` for all trials, then `<metric>_<group>` for each `reliability_groups`
-        group, for each of `RELIABILITY_METRICS`.
+        dict[str, dict[str, float | int]]: The `RELIABILITY_METRICS` of each `trial_groups` group, keyed by group.
 
     Example:
-        >>> reliability_metrics(traces, time, trial_info, "cue_onset", baseline=(-1.0, 0.0), response=(0.0, 3.0))
+        >>> summary = reliability_metrics(traces, time, trial_info, "cue_onset", (-1.0, 0.0), (0.0, 3.0))
+        >>> summary["stim-go"]["epoch_correlation"]
     """
     options = options if options is not None else ReliabilityOptions()
     start, end, cue, keep = reliability_epochs(trial_info, event, response, options.mask_response, options.min_rt)
@@ -1024,8 +1265,7 @@ def reliability_metrics(
     else:
         base = anchored_window(traces, time, np.zeros(len(cue)), *baseline)
 
-    summary: dict[str, float | int] = {}
-    for name, mask in reliability_groups(trial_info).items():
-        values = _group_reliability(epochs[mask & keep], base[mask & keep], options)
-        summary |= {(metric if not name else f"{metric}_{name}"): value for metric, value in values.items()}
-    return summary
+    return {
+        name: _group_reliability(epochs[mask & keep], base[mask & keep], options, min_trials)
+        for name, mask in trial_groups(trial_info).items()
+    }

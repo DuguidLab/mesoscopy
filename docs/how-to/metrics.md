@@ -1,7 +1,8 @@
 # Response metrics
 
 `mesoscopy process metrics` turns the per-trial windows written by `process peri-event` into a table of response
-metrics per trial per region, and a per-session summary of how those metrics vary across trials.
+metrics per trial per region, a per-session summary of how those metrics vary across trials, and the same metrics
+taken from the trial-mean trace with bootstrap intervals.
 
 ## Input
 
@@ -40,16 +41,38 @@ metrics baseline window. Metrics are not computed for HDF5 peri-event windows.
 The trials table columns (`sdt_type`, `outcome`, `response_time`, ...) follow, carried over from the peri-event file.
 For a peri-event file without them, `--trials` joins a trials CSV by row index.
 
-`<stem>_metrics-session.csv` has one row per region with `n_trials`, `trace_correlation` (the mean pairwise
-Pearson correlation between trial traces over the response window) and, for each metric above, `<metric>_mean`,
-`<metric>_sd` and `<metric>_cv` across trials, ignoring trials where the metric is undefined. `onset_n`, `decay_n`
-and `offset_n` count the trials where each was found.
+`<stem>_metrics-session.csv` has one row per region and [trial group](#trial-groups), with `region`, `group`,
+`n_trials`, `trace_correlation` (the mean pairwise Pearson correlation between trial traces over the response
+window) and, for each metric above, `<metric>_mean`, `<metric>_sd` and `<metric>_cv` across trials, ignoring
+trials where the metric is undefined. `onset_n`, `decay_n` and `offset_n` count the trials where each was found.
 
 For go/no-go sessions aligned to the cue, trial start or lever push, the session table also has the
 [reliability](#reliability) columns.
 
+`<stem>_metrics-boot.csv` and `<stem>_traces-boot.csv` hold the [mean-trace metrics](#mean-trace-metrics) and the
+mean traces they are taken from.
+
 Any metric is empty when it is undefined for that trial, for example a decay when the trace never falls back to
 the fraction, or an onset when the trace never crosses the threshold.
+
+## Trial groups
+
+For go/no-go sessions, the session metrics are taken over all trials and over groups of trials, one row each:
+
+| `group` | Trials |
+| --- | --- |
+| `all` | Every trial. |
+| `sdt-hit`, `sdt-miss`, `sdt-false_alarm`, `sdt-correct_rejection` | One trial type. |
+| `stim-go`, `stim-nogo` | By the stimulus shown: hits and misses, or false alarms and correct rejections. |
+| `resp-push`, `resp-nopush` | By whether the lever was pushed: hits and false alarms, or misses and correct rejections. |
+
+The groups come from the `sdt_type` trials column, carried over by `process peri-event` or joined with `--trials`.
+Without it, or for sessions other than go/no-go, the session table has the `all` rows only, with a warning.
+
+Every group gets a row. A group with fewer than `--min-trials` (default 10) trials keeps its trial counts
+(`n_trials`, `onset_n`, `decay_n`, `offset_n` and `reliability_n`) and is otherwise empty. The `all` row's
+across-trial summaries are always taken; its reliability columns follow the same minimum. For the reliability
+columns the minimum applies to `reliability_n`, the trials left after `--min-rt`.
 
 ## Metrics
 
@@ -88,6 +111,38 @@ estimate that the `sd` onset threshold depends on.
 - Session CV is unstable for any metric whose mean sits near zero, which the extrapolated onset often does.
   Read the SD in that case.
 
+## Mean-trace metrics
+
+Single-trial onsets, peaks and amplitudes are noisy. The mean-trace metrics take the same metrics from the mean of
+each trial group's traces instead, with a bootstrap interval for each.
+
+Each trace is baseline-subtracted as above and the traces are averaged, ignoring missing samples. The metrics are
+taken on this mean trace with the same options as the per-trial metrics. The trials are then resampled with
+replacement `--bootstrap` times (default 10000), the metrics are taken on the mean of each resample, and the
+interval spans the central `--ci` percent (default 95) of the resampled values. Each trial group is resampled as one
+pool, and every region uses the same resamples. `--seed` (default 42) fixes the resamples, so a rerun gives the same
+intervals. `--bootstrap 0` skips the mean-trace metrics.
+
+`<stem>_metrics-boot.csv` has one row per region and trial group with `region`, `group`, `n_trials` and, for each
+metric, `boot_<metric>` (the metric of the mean trace), `boot_<metric>_ci_low` and `boot_<metric>_ci_high` (its
+interval) and `boot_<metric>_n` (the resamples where the metric was found). A group with fewer than `--min-trials`
+trials keeps only `n_trials`.
+
+`<stem>_traces-boot.csv` has the mean trace of each region and trial group, one row per sample, with `region`,
+`group`, `n_trials`, `time`, `mean`, and the pointwise interval `ci_low` and `ci_high`. Groups with fewer than
+`--min-trials` trials are left out.
+
+Reading them:
+
+- With `--onset sd`, the threshold comes from the mean trace's own baseline SD, which is smaller than a single
+  trial's, so mean-trace onsets come earlier than single-trial ones.
+- A mean-trace onset at the start of the response window means the trace was already above the threshold there.
+  `--onset extrapolate` can place the onset before the window.
+- The mean trace's amplitude is lower than the mean single-trial amplitude: single-trial peaks ride on noise, and
+  responses that vary in timing flatten when averaged.
+- An interval is taken over the resamples where the metric was found, so read it alongside `boot_<metric>_n`. An
+  offset found in only a few hundred of 10000 resamples has an unreliable interval.
+
 ## Reliability
 
 How consistent a region's response is from trial to trial, over the part of each trial before the lever push, so
@@ -105,7 +160,7 @@ reward-aligned windows, the columns are skipped with a warning.
   `--pre 5`); trials whose baseline falls outside the window have no response fraction or variance quench
   baseline, and a warning gives their count.
 
-Trials with a response time below `--min-rt` (default 0.2 s) are left out.
+Trials with a response time below `--min-rt` (default 0.2 s) are left out of the reliability metrics.
 
 **Metrics.**
 
@@ -117,10 +172,7 @@ Trials with a response time below `--min-rt` (default 0.2 s) are left out.
 | `signal_fraction` | Fraction of single-trial variance explained by the trial-mean trace. |
 | `reliability_n` | Trials used. |
 
-**Groups.** Each metric is taken over all trials (`<metric>`), per trial type (`<metric>_sdt-hit`,
-`_sdt-miss`, `_sdt-false_alarm`, `_sdt-correct_rejection`) and per stimulus (`<metric>_stim-go` for hits and
-misses, `<metric>_stim-nogo` for false alarms and correct rejections). Every column is always written; a group with
-fewer than 10 trials is empty.
+**Groups.** Each metric is taken for every [trial group](#trial-groups), on that group's row of the session table.
 
 **Trial counts.** None of the metrics depends on the number of trials, but all are noisier with fewer, so read
 them alongside `reliability_n` when comparing groups.
@@ -136,11 +188,15 @@ import pandas as pd
 from mesoscopy.process import metrics
 
 perievent = pd.read_csv("recording_smoothed_regions_event-cueonset_perievent.csv")
-per_trial, per_session = metrics.metrics_tables(perievent, smoothing=5)
+tables = metrics.metrics_tables(perievent, smoothing=5)
+tables.per_trial, tables.per_session, tables.boot, tables.boot_traces
 ```
 
 `metrics.trial_metrics` works on a `(n_trials, n_samples)` array for one region, and the per-metric functions
 (`peak`, `auc`, `onset_time`, `extrapolated_onset`, `offset_time`, `decay_time`, `trace_correlation`) are
-available on their own. `metrics.reliability_metrics` takes the reliability columns for one region, with options
-in a `metrics.ReliabilityOptions`; `epoch_correlation`, `response_fraction`, `variance_quench` and
-`signal_fraction` work on masked `(n_trials, n_samples)` arrays from `reliability_epochs` and `epoch_traces`.
+available on their own. `metrics.trial_groups` splits a trials table into the trial groups.
+`metrics.bootstrap_metrics` takes the mean-trace metrics of one region's traces, with resamples from
+`metrics.resample_counts`; `metrics_tables` takes its options in a `metrics.BootstrapOptions`.
+`metrics.reliability_metrics` takes the reliability columns for one region, per trial group, with options in a
+`metrics.ReliabilityOptions`; `epoch_correlation`, `response_fraction`, `variance_quench` and `signal_fraction` work
+on masked `(n_trials, n_samples)` arrays from `reliability_epochs` and `epoch_traces`.

@@ -154,11 +154,8 @@
     </div>
     <div class="col-12 mt-3">
         <div class="d-flex align-items-center gap-2 mb-1">
-            <span class="fw-semibold">Session metrics (all trials)</span>
-            <span id="pev-session-group-wrap" class="d-none align-items-center gap-2">
-                <span class="text-secondary">reliability for</span>
-                <select id="pev-session-group" class="form-select form-select-sm w-auto"></select>
-            </span>
+            <span class="fw-semibold">Session metrics for</span>
+            <select id="pev-session-group" class="form-select form-select-sm w-auto"></select>
         </div>
         <div class="table-responsive" style="max-height: 420px">
             <table class="table table-sm table-hover pev-metrics" id="pev-session-table"></table>
@@ -189,8 +186,8 @@
     const MARKERS = {onset_time: {symbol: 'triangle-right', label: 'onset'}, peak_time: {symbol: 'diamond', label: 'peak'}, offset_time: {symbol: 'triangle-left', label: 'offset'}};
     const SESSION_COLS = ['region', 'n_trials', 'amplitude_mean', 'amplitude_sd', 'peak_time_mean', 'onset_time_mean', 'offset_time_mean', 'auc_mean', 'duration_mean', 'trace_correlation'];
     const RELIABILITY_COLS = ['epoch_correlation', 'response_fraction', 'variance_quench', 'signal_fraction', 'reliability_n'];
-    const RELIABILITY_GROUPS = [['', 'all trials'], ['sdt-hit', 'hit'], ['sdt-miss', 'miss'], ['sdt-false_alarm', 'false_alarm'], ['sdt-correct_rejection', 'correct_rejection'], ['stim-go', 'go stimulus'], ['stim-nogo', 'no-go stimulus']];
-    const hasReliability = hasMetrics && 'epoch_correlation' in DATA.session_metrics[0];
+    const GROUP_LABELS = {'all': 'all trials', 'sdt-hit': 'hit', 'sdt-miss': 'miss', 'sdt-false_alarm': 'false_alarm', 'sdt-correct_rejection': 'correct_rejection', 'stim-go': 'go stimulus', 'stim-nogo': 'no-go stimulus', 'resp-push': 'lever push', 'resp-nopush': 'no lever push'};
+    const GROUPS = hasMetrics ? [...new Set(DATA.session_metrics.map(r => r.group))] : [];
     const ATLAS_METRICS = ['amplitude_mean', 'peak_time_mean', 'onset_time_mean', 'offset_time_mean', 'auc_mean', 'duration_mean', 'amplitude_cv', 'trace_correlation'];
 
     const state = {types: new Set(TYPES), view: 'mean', split: false, markers: hasMetrics, marks: new Set(['onset_time', 'peak_time']), stat: 'mean', region: DATA.regions[0]};
@@ -396,19 +393,19 @@
     });
 
     // ---------- metrics section ----------
+    // Session table rows of the selected trial group, one per region.
+    const sessionRows = () => DATA.session_metrics.filter(r => r.group === $('pev-session-group').value);
     function renderSessionTable() {
-        // [column, header] pairs; reliability columns follow the selected trial group.
-        const group = hasReliability ? $('pev-session-group').value : '';
-        const cols = SESSION_COLS.filter(c => c in DATA.session_metrics[0]).map(c => [c, c]);
-        if (hasReliability) cols.push(...RELIABILITY_COLS.map(c => [group ? `${c}_${group}` : c, c]));
+        const cols = [...SESSION_COLS, ...RELIABILITY_COLS].filter(c => c in DATA.session_metrics[0]);
         const fmt = v => typeof v === 'number' ? (Number.isInteger(v) ? v : v.toFixed(3)) : (v ?? '');
-        $('pev-session-table').innerHTML = `<thead><tr>${cols.map(([, h]) => `<th>${h}</th>`).join('')}</tr></thead><tbody>` +
-            DATA.session_metrics.map(row => `<tr data-region="${row.region}" class="${row.region === state.region ? 'selected' : ''}">${cols.map(([c]) => `<td>${fmt(row[c])}</td>`).join('')}</tr>`).join('') + '</tbody>';
+        $('pev-session-table').innerHTML = `<thead><tr>${cols.map(c => `<th>${c}</th>`).join('')}</tr></thead><tbody>` +
+            sessionRows().map(row => `<tr data-region="${row.region}" class="${row.region === state.region ? 'selected' : ''}">${cols.map(c => `<td>${fmt(row[c])}</td>`).join('')}</tr>`).join('') + '</tbody>';
         $('pev-session-table').querySelectorAll('tbody tr').forEach(tr => tr.onclick = () => selectRegion(tr.dataset.region));
     }
     function renderMetricAtlas() {
         const metric = $('pev-metric').value;
-        const vals = Object.fromEntries(DATA.session_metrics.map(r => [r.region, r[metric]]));
+        const group = $('pev-session-group').value;
+        const vals = Object.fromEntries(sessionRows().map(r => [r.region, r[metric]]));
         const nums = Object.values(vals).filter(v => typeof v === 'number');
         const lo = Math.min(...nums), hi = Math.max(...nums);
         const cmap = v => { const t = (v - lo) / (hi - lo || 1); return `rgb(${Math.round(255 - 200 * t)},${Math.round(245 - 160 * t)},${Math.round(255 - 60 * t)})`; };
@@ -418,7 +415,10 @@
             p.classList.toggle('selected', p.dataset.region === state.region);
             p.querySelector('title').textContent = typeof v === 'number' ? `${p.dataset.region}: ${metric} = ${v.toFixed(3)}` : p.dataset.region;
         });
-        $('pev-colorbar').innerHTML = `<span style="display:inline-block;width:120px;height:10px;background:linear-gradient(90deg,${cmap(lo)},${cmap(hi)});vertical-align:middle"></span> ${lo.toFixed(3)} to ${hi.toFixed(3)} (${metric}, all trials)`;
+        const label = `${metric}, ${GROUP_LABELS[group] ?? group}`;
+        $('pev-colorbar').innerHTML = nums.length
+            ? `<span style="display:inline-block;width:120px;height:10px;background:linear-gradient(90deg,${cmap(lo)},${cmap(hi)});vertical-align:middle"></span> ${lo.toFixed(3)} to ${hi.toFixed(3)} (${label})`
+            : `No values (${label})`;
     }
     function renderTrialMetrics() {
         $('pev-metric-region').textContent = state.region;
@@ -435,11 +435,8 @@
         buildAtlas($('pev-atlas-metric'));
         $('pev-metric').innerHTML = ATLAS_METRICS.filter(m => m in DATA.session_metrics[0]).map(m => `<option value="${m}">${m}</option>`).join('');
         $('pev-metric').onchange = renderMetricAtlas;
-        if (hasReliability) {
-            $('pev-session-group-wrap').classList.replace('d-none', 'd-inline-flex');
-            $('pev-session-group').innerHTML = RELIABILITY_GROUPS.map(([g, label]) => `<option value="${g}">${label}</option>`).join('');
-            $('pev-session-group').onchange = renderSessionTable;
-        }
+        $('pev-session-group').innerHTML = GROUPS.map(g => `<option value="${g}">${GROUP_LABELS[g] ?? g}</option>`).join('');
+        $('pev-session-group').onchange = () => { renderSessionTable(); renderMetricAtlas(); };
     }
 
     // ---------- render ----------
