@@ -1,59 +1,66 @@
 # Connectivity
 
-`mesoscopy process connectivity` measures how pairs of regions covary over the cue-to-response epoch of the
-per-trial windows written by `process peri-event`, for all trials and per trial group.
-
-## Input
-
-A long-format `_perievent.csv`, as written by `process peri-event` from a `_regions.csv`, with the trials
-columns carried over or joined with `--trials` (see [Response metrics](metrics.md#input)):
+`mesoscopy process connectivity` measures how pairs of regions covary while the animal responds to the cue. It
+works on the per-trial windows written by `process peri-event`, the same `_perievent.csv` that `process metrics`
+takes.
 
 ```bash
 mesoscopy process connectivity /path/to/recording_smoothed_regions_event-cueonset_perievent.csv
 ```
 
+A peri-event file written from a `_regions.csv` already carries the trials columns. If yours does not, pass the
+trials CSV with `--trials`.
+
 ## Output
 
-`<stem>_connectivity.csv` has one row per pair of regions and [trial group](metrics.md#trial-groups). Each pair
-appears once, in the order the regions appear in the peri-event file.
+The command writes `<stem>_connectivity.csv` with one row per pair of regions and
+[trial group](metrics.md#trial-groups). Each pair appears once, in the order the regions appear in the peri-event
+file.
 
 | Column | Meaning |
 | --- | --- |
 | `region_a`, `region_b` | The pair. |
-| `group` | Trial group, as in the session metrics. |
-| `r` | Pearson correlation between the two regions over the epoch samples of every trial in the group, pooled. |
-| `r_residual` | The same after subtracting the group's mean response at each sample from every trial: the noise correlation. |
-| `r_trials_avg` | Mean of the correlations taken within each trial, averaged as Fisher z. Trials with fewer than three epoch samples are left out. |
-| `partial_r` | Partial correlation given every other region. |
-| `lag`, `r_lag` | Lag of the largest absolute cross-correlation within `--max-lag` (default 0.5 s), in seconds, and the correlation there. Positive when `region_b` follows `region_a`. |
-| `n_trials`, `n_samples` | Trials used, and epoch samples pooled over them. |
+| `group` | The trial group, as in the session metrics. |
+| `r` | The Pearson correlation between the two regions over every epoch sample of the group's trials. |
+| `r_residual` | The same correlation after the group's mean response is subtracted from every trial. This is the noise correlation. |
+| `r_trials_avg` | The correlation within each trial, averaged across trials as Fisher z. |
+| `mi`, `mi_residual` | The mutual information between the two regions in bits, over the same samples as `r` and `r_residual`. |
+| `partial_r` | The partial correlation between the two regions, given every other region. |
+| `lag`, `r_lag` | The lag of the peak cross-correlation within `--max-lag` (default 0.5 s), in seconds, and the correlation at that lag. A positive lag means `region_b` follows `region_a`. |
+| `n_trials`, `n_samples` | The trials used and the samples pooled across them. |
 
-A group with fewer than `--min-trials` (default 10) trials keeps `n_trials` and is otherwise empty; the `all`
-rows are always taken. Sessions without the `sdt_type` column, or other than go/no-go, get the `all` rows only,
-with a warning.
+Groups with fewer than `--min-trials` trials (default 10) keep their `n_trials` and are otherwise empty. The `all`
+rows are always filled. A session without the `sdt_type` column gets the `all` rows only.
 
 ## Epoch
 
-The epoch is the [reliability](metrics.md#reliability) epoch: from the cue to each trial's response, within the
-response window (`--response START END`, default all post-event samples). Misses and correct rejections end at
-the median response time of the trials with a response, and lever-aligned windows run from the cue to the push.
-`--no-mask-response` uses the whole response window. Trials with a response time below `--min-rt` (default
-0.2 s) are left out.
+Each trial contributes the samples between the cue and its response. Misses and correct rejections end at the
+median response time of the trials that did respond, and lever-aligned windows run from the cue to the push.
+`--response START END` bounds the epoch (default all post-event samples), and trials with a response time below
+`--min-rt` (default 0.2 s) are left out. This is the same epoch the [reliability](metrics.md#reliability) metrics
+use. Pass `--no-mask-response` to use the whole response window instead.
 
-The epoch needs the `cue_onset` and `response_time` trials columns and the event the windows are aligned to.
-Without them, or for reward-aligned windows, the whole response window is used for every trial, with a warning.
+The epoch needs the `cue_onset` and `response_time` trials columns. Without them the command falls back to the
+whole response window and warns.
 
-## Reading the metrics
+## Reading the table
 
-- `r` mixes two things: that both regions respond to the cue, and that they fluctuate together from moment to
-  moment. `r_residual` keeps only the second, by removing each group's mean response first. On z-scored
-  recordings, where single-trial fluctuations are large next to the mean response, the two are close.
-- `r_trials_avg` is taken within trials, so differences in overall level between trials do not count. It runs
-  higher than `r` when trials sit at different levels.
-- `partial_r` removes what a pair shares with every other region, including any global signal. A pair with a
-  strong `r` and a `partial_r` near zero is coupled through the rest of the cortex. It needs more samples than
-  regions, so small groups give unstable values.
-- `lag` is in steps of the sample interval. A lag at the edge of `--max-lag` means the peak was not within range.
+`r` is high whenever both regions respond to the cue, whether or not they fluctuate together from moment to
+moment. `r_residual` strips out each group's mean response first, so it keeps only the moment-to-moment
+covariation. On z-scored recordings the mean response is a small part of the epoch variance, and the two come out
+close.
+
+`r_trials_avg` is taken within trials, so trials sitting at different levels do not pull it down.
+
+`mi` captures dependence of any shape, where `r` captures linear dependence only. A Gaussian pair has
+`-0.5 * log2(1 - r²)` bits, so a `mi` well above that marks a non-linear relation. Independent regions land near
+zero, on either side of it. The estimator is the Kraskov-Stögbauer-Grassberger nearest-neighbour method with
+`--mi-neighbours` (default 3) neighbours. It is the slowest part of the command. Pass `--no-mi` to skip it.
+
+`partial_r` removes what a pair shares with every other region, including the global signal. A pair with a strong
+`r` and a `partial_r` near zero is coupled through the rest of the cortex.
+
+`lag` moves in steps of the sample interval. A lag sitting at `--max-lag` means the peak lies beyond it.
 
 ## As a library
 
@@ -67,5 +74,5 @@ table = connectivity.connectivity_table(perievent)
 
 `connectivity.pair_metrics` returns the matrices of one trial group from a masked `(n_trials, n_samples,
 n_regions)` array, built by `connectivity.epoch_cube` from the per-trial bounds of `connectivity.epoch_bounds`.
-`correlation_matrix`, `residual_epochs`, `trial_correlation`, `partial_correlation`, `lagged_correlation` and
-`peak_lag` are available on their own.
+`correlation_matrix`, `residual_epochs`, `trial_correlation`, `mutual_information`, `partial_correlation`,
+`lagged_correlation` and `peak_lag` work on their own.
