@@ -732,6 +732,7 @@ def metrics_tables(
         perievent (pd.DataFrame): Peri-event table with `trial_index`, `event_time`, `time`, `region` and `F`
             columns, as written by `process peri-event` from a `_regions.csv`. Any other column is taken as
             per-trial information, such as the trials columns `process peri-event` joins on, and carried through.
+            Checked by `perievent_trials`.
         baseline (tuple[float, float] | None, optional): Baseline window `[start, end)`. Defaults to all
             pre-event samples.
         response (tuple[float, float] | None, optional): Response window `[start, end]`. Defaults to all
@@ -763,10 +764,6 @@ def metrics_tables(
         `group`, `n_trials` and `BOOT_COLUMNS`; and the mean traces, one row per sample per region per trial group
         with `region`, `group`, `n_trials`, `time`, `mean`, `ci_low` and `ci_high`.
 
-    Raises:
-        ValueError: If `perievent` lacks any of `PERIEVENT_COLUMNS`, has no rows, or has a column other than `time`,
-            `region` and `F` that varies within a trial.
-
     Example:
         >>> perievent = pd.read_csv("ses-01_regions_event-cueonset_perievent.csv")
         >>> tables = metrics_tables(perievent, smoothing=5)
@@ -774,30 +771,16 @@ def metrics_tables(
     """
     import pandas as pd
 
-    missing = PERIEVENT_COLUMNS - set(perievent.columns)
-    if missing:
-        msg = f"Peri-event table lacks the {', '.join(sorted(missing))} column(s)."
-        raise ValueError(msg)
-    if perievent.empty:
-        msg = "Peri-event table has no rows."
-        raise ValueError(msg)
-
-    time = np.sort(perievent["time"].unique()).astype(np.float64)
+    time, trial_info = perievent_trials(perievent)
     baseline = baseline if baseline is not None else (float(time[0]), 0.0)
     response = response if response is not None else (0.0, float(time[-1]))
-    extra_columns = [column for column in perievent.columns if column not in PERIEVENT_COLUMNS]
-    trial_info = perievent[["trial_index", "event_time", *extra_columns]].drop_duplicates().reset_index(drop=True)
-    if trial_info["trial_index"].duplicated().any():
-        per_trial_values = perievent.groupby("trial_index")[["event_time", *extra_columns]].nunique(dropna=False)
-        varying = per_trial_values.columns[(per_trial_values > 1).any()]
-        msg = f"Column(s) {', '.join(varying)} vary within a trial; only per-trial columns can be carried through."
-        raise ValueError(msg)
+    extra_columns = [column for column in trial_info.columns if column not in {"trial_index", "event_time"}]
     events = trial_info[["trial_index", "event_time"]]
 
     info = trial_info
     if trials is not None:
         info = join_trials(trial_info, trials.drop(columns=extra_columns, errors="ignore"))
-    group_skip = _group_skip_reason(info)
+    group_skip = group_skip_reason(info)
     if group_skip:
         warnings.warn(f"Skipping trial groups: {group_skip}", stacklevel=2)
     groups = {"all": np.ones(len(info), dtype=bool)} if group_skip else trial_groups(info)
@@ -888,6 +871,40 @@ def metrics_tables(
     return MetricsTables(trial_table, session_table, boot_table, trace_table)
 
 
+def perievent_trials(perievent: pd.DataFrame) -> tuple[npt.NDArray[np.float64], pd.DataFrame]:
+    """Sample times and per-trial information of a long-format peri-event table.
+
+    Args:
+        perievent (pd.DataFrame): Peri-event table with `PERIEVENT_COLUMNS`; any other column is taken as
+            per-trial information.
+
+    Returns:
+        tuple[npt.NDArray[np.float64], pd.DataFrame]: Sorted sample times, shape `(n_samples,)`, and one row
+        per trial with `trial_index`, `event_time` and the per-trial columns, in order of first appearance.
+
+    Raises:
+        ValueError: If `perievent` lacks any of `PERIEVENT_COLUMNS`, has no rows, or has a column other than `time`,
+            `region` and `F` that varies within a trial.
+    """
+    missing = PERIEVENT_COLUMNS - set(perievent.columns)
+    if missing:
+        msg = f"Peri-event table lacks the {', '.join(sorted(missing))} column(s)."
+        raise ValueError(msg)
+    if perievent.empty:
+        msg = "Peri-event table has no rows."
+        raise ValueError(msg)
+
+    time = np.sort(perievent["time"].unique()).astype(np.float64)
+    extra_columns = [column for column in perievent.columns if column not in PERIEVENT_COLUMNS]
+    trial_info = perievent[["trial_index", "event_time", *extra_columns]].drop_duplicates().reset_index(drop=True)
+    if trial_info["trial_index"].duplicated().any():
+        per_trial_values = perievent.groupby("trial_index")[["event_time", *extra_columns]].nunique(dropna=False)
+        varying = per_trial_values.columns[(per_trial_values > 1).any()]
+        msg = f"Column(s) {', '.join(varying)} vary within a trial; only per-trial columns can be carried through."
+        raise ValueError(msg)
+    return time, trial_info
+
+
 def join_trials(table: pd.DataFrame, trials: pd.DataFrame) -> pd.DataFrame:
     """Left-join trials table columns onto a per-trial table by trials row index.
 
@@ -928,8 +945,11 @@ def infer_event(trial_info: pd.DataFrame) -> str | None:
     return None
 
 
-def _group_skip_reason(trial_info: pd.DataFrame) -> str | None:
+def group_skip_reason(trial_info: pd.DataFrame) -> str | None:
     """Why the trials cannot be split into `trial_groups`.
+
+    Args:
+        trial_info (pd.DataFrame): One row per trial.
 
     Returns:
         str | None: The reason, or None when they can be.
