@@ -1110,6 +1110,20 @@ def metrics_cmd(
     show_default=True,
     help="Largest lag searched for the peak cross-correlation, in seconds.",
 )
+@click.option(
+    "--mi-neighbours",
+    type=click.IntRange(min=1),
+    default=3,
+    show_default=True,
+    help="Neighbours for the mutual information estimator.",
+)
+@click.option(
+    "--mi/--no-mi",
+    "mutual_info",
+    default=True,
+    show_default=True,
+    help="Estimate the mutual information of each pair, the slowest part.",
+)
 def connectivity_cmd(
     path: str,
     out_dir: str,
@@ -1119,16 +1133,19 @@ def connectivity_cmd(
     mask_response: bool,
     min_rt: float,
     max_lag: float,
+    mi_neighbours: int,
+    mutual_info: bool,
 ) -> None:
     """Measure pairwise connectivity between regions over the cue-to-response epoch of peri-event traces.
 
     PATH is the long-format *_perievent.csv written by `process peri-event`. Writes <stem>_connectivity.csv with
     one row per region pair and trial group: the Pearson correlation of the pooled epoch samples, the same after
-    removing the group's mean response, the mean of the per-trial correlations, the partial correlation given
-    every other region, and the lag and value of the peak cross-correlation. Epochs run from the cue to each
-    trial's response, as for the reliability metrics of `process metrics`; without the cue_onset and
-    response_time columns the whole response window is used. Go/no-go sessions are grouped by sdt_type, go/no-go
-    stimulus and lever push, as well as all trials.
+    removing the group's mean response, the mean of the per-trial correlations, the mutual information of the
+    pooled samples and of the residuals in bits, the partial correlation given every other region, and the lag
+    and value of the peak cross-correlation. Epochs run from the cue to each trial's response, as for the
+    reliability metrics of `process metrics`; without the cue_onset and response_time columns the whole response
+    window is used. Go/no-go sessions are grouped by sdt_type, go/no-go stimulus and lever push, as well as all
+    trials.
     """  # noqa: DOC501
     import pandas as pd
 
@@ -1157,6 +1174,8 @@ def connectivity_cmd(
                 min_rt=min_rt,
                 min_trials=min_trials,
                 max_lag=max_lag,
+                mi_neighbours=mi_neighbours,
+                mutual_info=mutual_info,
             )
         except ValueError as error:
             msg = f"{path}: {error} Expected the columns written by `process peri-event`."

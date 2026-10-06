@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import typing
 import warnings
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import numpy.typing as npt
@@ -35,7 +36,7 @@ if typing.TYPE_CHECKING:
     import pandas as pd
 
 # Connectivity metrics per region pair, in output column order.
-PAIR_METRICS = ("r", "r_residual", "r_trials_avg", "partial_r", "lag", "r_lag")
+PAIR_METRICS = ("r", "r_residual", "r_trials_avg", "mi", "mi_residual", "partial_r", "lag", "r_lag")
 
 # Columns of the connectivity table, in order.
 TABLE_COLUMNS = ("region_a", "region_b", "group", *PAIR_METRICS, "n_trials", "n_samples")
@@ -151,6 +152,68 @@ def partial_correlation(samples: npt.NDArray) -> npt.NDArray[np.float64]:
     np.fill_diagonal(block, 1.0)
     partial[np.ix_(present, present)] = block
     return partial
+
+
+def mutual_information(x: npt.NDArray, y: npt.NDArray, k: int = 3) -> float:
+    """Mutual information between two continuous variables, in bits, by the Kraskov-Stögbauer-Grassberger estimator.
+
+    Each variable is scaled to unit SD first, as the estimator depends on the relative scale of the two. Samples at
+    exactly the distance of the `k`-th neighbour count as outside it.
+
+    Args:
+        x (npt.NDArray): Samples, shape `(n_samples,)`.
+        y (npt.NDArray): Samples, shape `(n_samples,)`.
+        k (int, optional): Neighbours. Defaults to 3.
+
+    Returns:
+        float: The estimate, which can fall slightly below zero for independent variables. NaN with `k` or fewer
+        samples, or when either variable is constant or has NaNs.
+    """
+    from scipy.spatial import cKDTree
+    from scipy.special import digamma
+
+    x = np.array(x, dtype=np.float64)
+    y = np.array(y, dtype=np.float64)
+    n = x.size
+    if n <= k or np.isnan(x).any() or np.isnan(y).any():
+        return float("nan")
+    with np.errstate(divide="ignore", invalid="ignore"):
+        x /= x.std()
+        y /= y.std()
+    if not (np.isfinite(x).all() and np.isfinite(y).all()):
+        return float("nan")
+    points = np.column_stack([x, y])
+    eps = cKDTree(points).query(points, k=k + 1, p=np.inf)[0][:, -1]
+    total = 0.0
+    for values in (x, y):
+        ordered = np.sort(values)
+        inside = np.searchsorted(ordered, values + eps, "left") - np.searchsorted(ordered, values - eps, "right") - 1
+        total += np.mean(digamma(np.maximum(inside, 0) + 1))
+    return float((digamma(k) + digamma(n) - total) / np.log(2))
+
+
+def mutual_information_matrix(samples: npt.NDArray, k: int = 3) -> npt.NDArray[np.float64]:
+    """`mutual_information` between every pair of columns, over threads.
+
+    Args:
+        samples (npt.NDArray): Samples of shape `(n_samples, n_regions)`.
+        k (int, optional): Neighbours. Defaults to 3.
+
+    Returns:
+        npt.NDArray[np.float64]: Symmetric matrix of shape `(n_regions, n_regions)`, NaN on the diagonal.
+    """
+    values = np.asarray(samples, dtype=np.float64)
+    n_regions = values.shape[1]
+    matrix = np.full((n_regions, n_regions), np.nan)
+    pairs = [(i, j) for i in range(n_regions) for j in range(i + 1, n_regions)]
+
+    def estimate(pair: tuple[int, int]) -> float:
+        return mutual_information(values[:, pair[0]], values[:, pair[1]], k)
+
+    with ThreadPoolExecutor() as pool:
+        for (i, j), value in zip(pairs, pool.map(estimate, pairs), strict=True):
+            matrix[i, j] = matrix[j, i] = value
+    return matrix
 
 
 def lagged_correlation(epochs: npt.NDArray, max_lag: int) -> npt.NDArray[np.float64]:
@@ -280,24 +343,36 @@ def epoch_cube(
     return cube
 
 
-def pair_metrics(epochs: npt.NDArray, lag_samples: int, min_trial_samples: int = 3) -> dict[str, typing.Any]:
+def pair_metrics(
+    epochs: npt.NDArray,
+    lag_samples: int,
+    min_trial_samples: int = 3,
+    mi_neighbours: int = 3,
+    mutual_info: bool = True,
+) -> dict[str, typing.Any]:
     """Connectivity matrices of one trial group.
 
     Args:
         epochs (npt.NDArray): Masked traces of shape `(n_trials, n_samples, n_regions)`.
         lag_samples (int): Largest lag searched for the peak cross-correlation, in samples.
         min_trial_samples (int, optional): Samples a trial needs for `trial_correlation`. Defaults to 3.
+        mi_neighbours (int, optional): Neighbours for `mutual_information`. Defaults to 3.
+        mutual_info (bool, optional): Estimate `mi` and `mi_residual`; False leaves them NaN. Defaults to True.
 
     Returns:
         dict[str, typing.Any]: One `(n_regions, n_regions)` matrix per `PAIR_METRICS` name, with `lag` in
         samples, plus `n_samples`, the pooled samples used.
     """
     pooled = pooled_samples(epochs)
+    residuals = pooled_samples(residual_epochs(epochs))
     index, r_lag = peak_lag(lagged_correlation(epochs, lag_samples))
+    empty = np.full((pooled.shape[1], pooled.shape[1]), np.nan)
     return {
         "r": correlation_matrix(pooled),
-        "r_residual": correlation_matrix(pooled_samples(residual_epochs(epochs))),
+        "r_residual": correlation_matrix(residuals),
         "r_trials_avg": trial_correlation(epochs, min_trial_samples),
+        "mi": mutual_information_matrix(pooled, mi_neighbours) if mutual_info else empty,
+        "mi_residual": mutual_information_matrix(residuals, mi_neighbours) if mutual_info else empty,
         "partial_r": partial_correlation(pooled),
         "lag": np.where(np.isnan(r_lag), np.nan, index - lag_samples),
         "r_lag": r_lag,
@@ -315,6 +390,8 @@ def connectivity_table(
     min_trials: int = 10,
     max_lag: float = 0.5,
     min_trial_samples: int = 3,
+    mi_neighbours: int = 3,
+    mutual_info: bool = True,
 ) -> pd.DataFrame:
     """Pairwise connectivity between regions, per trial group, from a long-format peri-event table.
 
@@ -340,12 +417,15 @@ def connectivity_table(
         max_lag (float, optional): Largest lag searched for the peak cross-correlation, in seconds. Defaults to
             0.5.
         min_trial_samples (int, optional): Samples a trial needs to count towards `r_trials_avg`. Defaults to 3.
+        mi_neighbours (int, optional): Neighbours for `mutual_information`. Defaults to 3.
+        mutual_info (bool, optional): Estimate `mi` and `mi_residual`; False leaves them NaN. Defaults to True.
 
     Returns:
         pd.DataFrame: One row per unordered region pair per trial group, with `TABLE_COLUMNS`: `region_a` and
         `region_b` in the order the regions appear, `group`, `r` (Pearson correlation of the pooled samples),
         `r_residual` (the same after removing the group's mean response at each sample), `r_trials_avg`
-        (`trial_correlation`), `partial_r` (`partial_correlation`), `lag` and `r_lag` (lag in seconds and value
+        (`trial_correlation`), `mi` and `mi_residual` (`mutual_information` of the pooled samples and of the
+        residuals, in bits), `partial_r` (`partial_correlation`), `lag` and `r_lag` (lag in seconds and value
         of the peak absolute cross-correlation within `max_lag`; positive when `region_b` lags `region_a`),
         `n_trials` (trials used) and `n_samples` (pooled samples used).
 
@@ -381,7 +461,7 @@ def connectivity_table(
         if name != "all" and n_trials < min_trials:
             per_group[name] = {"n_trials": n_trials, "n_samples": 0}
             continue
-        metrics = pair_metrics(cube[used], lag_samples, min_trial_samples)
+        metrics = pair_metrics(cube[used], lag_samples, min_trial_samples, mi_neighbours, mutual_info)
         metrics["lag"] *= step
         per_group[name] = {"n_trials": n_trials, **metrics}
 
