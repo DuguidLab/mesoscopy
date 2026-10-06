@@ -4,6 +4,8 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 ## Unreleased
 
+## [0.15.0] - 2026-10-06
+
 ### Added
 
 - `process connectivity`: pairwise connectivity between regions over the cue-to-response epoch of a `_perievent.csv`, written to `<stem>_connectivity.csv` with one row per region pair and trial group: the Pearson correlation of the pooled epoch samples, the correlation of the residuals after removing the group's mean response, the mean per-trial correlation, the mutual information of the pooled samples and of the residuals in bits, the partial correlation and the lag and value of the peak cross-correlation within `--max-lag`. The peri-event report shows the table as a heatmap by metric and trial group when it sits next to the input ([#184](https://github.com/DuguidLab/mesoscopy/issues/184)).
