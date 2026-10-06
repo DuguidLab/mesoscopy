@@ -14,6 +14,7 @@ from click.testing import CliRunner
 
 import mesoscopy
 from mesoscopy import io
+from mesoscopy.process import connectivity as pc
 from mesoscopy.process import metrics as pm
 from mesoscopy.process import perievent as pev
 from mesoscopy.process import regression as regr
@@ -3632,3 +3633,437 @@ def test_perievent_cmd_with_metrics_bootstrap(perievent_regions_csv, perievent_t
     pd.testing.assert_frame_equal(boot, expected.boot)
     # The two lever pushes meet the lowered minimum.
     assert boot[boot["group"] == "resp-push"]["boot_amplitude"].notna().all()
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Connectivity
+
+
+CONNECTIVITY_REGIONS = ["L_MOp", "R_MOp", "L_SSp-ul"]
+
+
+def _connectivity_cube(seed=0):
+    """Go/no-go traces for three regions: a shared response plus noise, and the first delayed by two samples."""
+    n_trials = len(_gonogo_info())
+    rng = np.random.default_rng(seed)
+    shape = np.interp(METRICS_GRID, [0.0, 0.5, 1.5], [0.0, 1.0, 0.0])
+    first, second = (shape + 0.1 * rng.standard_normal((n_trials, len(METRICS_GRID))) for _ in range(2))
+    return np.stack([first, second, np.roll(first, 2, axis=1)], axis=-1)
+
+
+def _connectivity_perievent(cube=None):
+    """Long-format cue-aligned peri-event table of the go/no-go session for `CONNECTIVITY_REGIONS`."""
+    info = _gonogo_info()
+    cube = cube if cube is not None else _connectivity_cube()
+    frames = [
+        pd.DataFrame(
+            {
+                "trial_index": row["trial_index"],
+                "event_time": row["event_time"],
+                "time": METRICS_GRID,
+                "region": region,
+                "F": cube[i, :, column],
+            }
+        )
+        for i, row in info.iterrows()
+        for column, region in enumerate(CONNECTIVITY_REGIONS)
+    ]
+    return pd.concat(frames, ignore_index=True).merge(info.drop(columns="event_time"), on="trial_index")
+
+
+def _post_event_samples(end=3.0):
+    """Samples of the grid within `[0, end]`."""
+    return int(((METRICS_GRID >= 0) & (METRICS_GRID <= np.nextafter(end, np.inf))).sum())
+
+
+class TestPerieventTrials:
+    def test_time_and_trials(self):
+        time, info = pm.perievent_trials(_connectivity_perievent())
+        np.testing.assert_array_equal(time, METRICS_GRID)
+        assert info["trial_index"].tolist() == list(range(36))
+        assert "sdt_type" in info.columns
+        assert "F" not in info.columns
+
+    def test_varying_column_raises(self):
+        perievent = _connectivity_perievent()
+        perievent["bad"] = np.arange(len(perievent))
+        with pytest.raises(ValueError, match="bad vary within a trial"):
+            pm.perievent_trials(perievent)
+
+
+class TestPooledSamples:
+    def test_drops_incomplete_rows(self):
+        epochs = np.arange(24, dtype=float).reshape(2, 4, 3)
+        epochs[0, 1, 2] = np.nan
+        epochs[1, 3, :] = np.nan
+        pooled = pc.pooled_samples(epochs)
+        assert pooled.shape == (6, 3)
+        assert not np.isnan(pooled).any()
+
+    def test_absent_region_stays_nan(self):
+        epochs = np.ones((2, 4, 3))
+        epochs[:, :, 1] = np.nan
+        pooled = pc.pooled_samples(epochs)
+        assert pooled.shape == (8, 3)
+        assert np.isnan(pooled[:, 1]).all()
+        assert not np.isnan(pooled[:, [0, 2]]).any()
+
+
+class TestCorrelationMatrix:
+    def test_matches_corrcoef(self):
+        samples = np.random.default_rng(0).standard_normal((50, 4))
+        np.testing.assert_allclose(pc.correlation_matrix(samples), np.corrcoef(samples, rowvar=False))
+
+    def test_constant_column_and_too_few_samples(self):
+        samples = np.random.default_rng(0).standard_normal((50, 3))
+        samples[:, 1] = 2.0
+        matrix = pc.correlation_matrix(samples)
+        assert np.isnan(matrix[1]).all()
+        assert np.isnan(matrix[:, 1]).all()
+        assert matrix[0, 2] == pytest.approx(np.corrcoef(samples[:, 0], samples[:, 2])[0, 1])
+        assert np.isnan(pc.correlation_matrix(samples[:1])).all()
+
+
+class TestResidualEpochs:
+    def test_removes_mean_per_sample(self):
+        epochs = np.random.default_rng(0).standard_normal((5, 6, 2))
+        epochs[0, :2] = np.nan
+        residuals = pc.residual_epochs(epochs)
+        np.testing.assert_allclose(np.nanmean(residuals, axis=0), 0.0, atol=1e-12)
+        assert np.isnan(residuals[0, :2]).all()
+        assert not np.isnan(residuals[1:]).any()
+
+    def test_identical_trials_give_zero(self):
+        epochs = np.tile(np.arange(6.0)[None, :, None], (4, 1, 3))
+        np.testing.assert_allclose(pc.residual_epochs(epochs), 0.0)
+
+
+class TestTrialCorrelation:
+    def test_matches_fisher_mean_of_trials(self):
+        epochs = np.random.default_rng(0).standard_normal((6, 10, 3))
+        epochs[0, 5:] = np.nan
+        epochs[1, 2:] = np.nan
+        z = []
+        for trial in epochs:
+            valid = ~np.isnan(trial).any(axis=1)
+            if valid.sum() >= 3:
+                with np.errstate(divide="ignore"):
+                    z.append(np.arctanh(np.corrcoef(trial[valid], rowvar=False)))
+        assert len(z) == 5
+        expected = np.tanh(np.mean(z, axis=0))
+        off_diagonal = ~np.eye(3, dtype=bool)
+        np.testing.assert_allclose(pc.trial_correlation(epochs)[off_diagonal], expected[off_diagonal])
+
+    def test_min_samples(self):
+        epochs = np.random.default_rng(0).standard_normal((3, 2, 2))
+        assert np.isnan(pc.trial_correlation(epochs)).all()
+        assert not np.isnan(pc.trial_correlation(epochs, min_samples=2)[0, 1])
+
+
+class TestPartialCorrelation:
+    def test_matches_regression_residuals(self):
+        rng = np.random.default_rng(0)
+        samples = rng.standard_normal((200, 4)) @ rng.standard_normal((4, 4))
+        partial = pc.partial_correlation(samples)
+        for i, j in [(0, 1), (2, 3), (1, 3)]:
+            others = [k for k in range(4) if k not in {i, j}]
+            design = np.column_stack([np.ones(200), samples[:, others]])
+            residuals = [samples[:, k] - design @ np.linalg.lstsq(design, samples[:, k], rcond=None)[0] for k in (i, j)]
+            assert partial[i, j] == pytest.approx(np.corrcoef(*residuals)[0, 1])
+            assert partial[j, i] == partial[i, j]
+        np.testing.assert_allclose(np.diag(partial), 1.0)
+
+    def test_shared_sum_turns_independent_negative(self):
+        rng = np.random.default_rng(1)
+        x, y = rng.standard_normal((2, 500))
+        samples = np.column_stack([x, y, x + y + 0.1 * rng.standard_normal(500)])
+        assert abs(np.corrcoef(x, y)[0, 1]) < 0.1
+        assert pc.partial_correlation(samples)[0, 1] < -0.9
+
+    def test_nan_column_and_too_few_samples(self):
+        samples = np.random.default_rng(0).standard_normal((50, 3))
+        samples[:, 1] = np.nan
+        partial = pc.partial_correlation(samples)
+        assert np.isnan(partial[1]).all()
+        assert np.isnan(partial[:, 1]).all()
+        # With nothing else to condition on, the partial correlation is the correlation.
+        assert partial[0, 2] == pytest.approx(np.corrcoef(samples[:, 0], samples[:, 2])[0, 1])
+        assert np.isnan(pc.partial_correlation(samples[:1])).all()
+
+
+class TestLaggedCorrelation:
+    def test_delayed_copy_peaks_at_its_lag(self):
+        first = np.random.default_rng(0).standard_normal((4, 30))
+        epochs = np.stack([first, np.roll(first, 2, axis=1)], axis=-1)
+        lagged = pc.lagged_correlation(epochs, 3)
+        assert lagged.shape == (7, 2, 2)
+        # Region 1 at t + 2 is region 0 at t.
+        assert lagged[3 + 2, 0, 1] == pytest.approx(1.0)
+        assert lagged[3 - 2, 1, 0] == pytest.approx(1.0)
+        assert lagged[3, 0, 0] == pytest.approx(1.0)
+        index, peak = pc.peak_lag(lagged)
+        assert index[0, 1] == 5
+        assert index[1, 0] == 1
+        assert peak[0, 1] == pytest.approx(1.0)
+
+    def test_symmetric_in_lag_and_pair(self):
+        epochs = np.random.default_rng(0).standard_normal((3, 20, 3))
+        epochs[0, 15:] = np.nan
+        lagged = pc.lagged_correlation(epochs, 4)
+        np.testing.assert_allclose(lagged, np.swapaxes(lagged[::-1], 1, 2))
+
+    def test_zero_lag_is_pooled_correlation(self):
+        epochs = np.random.default_rng(0).standard_normal((3, 20, 3))
+        epochs[0, 15:] = np.nan
+        expected = pc.correlation_matrix(pc.pooled_samples(epochs))
+        np.testing.assert_allclose(pc.lagged_correlation(epochs, 2)[2], expected)
+
+    def test_lag_beyond_epoch_is_nan(self):
+        epochs = np.random.default_rng(0).standard_normal((2, 3, 2))
+        lagged = pc.lagged_correlation(epochs, 3)
+        assert np.isnan(lagged[0]).all()
+        assert np.isnan(lagged[-1]).all()
+        assert not np.isnan(lagged[3]).any()
+
+
+class TestPeakLag:
+    def test_largest_magnitude_first_on_ties(self):
+        lagged = np.zeros((3, 2, 2))
+        lagged[0, 0, 1], lagged[2, 0, 1], lagged[1, 1, 0] = -0.5, 0.5, 0.9
+        index, peak = pc.peak_lag(lagged)
+        assert index[0, 1] == 0
+        assert peak[0, 1] == -0.5
+        assert index[1, 0] == 1
+        assert peak[1, 0] == 0.9
+
+    def test_all_nan(self):
+        lagged = np.full((3, 2, 2), np.nan)
+        lagged[1, 0, 0] = 1.0
+        index, peak = pc.peak_lag(lagged)
+        assert np.isnan(peak[0, 1])
+        assert index[0, 1] == 0
+        assert peak[0, 0] == 1.0
+        assert index[0, 0] == 1
+
+
+class TestEpochBounds:
+    def test_matches_reliability_epochs(self):
+        info = _gonogo_info()
+        start, end, keep = pc.epoch_bounds(info, "cue_onset", (0.0, 3.0), min_rt=0.5)
+        expected = pm.reliability_epochs(info, "cue_onset", (0.0, 3.0), min_rt=0.5)
+        np.testing.assert_array_equal(start, expected[0])
+        np.testing.assert_array_equal(end, expected[1])
+        np.testing.assert_array_equal(keep, expected[3])
+        assert not keep.all()
+
+    @pytest.mark.parametrize(
+        ("columns", "event", "reason"),
+        [
+            (["response_time"], "cue_onset", "no response_time column"),
+            (["cue_onset", "response_time"], "cue_onset", "no cue_onset, response_time column"),
+            ([], None, "aligned event is unknown"),
+            ([], "reward", "not defined for reward-aligned windows"),
+        ],
+    )
+    def test_falls_back_to_response_window(self, columns, event, reason):
+        info = _gonogo_info().drop(columns=columns)
+        with pytest.warns(UserWarning, match=f"Using the response window as the epoch: .*{reason}"):
+            start, end, keep = pc.epoch_bounds(info, event, (0.0, 3.0))
+        np.testing.assert_array_equal(start, 0.0)
+        assert (end > 3.0).all()
+        assert (end < 3.0001).all()
+        assert keep.all()
+
+
+class TestConnectivityTable:
+    PAIRS = [("L_MOp", "R_MOp"), ("L_MOp", "L_SSp-ul"), ("R_MOp", "L_SSp-ul")]
+
+    @staticmethod
+    def _row(table, pair, group):
+        return table[(table["region_a"] == pair[0]) & (table["region_b"] == pair[1]) & (table["group"] == group)].iloc[
+            0
+        ]
+
+    def test_layout(self):
+        table = pc.connectivity_table(_connectivity_perievent())
+        groups = list(pm.trial_groups(_gonogo_info()))
+        assert list(table.columns) == list(pc.TABLE_COLUMNS)
+        assert list(zip(table["region_a"], table["region_b"], strict=True)) == [p for p in self.PAIRS for _ in groups]
+        assert table["group"].tolist() == groups * len(self.PAIRS)
+        assert len(table) == 27
+
+    def test_shared_response_versus_residual(self):
+        row = self._row(pc.connectivity_table(_connectivity_perievent()), self.PAIRS[0], "all")
+        assert row["r"] > 0.8
+        assert abs(row["r_residual"]) < 0.15
+        assert row["r_trials_avg"] > 0.8
+        assert row["n_trials"] == 36
+
+    def test_lag_of_delayed_copy(self):
+        row = self._row(pc.connectivity_table(_connectivity_perievent()), self.PAIRS[1], "all")
+        assert row["lag"] == pytest.approx(0.08)
+        assert row["r_lag"] == pytest.approx(1.0)
+        assert row["r"] < row["r_lag"]
+
+    def test_matches_pair_metrics(self):
+        perievent = _connectivity_perievent()
+        table = pc.connectivity_table(perievent, max_lag=0.2)
+        info = _gonogo_info()
+        hits = (info["sdt_type"] == "hit").to_numpy()
+        start, end, keep = pc.epoch_bounds(info, "cue_onset", (0.0, 3.0))
+        cube = pc.epoch_cube(perievent, info["trial_index"].to_numpy(), METRICS_GRID, CONNECTIVITY_REGIONS, start, end)
+        assert cube.shape == (36, len(METRICS_GRID), 3)
+        expected = pc.pair_metrics(cube[hits & keep], 5)
+        rows = table[table["group"] == "sdt-hit"]
+        for metric in pc.PAIR_METRICS:
+            matrix = expected[metric] * (0.04 if metric == "lag" else 1.0)
+            assert rows[metric].tolist() == pytest.approx([matrix[0, 1], matrix[0, 2], matrix[1, 2]], nan_ok=True)
+        assert rows["n_samples"].tolist() == [expected["n_samples"]] * 3
+        assert rows["n_trials"].tolist() == [12] * 3
+
+    def test_n_samples_counts_epoch_samples(self):
+        table = pc.connectivity_table(_connectivity_perievent())
+        info = _gonogo_info()
+        start, end, _, keep = pm.reliability_epochs(info, "cue_onset", (0.0, 3.0))
+        inside = ~np.isnan(pm.epoch_traces(np.zeros((len(info), len(METRICS_GRID))), METRICS_GRID, start, end))
+        assert table[table["group"] == "all"]["n_samples"].tolist() == [int(inside[keep].sum())] * 3
+
+    def test_min_trials(self):
+        table = pc.connectivity_table(_connectivity_perievent())
+        misses = table[table["group"] == "sdt-miss"]
+        assert misses["n_trials"].tolist() == [6] * 3
+        assert misses["n_samples"].tolist() == [0] * 3
+        assert misses[list(pc.PAIR_METRICS)].isna().all().all()
+
+        lowered = pc.connectivity_table(_connectivity_perievent(), min_trials=5)
+        assert lowered[lowered["group"] == "sdt-miss"][list(pc.PAIR_METRICS)].notna().all().all()
+
+        # The all-trials metrics are always taken.
+        strict = pc.connectivity_table(_connectivity_perievent(), min_trials=100)
+        assert strict[strict["group"] == "all"]["r"].notna().all()
+        assert strict[strict["group"] != "all"]["r"].isna().all()
+
+    def test_min_rt_drops_trials(self):
+        table = pc.connectivity_table(_connectivity_perievent(), min_rt=0.5)
+        # Two hits respond at 0.4 s.
+        assert table[table["group"] == "all"]["n_trials"].tolist() == [34] * 3
+        assert table[table["group"] == "sdt-hit"]["n_trials"].tolist() == [10] * 3
+
+    def test_no_mask_response_uses_whole_window(self):
+        masked = pc.connectivity_table(_connectivity_perievent())
+        whole = pc.connectivity_table(_connectivity_perievent(), mask_response=False)
+        taken = whole["n_samples"] > 0
+        assert (whole["n_samples"][taken] > masked["n_samples"][taken]).all()
+        assert whole[whole["group"] == "all"]["n_samples"].tolist() == [36 * _post_event_samples()] * 3
+
+    def test_response_window(self):
+        table = pc.connectivity_table(_connectivity_perievent(), response=(0.0, 0.5))
+        assert table[table["group"] == "all"]["n_samples"].tolist() == [36 * _post_event_samples(0.5) - 2 * 3] * 3
+
+    def test_without_groups_warns(self):
+        with pytest.warns(UserWarning, match="Skipping trial groups: no sdt_type column"):
+            table = pc.connectivity_table(_connectivity_perievent().drop(columns="sdt_type"))
+        assert table["group"].tolist() == ["all"] * 3
+
+    def test_without_epoch_columns_warns(self):
+        with pytest.warns(UserWarning, match="Using the response window as the epoch: no response_time column"):
+            table = pc.connectivity_table(_connectivity_perievent().drop(columns="response_time"))
+        assert table[table["group"] == "all"]["n_samples"].tolist() == [36 * _post_event_samples()] * 3
+
+    def test_joins_trials(self):
+        perievent = _connectivity_perievent()
+        columns = [column for column in perievent.columns if column not in pm.PERIEVENT_COLUMNS]
+        trials = perievent.drop_duplicates("trial_index")[columns].reset_index(drop=True)
+        joined = pc.connectivity_table(perievent.drop(columns=columns), trials=trials)
+        pd.testing.assert_frame_equal(joined, pc.connectivity_table(perievent))
+
+    def test_invalid_table(self):
+        with pytest.raises(ValueError, match="lacks the F column"):
+            pc.connectivity_table(_connectivity_perievent().drop(columns="F"))
+        with pytest.raises(ValueError, match="no rows"):
+            pc.connectivity_table(_connectivity_perievent().iloc[:0])
+
+    def test_single_region(self):
+        perievent = _connectivity_perievent()
+        table = pc.connectivity_table(perievent[perievent["region"] == "L_MOp"])
+        assert table.empty
+        assert list(table.columns) == list(pc.TABLE_COLUMNS)
+
+
+def test_connectivity_cmd(output_dir, tmp_path):
+    path = tmp_path / "ses-01_regions_event-cueonset_perievent.csv"
+    _connectivity_perievent().to_csv(path, index=False)
+    result = CliRunner().invoke(mesoscopy.cli, args=f"process connectivity {path} -o {output_dir}")
+    assert result.exit_code == 0, result.output
+    output = pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_connectivity.csv"
+    assert f"Saved connectivity metrics at {output}" in result.output
+    table = pd.read_csv(output)
+    pd.testing.assert_frame_equal(table, pc.connectivity_table(pd.read_csv(path)), check_dtype=False)
+    assert len(table) == 27
+
+
+def test_connectivity_cmd_options(output_dir, tmp_path):
+    path = tmp_path / "ses-01_regions_event-cueonset_perievent.csv"
+    _connectivity_perievent().to_csv(path, index=False)
+    result = CliRunner().invoke(
+        mesoscopy.cli,
+        args=f"process connectivity {path} -o {output_dir} --response 0 1 --min-trials 5 --no-mask-response"
+        " --min-rt 0.5 --max-lag 0.2",
+    )
+    assert result.exit_code == 0, result.output
+    table = pd.read_csv(pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_connectivity.csv")
+    expected = pc.connectivity_table(
+        pd.read_csv(path), response=(0.0, 1.0), mask_response=False, min_rt=0.5, min_trials=5, max_lag=0.2
+    )
+    pd.testing.assert_frame_equal(table, expected, check_dtype=False)
+    assert table[table["group"] == "sdt-miss"]["r"].notna().all()
+    assert table["lag"].abs().max() <= 0.2 + 1e-9
+
+
+def test_connectivity_cmd_joins_trials(output_dir, tmp_path):
+    perievent = _connectivity_perievent()
+    columns = [column for column in perievent.columns if column not in pm.PERIEVENT_COLUMNS]
+    path = tmp_path / "ses-01_regions_event-cueonset_perievent.csv"
+    perievent.drop(columns=columns).to_csv(path, index=False)
+    trials_path = tmp_path / "ses-01_trials.csv"
+    perievent.drop_duplicates("trial_index")[columns].to_csv(trials_path, index=False)
+    result = CliRunner().invoke(mesoscopy.cli, args=f"process connectivity {path} -o {output_dir} -t {trials_path}")
+    assert result.exit_code == 0, result.output
+    assert "Warning" not in result.output
+    table = pd.read_csv(pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_connectivity.csv")
+    pd.testing.assert_frame_equal(table, pc.connectivity_table(perievent), check_dtype=False)
+
+
+def test_connectivity_cmd_warns_without_trials_columns(metrics_perievent_csv, output_dir):
+    result = CliRunner().invoke(mesoscopy.cli, args=f"process connectivity {metrics_perievent_csv} -o {output_dir}")
+    assert result.exit_code == 0, result.output
+    assert "Warning: Using the response window as the epoch: no cue_onset, response_time column(s)" in result.output
+    assert "Warning: Skipping trial groups: no sdt_type column" in result.output
+    table = pd.read_csv(pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_connectivity.csv")
+    assert table["group"].tolist() == ["all"]
+    assert table["n_trials"].tolist() == [3]
+
+
+def test_connectivity_cmd_missing_columns(output_dir, tmp_path):
+    path = tmp_path / "bad_perievent.csv"
+    _connectivity_perievent().drop(columns="F").to_csv(path, index=False)
+    result = CliRunner().invoke(mesoscopy.cli, args=f"process connectivity {path} -o {output_dir}")
+    assert result.exit_code == 1
+    assert "lacks the F column(s)" in result.output
+
+
+def test_connectivity_cmd_empty_input(output_dir, tmp_path):
+    path = tmp_path / "empty_perievent.csv"
+    pd.DataFrame(columns=list(pm.PERIEVENT_COLUMNS)).to_csv(path, index=False)
+    result = CliRunner().invoke(mesoscopy.cli, args=f"process connectivity {path} -o {output_dir}")
+    assert result.exit_code == 1
+    assert "has no rows" in result.output
+
+
+def test_connectivity_cmd_creates_output_dir(tmp_path):
+    path = tmp_path / "ses-01_regions_event-cueonset_perievent.csv"
+    _connectivity_perievent().to_csv(path, index=False)
+    out_dir = tmp_path / "new" / "dir"
+    result = CliRunner().invoke(mesoscopy.cli, args=f"process connectivity {path} -o {out_dir}")
+    assert result.exit_code == 0, result.output
+    assert (out_dir / "ses-01_regions_event-cueonset_connectivity.csv").exists()
