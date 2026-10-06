@@ -4,19 +4,26 @@
 
 # Getting Started
 
-Mesoscopy is an open-source package for the analysis of mesoscale calcium recordings. It handles the preprocessing of mesoscale recording files to extract ∆F responses, the anatomical registration of recordings to the Allen Brain atlas as well as analysis of recordings captured at rest or with behaviour.
+Mesoscopy is an open-source package for the analysis of mesoscale calcium recordings. It preprocesses mesoscale
+recording files to extract ∆F responses, registers recordings to the Allen Brain atlas, and analyses recordings
+captured at rest or with behaviour.
 
 ## Prerequisites
 
-Mesoscopy works best with data acquired in the [NWB](https://www.nwb.org) format. Alternatively, recordings acquired as HDF5 files compatible with mesoscopy's [raw data schema](design-principles/data-structure.md) may be used.
+Mesoscopy works best with data acquired in the [NWB](https://www.nwb.org) format. It also takes recordings
+acquired as HDF5 files that follow mesoscopy's [raw data schema](design-principles/data-structure.md).
 
-Dual-channel recordings with an accompanying haemodynamic response channel (e.g. using both 470nm and 405nm excitation for GCaMP) will be automatically separated during preprocessing and yield a corrected ∆F signal.
+Dual-channel recordings with a haemodynamic response channel, such as 470nm and 405nm excitation for GCaMP, are
+separated during preprocessing and yield a corrected ∆F signal.
 
-An example acquisition script (designed for FLIR Grasshopper cameras) can be found [here](https://gist.github.com/celefthe/d069e4e90397039b3aaf53292446fbd1).
+An example acquisition script for FLIR Grasshopper cameras is
+[here](https://gist.github.com/celefthe/d069e4e90397039b3aaf53292446fbd1).
 
 ## Installing mesoscopy
 
-The recommended way to install `mesoscopy` is by using `pipx` (https://pypa.github.io/pipx/). `pipx` will create an isolated python environment from which `mesoscopy` will run, leaving the system python alone. This is the recommended way to install `mesoscopy`, as it will not interfere with any other python packages you may have installed on your system.
+Install `mesoscopy` with [`pipx`](https://pypa.github.io/pipx/). `pipx` creates an isolated python environment for
+`mesoscopy` to run from and leaves the system python alone, so it does not interfere with any other python
+packages on your system.
 
 ### On Linux
 
@@ -38,7 +45,7 @@ The recommended way to install `mesoscopy` is by using `pipx` (https://pypa.gith
         sudo pipx ensurepath
         ```
 
-    - For other distributions, install `pipx` with `pip`:
+    - On other distributions, install `pipx` with `pip`:
 
         ```bash
         python3 -m pip install --user pipx
@@ -70,16 +77,18 @@ The recommended way to install `mesoscopy` is by using `pipx` (https://pypa.gith
 
 ### On Windows
 
-With Windows, you have two choices. You can either use `mesoscopy` with the [Windows Subsystem for Linux (WSL)](https://learn.microsoft.com/en-us/windows/wsl/install) and follow the instructions above for installing `mesoscopy` on Linux (recommended), or you can run `mesoscopy` directly on Windows via PowerShell. The choice is of course yours, but you should bear in mind that `mesoscopy` primarily targets Unix-like OSs (Linux & MacOS) at the moment, so while everything _should_ work fine on Windows, your milage may vary.
+On Windows, use `mesoscopy` under the
+[Windows Subsystem for Linux (WSL)](https://learn.microsoft.com/en-us/windows/wsl/install) and follow the Linux
+instructions above. `mesoscopy` targets Unix-like systems first, so this is the path we recommend.
 
-To install `mesoscopy` directly on Windows, first install `pipx` using [Scoop](https://scoop.sh):
+To run `mesoscopy` directly on Windows instead, install `pipx` with [Scoop](https://scoop.sh) in PowerShell.
 
 ```powershell
 scoop install pipx
 pipx ensurepath
 ```
 
-Then install `mesoscopy` via `pipx`:
+Then install `mesoscopy` with `pipx`.
 
 ```powershell
 pipx install mesoscopy
@@ -87,6 +96,10 @@ pipx install mesoscopy
 
 ## Next steps
 
-Our [typical workflow]() guide will take you through the typical processing steps for analysing mesoscale recordings with `mesoscopy`.
+The [typical workflow](typical-workflow.md) guide takes you through the processing steps for analysing mesoscale
+recordings with `mesoscopy`.
 
-You should also check out our [how to](how-to/index.md) guides for a deeper dive into individual aspects of analysis, including [quality control](how-to/qa.md). If you're about to start acquiring data, or wish to convert existing data to a format compatible with `mesoscopy`, check out our [data schema](design-principles/data-structure.md) and [converting videos to HDF5](how-to/convert-video-to-h5.md) guides.
+The [how-to](how-to/index.md) guides go deeper into individual aspects of analysis, including
+[quality control](how-to/qa.md). If you are about to start acquiring data, or want to convert existing data to a
+format `mesoscopy` reads, start with the [data schema](design-principles/data-structure.md) and
+[converting videos to HDF5](how-to/convert-video-to-h5.md) guides.
