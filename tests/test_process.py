@@ -2605,7 +2605,8 @@ def metrics_perievent_csv(tmp_path_factory):
 
 class TestMetricsTables:
     def test_tables(self, metrics_perievent_csv):
-        per_trial, per_session = pm.metrics_tables(pd.read_csv(metrics_perievent_csv))
+        tables = pm.metrics_tables(pd.read_csv(metrics_perievent_csv))
+        per_trial, per_session = tables.per_trial, tables.per_session
         assert list(per_trial.columns[:3]) == ["trial_index", "event_time", "region"]
         assert len(per_trial) == 3 * len(PERIEVENT_REGIONS)
         assert per_session["region"].tolist() == PERIEVENT_REGIONS
@@ -2616,13 +2617,16 @@ class TestMetricsTables:
         assert first["amplitude"] == pytest.approx(1.0, abs=1e-3)
 
     def test_joins_trials(self, metrics_perievent_csv, perievent_trials_csv):
-        per_trial, _ = pm.metrics_tables(pd.read_csv(metrics_perievent_csv), trials=pd.read_csv(perievent_trials_csv))
+        per_trial = pm.metrics_tables(
+            pd.read_csv(metrics_perievent_csv), trials=pd.read_csv(perievent_trials_csv)
+        ).per_trial
         assert per_trial[per_trial["region"] == "L_MOp"]["sdt_type"].tolist() == ["hit", "miss", "correct_rejection"]
 
     def test_carries_trial_columns_through(self, metrics_perievent_csv, perievent_trials_csv):
         perievent = pm.join_trials(pd.read_csv(metrics_perievent_csv), pd.read_csv(perievent_trials_csv))
-        per_trial, per_session = pm.metrics_tables(perievent)
-        plain, _ = pm.metrics_tables(pd.read_csv(metrics_perievent_csv))
+        tables = pm.metrics_tables(perievent)
+        per_trial, per_session = tables.per_trial, tables.per_session
+        plain = pm.metrics_tables(pd.read_csv(metrics_perievent_csv)).per_trial
         assert list(per_trial.columns) == [
             *plain.columns,
             "start_time",
@@ -2645,26 +2649,26 @@ class TestMetricsTables:
     def test_trials_skips_columns_already_present(self, metrics_perievent_csv, perievent_trials_csv):
         trials = pd.read_csv(perievent_trials_csv)
         perievent = pm.join_trials(pd.read_csv(metrics_perievent_csv), trials)
-        with_trials, _ = pm.metrics_tables(perievent, trials=trials)
-        without, _ = pm.metrics_tables(perievent)
+        with_trials = pm.metrics_tables(perievent, trials=trials).per_trial
+        without = pm.metrics_tables(perievent).per_trial
         pd.testing.assert_frame_equal(with_trials, without)
 
     def test_trials_clashing_column_gets_suffix(self, metrics_perievent_csv, perievent_trials_csv):
         trials = pd.read_csv(perievent_trials_csv)
         trials["duration"] = 9.0
-        per_trial, _ = pm.metrics_tables(pd.read_csv(metrics_perievent_csv), trials=trials)
+        per_trial = pm.metrics_tables(pd.read_csv(metrics_perievent_csv), trials=trials).per_trial
         assert "duration_trial" in per_trial.columns
         assert per_trial["duration_trial"].eq(9.0).all()
         assert not per_trial["duration"].eq(9.0).any()
 
     def test_options_pass_through(self, metrics_perievent_csv):
-        per_trial, _ = pm.metrics_tables(
+        per_trial = pm.metrics_tables(
             pd.read_csv(metrics_perievent_csv),
             baseline=(-0.5, 0.0),
             response=(0.0, 1.2),
             onset="peak",
             onset_fraction=0.53,
-        )
+        ).per_trial
         assert per_trial["onset_time"].iloc[0] == pytest.approx(0.64)
         assert per_trial["peak_time"].max() <= 1.2
 
@@ -2686,6 +2690,10 @@ def test_metrics_cmd(metrics_perievent_csv, output_dir):
     assert trial_path.is_file()
     assert session_path.is_file()
     assert "Saved per-trial metrics" in result.output
+    # The bootstrap runs by default; three trials are below the minimum, so the mean traces file has a header only.
+    boot = _read_boot(pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_metrics-boot.csv")
+    assert boot["n_trials"].tolist() == [3, 3]
+    assert pd.read_csv(pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_traces-boot.csv").empty
 
     trial = pd.read_csv(trial_path)
     assert list(trial.columns) == [
@@ -2776,7 +2784,13 @@ def test_metrics_cmd_extrapolate_and_smooth(metrics_perievent_csv, output_dir):
 
 @pytest.mark.parametrize(
     ("option", "hint"),
-    [("--smooth 4", "odd"), ("--extrapolate-range 0.8 0.2", "LOW < HIGH"), ("--min-trials 0", "--min-trials")],
+    [
+        ("--smooth 4", "odd"),
+        ("--extrapolate-range 0.8 0.2", "LOW < HIGH"),
+        ("--min-trials 0", "--min-trials"),
+        ("--bootstrap -1", "--bootstrap"),
+        ("--ci 100", "--ci"),
+    ],
 )
 def test_metrics_cmd_rejects_bad_options(metrics_perievent_csv, output_dir, option, hint):
     result = CliRunner().invoke(mesoscopy.cli, args=f"process metrics {metrics_perievent_csv} -o {output_dir} {option}")
@@ -2863,9 +2877,9 @@ def test_perievent_cmd_with_metrics(perievent_regions_csv, perievent_trials_csv,
     np.testing.assert_allclose(trial["baseline_mean"], 0.0, atol=1e-6)
 
     # Same result as running `process metrics` on the written windows with the same options.
-    expected, _ = pm.metrics_tables(
+    expected = pm.metrics_tables(
         windows, baseline=(-0.5, 0.0), smoothing=3, onset="peak", trials=pd.read_csv(perievent_trials_csv)
-    )
+    ).per_trial
     pd.testing.assert_frame_equal(trial, expected, check_dtype=False)
 
 
@@ -3243,7 +3257,7 @@ class TestReliabilityMetrics:
 
 class TestMetricsTablesReliability:
     def test_gonogo_session(self):
-        _, per_session = pm.metrics_tables(_gonogo_perievent())
+        per_session = pm.metrics_tables(_gonogo_perievent()).per_session
         groups = list(pm.trial_groups(_gonogo_info()))
         assert per_session["region"].tolist() == [region for region in PERIEVENT_REGIONS for _ in groups]
         assert per_session["group"].tolist() == groups * len(PERIEVENT_REGIONS)
@@ -3255,13 +3269,13 @@ class TestMetricsTablesReliability:
 
     def test_reliability_only_adds_columns(self):
         perievent = _gonogo_perievent()
-        _, with_reliability = pm.metrics_tables(perievent)
+        with_reliability = pm.metrics_tables(perievent).per_session
         with pytest.warns(UserWarning, match="Skipping reliability"):
-            _, without = pm.metrics_tables(perievent.drop(columns="response_time"))
+            without = pm.metrics_tables(perievent.drop(columns="response_time")).per_session
         pd.testing.assert_frame_equal(with_reliability[without.columns], without)
 
     def test_group_summaries(self):
-        _, per_session = pm.metrics_tables(_gonogo_perievent())
+        per_session = pm.metrics_tables(_gonogo_perievent()).per_session
         info = _gonogo_info()
         traces = _gonogo_traces(len(info))
         hits = (info["sdt_type"] == "hit").to_numpy()
@@ -3272,18 +3286,18 @@ class TestMetricsTablesReliability:
 
     def test_min_trials(self):
         perievent = _gonogo_perievent()
-        _, per_session = pm.metrics_tables(perievent)
+        per_session = pm.metrics_tables(perievent).per_session
         misses = per_session[per_session["group"] == "sdt-miss"]
         # Six misses are below the default 10-trial minimum: the counts stay, the estimates are empty.
         assert misses["n_trials"].tolist() == [6, 6]
         assert misses["onset_n"].notna().all()
         assert misses[["trace_correlation", "amplitude_mean", "amplitude_sd", "epoch_correlation"]].isna().all().all()
 
-        _, lowered = pm.metrics_tables(perievent, min_trials=5)
+        lowered = pm.metrics_tables(perievent, min_trials=5).per_session
         assert lowered[lowered["group"] == "sdt-miss"][["amplitude_mean", "epoch_correlation"]].notna().all().all()
 
         # The all-trials summaries are always taken; their reliability metrics follow the minimum.
-        _, strict = pm.metrics_tables(perievent, min_trials=100)
+        strict = pm.metrics_tables(perievent, min_trials=100).per_session
         everything = strict[strict["group"] == "all"]
         pd.testing.assert_frame_equal(
             everything[["n_trials", "trace_correlation", "amplitude_mean"]],
@@ -3293,19 +3307,19 @@ class TestMetricsTablesReliability:
 
     def test_without_sdt_type_only_all_trials(self):
         perievent = _gonogo_perievent()
-        _, grouped = pm.metrics_tables(perievent)
+        grouped = pm.metrics_tables(perievent).per_session
         with (
             pytest.warns(UserWarning, match="Skipping reliability"),
             pytest.warns(UserWarning, match="Skipping trial groups: no sdt_type column"),
         ):
-            _, plain = pm.metrics_tables(perievent.drop(columns="sdt_type"))
+            plain = pm.metrics_tables(perievent.drop(columns="sdt_type")).per_session
         assert plain["region"].tolist() == PERIEVENT_REGIONS
         assert plain["group"].tolist() == ["all", "all"]
         everything = grouped[grouped["group"] == "all"].reset_index(drop=True)
         pd.testing.assert_frame_equal(everything[plain.columns], plain)
 
     def test_lever_aligned(self):
-        _, per_session = pm.metrics_tables(_gonogo_perievent("response"), baseline=(-1.0, 0.0))
+        per_session = pm.metrics_tables(_gonogo_perievent("response"), baseline=(-1.0, 0.0)).per_session
         by_group = per_session.set_index(["group", "region"])
         assert by_group.loc["all", "reliability_n"].tolist() == [24, 24]
         assert by_group.loc["sdt-miss", "reliability_n"].tolist() == [0, 0]
@@ -3321,8 +3335,8 @@ class TestMetricsTablesReliability:
         perievent = _gonogo_perievent()
         trials = _gonogo_info().drop(columns=["trial_index", "event_time"])
         bare = perievent[["trial_index", "event_time", "time", "region", "F"]]
-        _, joined = pm.metrics_tables(bare, trials=trials)
-        _, carried = pm.metrics_tables(perievent)
+        joined = pm.metrics_tables(bare, trials=trials).per_session
+        carried = pm.metrics_tables(perievent).per_session
         pd.testing.assert_frame_equal(joined, carried)
 
     @pytest.mark.parametrize(
@@ -3335,12 +3349,12 @@ class TestMetricsTablesReliability:
     )
     def test_skipped(self, change, match):
         with pytest.warns(UserWarning, match=match):
-            _, per_session = pm.metrics_tables(change(_gonogo_perievent()))
+            per_session = pm.metrics_tables(change(_gonogo_perievent())).per_session
         assert "epoch_correlation" not in per_session.columns
 
     def test_reward_skipped(self):
         with pytest.warns(UserWarning, match="not defined for reward"):
-            _, per_session = pm.metrics_tables(_gonogo_perievent(), event="reward")
+            per_session = pm.metrics_tables(_gonogo_perievent(), event="reward").per_session
         assert "epoch_correlation" not in per_session.columns
         # Trial groups do not depend on the aligned event.
         assert per_session["group"].unique().tolist() == list(pm.trial_groups(_gonogo_info()))
@@ -3350,7 +3364,7 @@ class TestMetricsTablesReliability:
             pytest.warns(UserWarning, match="Skipping reliability metrics: only go/no-go"),
             pytest.warns(UserWarning, match="Skipping trial groups: only go/no-go"),
         ):
-            _, per_session = pm.metrics_tables(_gonogo_perievent().assign(protocol="2afc"))
+            per_session = pm.metrics_tables(_gonogo_perievent().assign(protocol="2afc")).per_session
         assert per_session["group"].tolist() == ["all", "all"]
 
 
@@ -3373,7 +3387,7 @@ def test_metrics_cmd_reliability(output_dir, tmp_path):
             time_warp=True,
             cue_baseline=(-0.5, 0.0),
         ),
-    )[1]
+    ).per_session
     pd.testing.assert_frame_equal(session, expected, check_dtype=False)
     assert session[session["group"] == "all"]["reliability_n"].tolist() == [36, 36]
 
@@ -3384,7 +3398,7 @@ def test_metrics_cmd_min_trials(output_dir, tmp_path):
     result = CliRunner().invoke(mesoscopy.cli, args=f"process metrics {path} -o {output_dir} --min-trials 5")
     assert result.exit_code == 0, result.output
     session = pd.read_csv(pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_metrics-session.csv")
-    expected = pm.metrics_tables(pd.read_csv(path), min_trials=5)[1]
+    expected = pm.metrics_tables(pd.read_csv(path), min_trials=5).per_session
     pd.testing.assert_frame_equal(session, expected, check_dtype=False)
     # Six misses meet the lowered minimum.
     assert session[session["group"] == "sdt-miss"]["amplitude_mean"].notna().all()
@@ -3404,3 +3418,217 @@ def test_perievent_cmd_reliability_options_rejected(perievent_regions_csv, perie
     )
     assert result.exit_code == 2
     assert "--min-rt" in result.output
+
+
+class TestBootstrapOptions:
+    @pytest.mark.parametrize(
+        ("options", "match"), [({"n_resamples": -1}, "n_resamples"), ({"ci": 0}, "ci"), ({"ci": 100}, "ci")]
+    )
+    def test_rejects_bad_values(self, options, match):
+        with pytest.raises(ValueError, match=match):
+            pm.BootstrapOptions(**options)
+
+
+class TestResampleCounts:
+    def test_counts_draws_with_replacement(self):
+        counts = pm.resample_counts(7, 500, seed=1)
+        assert counts.shape == (500, 7)
+        np.testing.assert_array_equal(counts.sum(axis=1), 7)
+        draws = np.random.default_rng(1).integers(0, 7, size=(500, 7))
+        np.testing.assert_array_equal(counts, [np.bincount(row, minlength=7) for row in draws])
+
+    def test_seed(self):
+        np.testing.assert_array_equal(pm.resample_counts(10, 50, seed=3), pm.resample_counts(10, 50, seed=3))
+        assert not np.array_equal(pm.resample_counts(10, 50, seed=3), pm.resample_counts(10, 50, seed=4))
+
+
+def _resampled(traces, draws):
+    """Mean of the baseline-subtracted traces drawn into each resample, ignoring NaNs."""
+    baseline_mean, _ = pm.baseline_stats(traces, METRICS_GRID, -1.0, 0.0)
+    return np.nanmean((traces - baseline_mean[:, None])[draws], axis=1)
+
+
+class TestBootstrapMetrics:
+    def test_estimates_from_mean_trace(self):
+        traces = _gonogo_traces(36)
+        counts = pm.resample_counts(36, 500, seed=0)
+        summary, mean, _, _ = pm.bootstrap_metrics(traces, METRICS_GRID, (-1.0, 0.0), (0.0, 3.0), counts)
+        assert list(summary) == list(pm.BOOT_COLUMNS)
+        baseline_mean, _ = pm.baseline_stats(traces, METRICS_GRID, -1.0, 0.0)
+        np.testing.assert_allclose(mean, (traces - baseline_mean[:, None]).mean(axis=0))
+        estimates = pm.trial_metrics(mean[None], METRICS_GRID, (-1.0, 0.0), (0.0, 3.0))
+        assert [summary[f"boot_{name}"] for name in pm.METRICS] == pytest.approx(
+            [estimates[name].iloc[0] for name in pm.METRICS], nan_ok=True
+        )
+
+    def test_intervals_from_resampled_means(self):
+        traces = _gonogo_traces(36)
+        args = (traces, METRICS_GRID, (-1.0, 0.0), (0.0, 3.0), pm.resample_counts(36, 500, seed=0))
+        summary, _, low, high = pm.bootstrap_metrics(*args, ci=90, onset="peak", smoothing=3)
+        resampled = _resampled(traces, np.random.default_rng(0).integers(0, 36, size=(500, 36)))
+        np.testing.assert_allclose(low, np.percentile(resampled, 5, axis=0))
+        np.testing.assert_allclose(high, np.percentile(resampled, 95, axis=0))
+        values = pm.trial_metrics(resampled, METRICS_GRID, (-1.0, 0.0), (0.0, 3.0), onset="peak", smoothing=3)
+        for name in pm.METRICS:
+            defined = values[name].dropna()
+            assert summary[f"boot_{name}_n"] == len(defined)
+            assert summary[f"boot_{name}_ci_low"] == pytest.approx(np.percentile(defined, 5))
+            assert summary[f"boot_{name}_ci_high"] == pytest.approx(np.percentile(defined, 95))
+
+    def test_nan_samples_are_ignored(self):
+        traces = _gonogo_traces(20)
+        traces[3, 40:50] = np.nan
+        traces[7, 60:] = np.nan
+        args = (traces, METRICS_GRID, (-1.0, 0.0), (0.0, 3.0), pm.resample_counts(20, 300, seed=5))
+        summary, mean, low, high = pm.bootstrap_metrics(*args)
+        resampled = _resampled(traces, np.random.default_rng(5).integers(0, 20, size=(300, 20)))
+        np.testing.assert_allclose(mean, _resampled(traces, np.arange(20)[None])[0])
+        np.testing.assert_allclose(low, np.percentile(resampled, 2.5, axis=0))
+        np.testing.assert_allclose(high, np.percentile(resampled, 97.5, axis=0))
+        assert summary["boot_amplitude_n"] == 300
+
+    def test_auc_interval_is_bootstrap_of_trial_mean(self):
+        # The area is linear in the trace, so the mean trace's area is the mean of the per-trial areas.
+        traces = _gonogo_traces(36, noise=0.3, seed=2)
+        counts = pm.resample_counts(36, 2000, seed=0)
+        summary, *_ = pm.bootstrap_metrics(traces, METRICS_GRID, (-1.0, 0.0), (0.0, 3.0), counts)
+        areas = pm.trial_metrics(traces, METRICS_GRID, (-1.0, 0.0), (0.0, 3.0))["auc"].to_numpy()
+        assert summary["boot_auc"] == pytest.approx(areas.mean())
+        low, high = np.percentile(counts @ areas / 36, [2.5, 97.5])
+        assert summary["boot_auc_ci_low"] == pytest.approx(low)
+        assert summary["boot_auc_ci_high"] == pytest.approx(high)
+        assert low < areas.mean() < high
+
+    @pytest.mark.parametrize("ci", [0, 100])
+    def test_bad_ci_raises(self, ci):
+        with pytest.raises(ValueError, match="ci"):
+            pm.bootstrap_metrics(_gonogo_traces(5), METRICS_GRID, (-1.0, 0.0), (0.0, 3.0), np.ones((1, 5)), ci)
+
+
+class TestMetricsTablesBootstrap:
+    def test_tables(self):
+        tables = pm.metrics_tables(_gonogo_perievent(), bootstrap=pm.BootstrapOptions(n_resamples=500))
+        groups = list(pm.trial_groups(_gonogo_info()))
+        boot = tables.boot
+        assert list(boot.columns) == ["region", "group", "n_trials", *pm.BOOT_COLUMNS]
+        assert boot["group"].tolist() == groups * len(PERIEVENT_REGIONS)
+        assert boot["n_trials"].tolist() == tables.per_session["n_trials"].tolist()
+        # Six misses and six correct rejections are below the default 10-trial minimum: only the count stays.
+        small = boot["group"].isin(["sdt-miss", "sdt-correct_rejection"])
+        assert boot.loc[small, list(pm.BOOT_COLUMNS)].isna().all().all()
+        assert boot.loc[~small, "boot_amplitude_n"].eq(500).all()
+        traces = tables.boot_traces
+        assert list(traces.columns) == ["region", "group", "n_trials", "time", "mean", "ci_low", "ci_high"]
+        assert len(traces) == len(PERIEVENT_REGIONS) * (len(groups) - 2) * len(METRICS_GRID)
+        assert not traces["group"].isin(["sdt-miss", "sdt-correct_rejection"]).any()
+
+    def test_matches_bootstrap_metrics(self):
+        options = pm.BootstrapOptions(n_resamples=300, ci=90, seed=7)
+        tables = pm.metrics_tables(_gonogo_perievent(), smoothing=3, onset="peak", bootstrap=options)
+        info = _gonogo_info()
+        hits = (info["sdt_type"] == "hit").to_numpy()
+        summary, mean, low, high = pm.bootstrap_metrics(
+            _gonogo_traces(len(info))[hits],
+            METRICS_GRID,
+            (-1.0, 0.0),
+            (0.0, 3.0),
+            pm.resample_counts(int(hits.sum()), 300, seed=7),
+            ci=90,
+            smoothing=3,
+            onset="peak",
+        )
+        boot = tables.boot.set_index(["region", "group"]).loc[(PERIEVENT_REGIONS[0], "sdt-hit")]
+        assert boot[list(summary)].tolist() == pytest.approx(list(summary.values()))
+        band = tables.boot_traces.set_index(["region", "group"]).loc[(PERIEVENT_REGIONS[0], "sdt-hit")]
+        np.testing.assert_allclose(band["time"], METRICS_GRID)
+        np.testing.assert_allclose(band[["mean", "ci_low", "ci_high"]].to_numpy().T, [mean, low, high])
+
+    def test_regions_share_resamples(self):
+        perievent = _gonogo_perievent()
+        first = perievent["region"] == PERIEVENT_REGIONS[0]
+        perievent.loc[~first, "F"] = 2 * perievent.loc[first, "F"].to_numpy()
+        boot = pm.metrics_tables(perievent, bootstrap=pm.BootstrapOptions(n_resamples=300)).boot.dropna()
+        left = boot[boot["region"] == PERIEVENT_REGIONS[0]].set_index("group")
+        right = boot[boot["region"] == PERIEVENT_REGIONS[1]].set_index("group")
+        # With the same resamples, doubling a region doubles every resampled amplitude and leaves onsets unchanged.
+        amplitude = ["boot_amplitude", "boot_amplitude_ci_low", "boot_amplitude_ci_high"]
+        np.testing.assert_allclose(right[amplitude], 2 * left[amplitude])
+        onset = ["boot_onset_time", "boot_onset_time_ci_low", "boot_onset_time_ci_high"]
+        np.testing.assert_allclose(right[onset], left[onset])
+
+    def test_seed(self):
+        perievent = _gonogo_perievent()
+        options = pm.BootstrapOptions(n_resamples=200, seed=1)
+        first = pm.metrics_tables(perievent, bootstrap=options).boot
+        pd.testing.assert_frame_equal(first, pm.metrics_tables(perievent, bootstrap=options).boot)
+        other = pm.metrics_tables(perievent, bootstrap=pm.BootstrapOptions(n_resamples=200, seed=2)).boot
+        assert not first["boot_amplitude_ci_low"].equals(other["boot_amplitude_ci_low"])
+
+    def test_skipped(self):
+        tables = pm.metrics_tables(_gonogo_perievent(), bootstrap=pm.BootstrapOptions(n_resamples=0))
+        assert tables.boot is None
+        assert tables.boot_traces is None
+
+    def test_without_trial_groups(self, metrics_perievent_csv):
+        perievent = pd.read_csv(metrics_perievent_csv)
+        tables = pm.metrics_tables(perievent, min_trials=2, bootstrap=pm.BootstrapOptions(n_resamples=100))
+        assert tables.boot["group"].tolist() == ["all", "all"]
+        assert tables.boot["boot_amplitude"].notna().all()
+        # Three trials are below the default minimum.
+        default = pm.metrics_tables(perievent)
+        assert default.boot["n_trials"].tolist() == [3, 3]
+        assert default.boot[list(pm.BOOT_COLUMNS)].isna().all().all()
+        assert default.boot_traces.empty
+
+
+def _read_boot(path):
+    """A `_metrics-boot.csv` with its resample counts read as nullable integers, as written."""
+    return pd.read_csv(path, dtype={column: "Int64" for column in pm.BOOT_COLUMNS if column.endswith("_n")})
+
+
+def test_metrics_cmd_bootstrap(output_dir, tmp_path):
+    path = tmp_path / "ses-01_regions_event-cueonset_perievent.csv"
+    _gonogo_perievent().to_csv(path, index=False)
+    result = CliRunner().invoke(
+        mesoscopy.cli, args=f"process metrics {path} -o {output_dir} --bootstrap 300 --ci 90 --seed 3"
+    )
+    assert result.exit_code == 0, result.output
+    assert "Saved bootstrapped mean-trace metrics" in result.output
+    assert "Saved bootstrapped mean traces" in result.output
+    stem = pathlib.Path(output_dir) / "ses-01_regions_event-cueonset"
+    expected = pm.metrics_tables(pd.read_csv(path), bootstrap=pm.BootstrapOptions(n_resamples=300, ci=90, seed=3))
+    pd.testing.assert_frame_equal(_read_boot(f"{stem}_metrics-boot.csv"), expected.boot)
+    pd.testing.assert_frame_equal(pd.read_csv(f"{stem}_traces-boot.csv"), expected.boot_traces, check_dtype=False)
+
+
+def test_metrics_cmd_bootstrap_skipped(metrics_perievent_csv, output_dir):
+    result = CliRunner().invoke(
+        mesoscopy.cli, args=f"process metrics {metrics_perievent_csv} -o {output_dir} --bootstrap 0"
+    )
+    assert result.exit_code == 0, result.output
+    assert "bootstrapped" not in result.output
+    assert not list(pathlib.Path(output_dir).glob("*-boot.csv"))
+    assert (pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_metrics-session.csv").is_file()
+
+
+def test_perievent_cmd_with_metrics_bootstrap(perievent_regions_csv, perievent_trials_csv, output_dir):
+    result = CliRunner().invoke(
+        mesoscopy.cli,
+        args=(
+            f"process peri-event {perievent_regions_csv} {perievent_trials_csv} -o {output_dir} --with-metrics"
+            " --min-trials 2 --bootstrap 200 --ci 80 --seed 5"
+        ),
+    )
+    assert result.exit_code == 0, result.output
+    stem = pathlib.Path(output_dir) / "ses-01_regions_event-cueonset"
+    windows = pd.read_csv(f"{stem}_perievent.csv")
+    expected = pm.metrics_tables(
+        windows,
+        trials=pd.read_csv(perievent_trials_csv),
+        min_trials=2,
+        bootstrap=pm.BootstrapOptions(n_resamples=200, ci=80, seed=5),
+    )
+    boot = _read_boot(f"{stem}_metrics-boot.csv")
+    pd.testing.assert_frame_equal(boot, expected.boot)
+    # The two lever pushes meet the lowered minimum.
+    assert boot[boot["group"] == "resp-push"]["boot_amplitude"].notna().all()
