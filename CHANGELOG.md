@@ -4,6 +4,10 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 ## Unreleased
 
+### Added
+
+- `process connectivity` takes a `_regions.csv` and writes the connectivity metrics over the whole recording to `<stem>_connectivity.csv`, as the `all` rows only, with the residual and per-trial columns empty. Library entry point `connectivity.trace_table` ([#190](https://github.com/DuguidLab/mesoscopy/issues/190)).
+
 ## [0.15.0] - 2026-10-06
 
 ### Added
