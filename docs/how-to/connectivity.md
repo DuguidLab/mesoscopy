@@ -46,6 +46,21 @@ use. Pass `--no-mask-response` to use the whole response window instead.
 The epoch needs the `cue_onset` and `response_time` trials columns. Without them the command falls back to the
 whole response window and warns.
 
+## Whole recording
+
+A `_regions.csv` from `process regions` gives the same table over the whole recording.
+
+```bash
+mesoscopy process connectivity /path/to/recording_smoothed_regions.csv
+```
+
+It writes `<stem>_connectivity.csv` next to the epoch table, so `recording_smoothed_regions.csv` gives
+`recording_smoothed_regions_connectivity.csv` and its peri-event file gives
+`recording_smoothed_regions_event-cueonset_connectivity.csv`. The rows are the `all` group only. `r_residual`,
+`r_trials_avg`, `mi_residual` and `n_trials` are empty, since there are no trials to take them over, and
+`n_samples` is the number of frames. The trial options are ignored. This table is the baseline the epoch tables
+depart from.
+
 ## Reading the table
 
 `r` is high whenever both regions respond to the cue, whether or not they fluctuate together from moment to
@@ -75,7 +90,11 @@ perievent = pd.read_csv("recording_smoothed_regions_event-cueonset_perievent.csv
 table = connectivity.connectivity_table(perievent)
 ```
 
+`connectivity.trace_table` takes the regions table of a `_regions.csv` instead.
+
 `connectivity.pair_metrics` returns the matrices of one trial group from a masked `(n_trials, n_samples,
 n_regions)` array, built by `connectivity.epoch_cube` from the per-trial bounds of `connectivity.epoch_bounds`.
+`connectivity.pooled_metrics` returns the metrics that need no trials, which is what `trace_table` takes over the
+traces of `connectivity.trace_samples`.
 `correlation_matrix`, `residual_epochs`, `trial_correlation`, `mutual_information`, `partial_correlation`,
 `lagged_correlation` and `peak_lag` work on their own.

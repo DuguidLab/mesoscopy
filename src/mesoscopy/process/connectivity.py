@@ -19,7 +19,7 @@
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
 
-"""Pairwise connectivity between regions over the cue-to-response epoch of peri-event traces."""
+"""Pairwise connectivity between regions over the cue-to-response epoch of peri-event traces, or whole traces."""
 
 from __future__ import annotations
 
@@ -343,6 +343,37 @@ def epoch_cube(
     return cube
 
 
+def pooled_metrics(
+    epochs: npt.NDArray,
+    lag_samples: int,
+    mi_neighbours: int = 3,
+    mutual_info: bool = True,
+) -> dict[str, typing.Any]:
+    """Connectivity matrices that need no trial structure, over the pooled samples.
+
+    Args:
+        epochs (npt.NDArray): Masked traces of shape `(n_trials, n_samples, n_regions)`.
+        lag_samples (int): Largest lag searched for the peak cross-correlation, in samples.
+        mi_neighbours (int, optional): Neighbours for `mutual_information`. Defaults to 3.
+        mutual_info (bool, optional): Estimate `mi`; False leaves it NaN. Defaults to True.
+
+    Returns:
+        dict[str, typing.Any]: `(n_regions, n_regions)` matrices `r`, `mi`, `partial_r`, `lag` (in samples) and
+        `r_lag`, plus `n_samples`, the pooled samples used.
+    """
+    pooled = pooled_samples(epochs)
+    index, r_lag = peak_lag(lagged_correlation(epochs, lag_samples))
+    empty = np.full((pooled.shape[1], pooled.shape[1]), np.nan)
+    return {
+        "r": correlation_matrix(pooled),
+        "mi": mutual_information_matrix(pooled, mi_neighbours) if mutual_info else empty,
+        "partial_r": partial_correlation(pooled),
+        "lag": np.where(np.isnan(r_lag), np.nan, index - lag_samples),
+        "r_lag": r_lag,
+        "n_samples": pooled.shape[0],
+    }
+
+
 def pair_metrics(
     epochs: npt.NDArray,
     lag_samples: int,
@@ -363,21 +394,78 @@ def pair_metrics(
         dict[str, typing.Any]: One `(n_regions, n_regions)` matrix per `PAIR_METRICS` name, with `lag` in
         samples, plus `n_samples`, the pooled samples used.
     """
-    pooled = pooled_samples(epochs)
     residuals = pooled_samples(residual_epochs(epochs))
-    index, r_lag = peak_lag(lagged_correlation(epochs, lag_samples))
-    empty = np.full((pooled.shape[1], pooled.shape[1]), np.nan)
-    return {
-        "r": correlation_matrix(pooled),
+    empty = np.full((residuals.shape[1], residuals.shape[1]), np.nan)
+    return pooled_metrics(epochs, lag_samples, mi_neighbours, mutual_info) | {
         "r_residual": correlation_matrix(residuals),
         "r_trials_avg": trial_correlation(epochs, min_trial_samples),
-        "mi": mutual_information_matrix(pooled, mi_neighbours) if mutual_info else empty,
         "mi_residual": mutual_information_matrix(residuals, mi_neighbours) if mutual_info else empty,
-        "partial_r": partial_correlation(pooled),
-        "lag": np.where(np.isnan(r_lag), np.nan, index - lag_samples),
-        "r_lag": r_lag,
-        "n_samples": pooled.shape[0],
     }
+
+
+def trace_samples(regions: pd.DataFrame) -> tuple[npt.NDArray[np.float64], list[str], float]:
+    """Whole traces of a long-format regions table, one column per region in order of appearance.
+
+    Args:
+        regions (pd.DataFrame): Regions table with `region`, `F` and `timestamp` or `time_aligned` columns, as
+            written by `process regions`.
+
+    Returns:
+        tuple[npt.NDArray[np.float64], list[str], float]: Traces of shape `(n_frames, n_regions)` in time order,
+        the region names, and the median frame interval in seconds.
+
+    Raises:
+        ValueError: If a column is missing.
+    """
+    from mesoscopy.process import regression as regr
+
+    missing = {"region", "F"} - set(regions.columns)
+    if "timestamp" not in regions.columns and "time_aligned" not in regions.columns:
+        missing.add("timestamp")
+    if missing:
+        msg = f"Missing columns: {sorted(missing)}."
+        raise ValueError(msg)
+    names = list(regions["region"].unique())
+    if "time_aligned" in regions.columns:
+        wide = regions.pivot(index="time_aligned", columns="region", values="F")
+        seconds = wide.index.to_numpy(dtype=np.float64)
+    else:
+        wide = regions.pivot(index="timestamp", columns="region", values="F")
+        seconds = regr.elapsed_seconds(wide.index.to_numpy(dtype=str))
+    order = np.argsort(seconds, kind="stable")
+    step = float(np.median(np.diff(seconds[order]))) if len(seconds) > 1 else 1.0
+    return wide[names].to_numpy(dtype=np.float64)[order], names, step
+
+
+def trace_table(
+    regions: pd.DataFrame,
+    max_lag: float = 0.5,
+    mi_neighbours: int = 3,
+    mutual_info: bool = True,
+) -> pd.DataFrame:
+    """Pairwise connectivity between regions over their whole traces, from a long-format regions table.
+
+    Args:
+        regions (pd.DataFrame): Regions table, as for `trace_samples`.
+        max_lag (float, optional): Largest lag searched for the peak cross-correlation, in seconds. Defaults to
+            0.5.
+        mi_neighbours (int, optional): Neighbours for `mutual_information`. Defaults to 3.
+        mutual_info (bool, optional): Estimate `mi`; False leaves it NaN. Defaults to True.
+
+    Returns:
+        pd.DataFrame: One `all` row per unordered region pair with `TABLE_COLUMNS`, as for `connectivity_table`.
+        `r_residual`, `r_trials_avg`, `mi_residual` and `n_trials` are NaN, having no meaning without trials, and
+        `n_samples` is the frames where every region is finite.
+
+    Example:
+        >>> regions = pd.read_csv("ses-01_regions.csv")
+        >>> table = trace_table(regions)
+        >>> table.nlargest(5, "partial_r")
+    """
+    traces, names, step = trace_samples(regions)
+    metrics = pooled_metrics(traces[None], round(max_lag / step), mi_neighbours, mutual_info)
+    metrics["lag"] *= step
+    return _rows(names, {"all": {"n_trials": np.nan, **metrics}})
 
 
 def connectivity_table(
@@ -434,8 +522,6 @@ def connectivity_table(
         >>> table = connectivity_table(perievent)
         >>> table[table["group"] == "stim-go"].nlargest(5, "r_residual")
     """
-    import pandas as pd
-
     time, trial_info = pm.perievent_trials(perievent)
     info = trial_info
     if trials is not None:
@@ -465,11 +551,27 @@ def connectivity_table(
         metrics["lag"] *= step
         per_group[name] = {"n_trials": n_trials, **metrics}
 
+    return _rows(regions, per_group)
+
+
+def _rows(regions: list[str], per_group: dict[str, dict[str, typing.Any]]) -> pd.DataFrame:
+    """Table of `TABLE_COLUMNS` from each group's metric matrices.
+
+    Args:
+        regions (list[str]): Region names in order.
+        per_group (dict[str, dict[str, typing.Any]]): Per group, its `pair_metrics` matrices and `n_trials`;
+            metrics a group lacks are NaN.
+
+    Returns:
+        pd.DataFrame: One row per unordered region pair and group.
+    """
+    import pandas as pd
+
     rows = []
     for a, region_a in enumerate(regions):
         for b in range(a + 1, len(regions)):
             for name, values in per_group.items():
-                row = {"region_a": region_a, "region_b": regions[b], "group": name}
+                row: dict[str, typing.Any] = {"region_a": region_a, "region_b": regions[b], "group": name}
                 row |= {metric: values[metric][a, b] if metric in values else np.nan for metric in PAIR_METRICS}
                 rows.append(row | {"n_trials": values["n_trials"], "n_samples": values["n_samples"]})
     return pd.DataFrame(rows, columns=list(TABLE_COLUMNS))

@@ -3673,6 +3673,30 @@ def _connectivity_perievent(cube=None):
     return pd.concat(frames, ignore_index=True).merge(info.drop(columns="event_time"), on="trial_index")
 
 
+def _connectivity_regions(n_frames=500, seed=0, time_aligned=True):
+    """Long-format regions table of `CONNECTIVITY_REGIONS` at 40 ms: a shared slow wave plus noise, and the first
+    region delayed by two frames as the third."""
+    rng = np.random.default_rng(seed)
+    seconds = 0.04 * np.arange(n_frames)
+    wave = np.sin(2 * np.pi * 0.5 * seconds)
+    first, second = (wave + 0.3 * rng.standard_normal(n_frames) for _ in range(2))
+    traces = np.stack([first, second, np.roll(first, 2)], axis=-1)
+    start = datetime(2024, 1, 1, 14, 0, 0)
+    frames = [
+        pd.DataFrame(
+            {
+                "region": region,
+                "timestamp": [(start + timedelta(seconds=t)).isoformat() for t in seconds],
+                "time_aligned": seconds + 10.0,
+                "F": traces[:, column],
+            }
+        )
+        for column, region in enumerate(CONNECTIVITY_REGIONS)
+    ]
+    table = pd.concat(frames, ignore_index=True)
+    return table if time_aligned else table.drop(columns="time_aligned")
+
+
 def _post_event_samples(end=3.0):
     """Samples of the grid within `[0, end]`."""
     grid = METRICS_GRID
@@ -4085,6 +4109,99 @@ class TestConnectivityTable:
         assert list(table.columns) == list(pc.TABLE_COLUMNS)
 
 
+class TestPooledMetrics:
+    def test_pair_metrics_extends_it(self):
+        cube = _connectivity_cube()
+        pooled = pc.pooled_metrics(cube, 5)
+        pair = pc.pair_metrics(cube, 5)
+        assert set(pooled) == {"r", "mi", "partial_r", "lag", "r_lag", "n_samples"}
+        assert set(pair) == {*pc.PAIR_METRICS, "n_samples"}
+        for key, value in pooled.items():
+            np.testing.assert_array_equal(pair[key], value)
+
+    def test_without_mutual_info(self):
+        pooled = pc.pooled_metrics(_connectivity_cube(), 5, mutual_info=False)
+        assert np.isnan(pooled["mi"]).all()
+        assert not np.isnan(pooled["r"]).any()
+
+
+class TestTraceSamples:
+    def test_traces_names_and_step(self):
+        regions = _connectivity_regions()
+        traces, names, step = pc.trace_samples(regions)
+        assert names == CONNECTIVITY_REGIONS
+        assert traces.shape == (500, 3)
+        assert step == pytest.approx(0.04)
+        for column, region in enumerate(names):
+            np.testing.assert_array_equal(traces[:, column], regions[regions["region"] == region]["F"])
+
+    def test_timestamp_only_and_shuffled_rows(self):
+        regions = _connectivity_regions(time_aligned=False)
+        traces, names, step = pc.trace_samples(regions)
+        assert step == pytest.approx(0.04)
+        shuffled = regions.sample(frac=1.0, random_state=1)
+        shuffled_traces, shuffled_names, _ = pc.trace_samples(shuffled)
+        assert shuffled_names == list(shuffled["region"].unique())
+        np.testing.assert_array_equal(shuffled_traces[:, [shuffled_names.index(n) for n in names]], traces)
+
+    def test_missing_columns(self):
+        regions = _connectivity_regions()
+        with pytest.raises(ValueError, match=r"Missing columns: \['F'\]"):
+            pc.trace_samples(regions.drop(columns="F"))
+        with pytest.raises(ValueError, match=r"Missing columns: \['timestamp'\]"):
+            pc.trace_samples(regions.drop(columns=["timestamp", "time_aligned"]))
+
+
+class TestTraceTable:
+    @staticmethod
+    def _row(table, pair):
+        return table[(table["region_a"] == pair[0]) & (table["region_b"] == pair[1])].iloc[0]
+
+    def test_layout(self):
+        table = pc.trace_table(_connectivity_regions())
+        assert list(table.columns) == list(pc.TABLE_COLUMNS)
+        assert list(zip(table["region_a"], table["region_b"], strict=True)) == CONNECTIVITY_PAIRS
+        assert table["group"].tolist() == ["all"] * 3
+        assert table[["r_residual", "r_trials_avg", "mi_residual", "n_trials"]].isna().all().all()
+        assert table["n_samples"].tolist() == [500] * 3
+        assert table[["r", "mi", "partial_r", "lag", "r_lag"]].notna().all().all()
+
+    def test_matches_direct_metrics(self):
+        regions = _connectivity_regions()
+        traces, _, _ = pc.trace_samples(regions)
+        table = pc.trace_table(regions, max_lag=0.2, mi_neighbours=4)
+        expected = pc.pooled_metrics(traces[None], 5, mi_neighbours=4)
+        for metric in ("r", "mi", "partial_r", "r_lag"):
+            assert table[metric].tolist() == pytest.approx(
+                [expected[metric][a, b] for a, b in [(0, 1), (0, 2), (1, 2)]]
+            )
+        assert table["r"].tolist() == pytest.approx([np.corrcoef(traces.T)[a, b] for a, b in [(0, 1), (0, 2), (1, 2)]])
+        assert table["lag"].tolist() == pytest.approx((expected["lag"] * 0.04)[np.triu_indices(3, 1)])
+
+    def test_lag_of_delayed_copy(self):
+        row = self._row(pc.trace_table(_connectivity_regions()), ("L_MOp", "L_SSp-ul"))
+        assert row["lag"] == pytest.approx(0.08)
+        assert row["r_lag"] > 0.99
+        assert row["r"] < row["r_lag"]
+
+    def test_n_samples_counts_finite_frames(self):
+        regions = _connectivity_regions()
+        regions.loc[regions.index[:3], "F"] = np.nan
+        table = pc.trace_table(regions)
+        assert table["n_samples"].tolist() == [497] * 3
+
+    def test_without_mutual_info(self):
+        table = pc.trace_table(_connectivity_regions(), mutual_info=False)
+        assert table["mi"].isna().all()
+        assert table["r"].notna().all()
+
+    def test_single_region(self):
+        regions = _connectivity_regions()
+        table = pc.trace_table(regions[regions["region"] == "L_MOp"])
+        assert table.empty
+        assert list(table.columns) == list(pc.TABLE_COLUMNS)
+
+
 def test_connectivity_cmd(output_dir, tmp_path):
     path = tmp_path / "ses-01_regions_event-cueonset_perievent.csv"
     _connectivity_perievent().to_csv(path, index=False)
@@ -4172,6 +4289,44 @@ def test_connectivity_cmd_empty_input(output_dir, tmp_path):
     result = CliRunner().invoke(mesoscopy.cli, args=f"process connectivity {path} -o {output_dir}")
     assert result.exit_code == 1
     assert "has no rows" in result.output
+
+
+def test_connectivity_cmd_regions(output_dir, tmp_path):
+    path = tmp_path / "ses-01_regions.csv"
+    _connectivity_regions().to_csv(path, index=False)
+    result = CliRunner().invoke(mesoscopy.cli, args=f"process connectivity {path} -o {output_dir} --max-lag 0.2")
+    assert result.exit_code == 0, result.output
+    assert "Loading region traces" in result.output
+    output = pathlib.Path(output_dir) / "ses-01_regions_connectivity.csv"
+    assert f"Saved connectivity metrics at {output}" in result.output
+    table = pd.read_csv(output)
+    pd.testing.assert_frame_equal(table, pc.trace_table(pd.read_csv(path), max_lag=0.2), check_dtype=False)
+    assert table["group"].tolist() == ["all"] * 3
+
+
+def test_connectivity_cmd_regions_ignores_trial_options(output_dir, tmp_path):
+    path = tmp_path / "ses-01_regions.csv"
+    _connectivity_regions().to_csv(path, index=False)
+    trials_path = tmp_path / "ses-01_trials.csv"
+    _gonogo_info().to_csv(trials_path, index=False)
+    result = CliRunner().invoke(
+        mesoscopy.cli,
+        args=f"process connectivity {path} -o {output_dir} -t {trials_path} --min-trials 1 --no-mask-response --no-mi",
+    )
+    assert result.exit_code == 0, result.output
+    assert "Loading trials" not in result.output
+    table = pd.read_csv(pathlib.Path(output_dir) / "ses-01_regions_connectivity.csv")
+    assert table["mi"].isna().all()
+    assert table["group"].tolist() == ["all"] * 3
+
+
+def test_connectivity_cmd_regions_missing_columns(output_dir, tmp_path):
+    path = tmp_path / "ses-01_regions.csv"
+    _connectivity_regions().drop(columns="F").to_csv(path, index=False)
+    result = CliRunner().invoke(mesoscopy.cli, args=f"process connectivity {path} -o {output_dir}")
+    assert result.exit_code != 0
+    assert "Missing columns: ['F']" in result.output
+    assert "`process regions`" in result.output
 
 
 def test_connectivity_cmd_creates_output_dir(tmp_path):
