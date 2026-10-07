@@ -1073,7 +1073,8 @@ def metrics_cmd(
     "--response",
     type=(float, float),
     default=None,
-    help="Response window START END, seconds relative to the event, end inclusive. Defaults to all post-event samples.",
+    help="Response window START END, seconds relative to the event, end inclusive. Defaults to all post-event samples."
+    " Peri-event input only.",
 )
 @click.option(
     "-t",
@@ -1081,27 +1082,29 @@ def metrics_cmd(
     "trials_path",
     type=click.Path(exists=True, dir_okay=False),
     default=None,
-    help="Trials CSV to join by trial_index, for peri-event files without trials columns.",
+    help="Trials CSV to join by trial_index, for peri-event files without trials columns. Peri-event input only.",
 )
 @click.option(
     "--min-trials",
     type=click.IntRange(min=1),
     default=10,
     show_default=True,
-    help="Trial groups with fewer trials get empty metrics. The all-trials metrics are always taken.",
+    help="Trial groups with fewer trials get empty metrics. The all-trials metrics are always taken. Peri-event"
+    " input only.",
 )
 @click.option(
     "--mask-response/--no-mask-response",
     default=True,
     show_default=True,
-    help="End cue-aligned epochs at each trial's response; trials without one end at the median response time.",
+    help="End cue-aligned epochs at each trial's response; trials without one end at the median response time."
+    " Peri-event input only.",
 )
 @click.option(
     "--min-rt",
     type=click.FloatRange(min=0),
     default=0.2,
     show_default=True,
-    help="Drop trials with a response time below this, in seconds.",
+    help="Drop trials with a response time below this, in seconds. Peri-event input only.",
 )
 @click.option(
     "--max-lag",
@@ -1136,16 +1139,19 @@ def connectivity_cmd(
     mi_neighbours: int,
     mutual_info: bool,
 ) -> None:
-    """Measure pairwise connectivity between regions over the cue-to-response epoch of peri-event traces.
+    """Measure pairwise connectivity between regions, over the cue-to-response epoch or over whole traces.
 
-    PATH is the long-format *_perievent.csv written by `process peri-event`. Writes <stem>_connectivity.csv with
-    one row per region pair and trial group: the Pearson correlation of the pooled epoch samples, the same after
-    removing the group's mean response, the mean of the per-trial correlations, the mutual information of the
-    pooled samples and of the residuals in bits, the partial correlation given every other region, and the lag
-    and value of the peak cross-correlation. Epochs run from the cue to each trial's response, as for the
-    reliability metrics of `process metrics`; without the cue_onset and response_time columns the whole response
-    window is used. Go/no-go sessions are grouped by sdt_type, go/no-go stimulus and lever push, as well as all
-    trials.
+    PATH is the long-format *_perievent.csv written by `process peri-event`, or the *_regions.csv written by
+    `process regions`. Writes <stem>_connectivity.csv with one row per region pair and trial group: the Pearson
+    correlation of the pooled epoch samples, the same after removing the group's mean response, the mean of the
+    per-trial correlations, the mutual information of the pooled samples and of the residuals in bits, the
+    partial correlation given every other region, and the lag and value of the peak cross-correlation. Epochs run
+    from the cue to each trial's response, as for the reliability metrics of `process metrics`; without the
+    cue_onset and response_time columns the whole response window is used. Go/no-go sessions are grouped by
+    sdt_type, go/no-go stimulus and lever push, as well as all trials.
+
+    A regions CSV gives the metrics over the whole recording instead, as the all-trials rows only, with the
+    residual and per-trial columns empty. The trial options do not apply.
     """  # noqa: DOC501
     import pandas as pd
 
@@ -1153,32 +1159,37 @@ def connectivity_cmd(
         click.echo(f"Creating output directory {out_dir}...")
         Path(out_dir).mkdir(parents=True)
 
-    click.echo(f"Loading peri-event traces from {path}...")
-    perievent = pd.read_csv(path)
-    if perievent.empty:
-        msg = f"{path} has no rows; `process peri-event` kept no trials."
+    whole_trace = Path(path).stem.endswith("_regions")
+    click.echo(f"Loading {'region' if whole_trace else 'peri-event'} traces from {path}...")
+    table_in = pd.read_csv(path)
+    if table_in.empty:
+        msg = f"{path} has no rows; `process {'regions' if whole_trace else 'peri-event'}` kept no frames."
         raise click.ClickException(msg)
     trials = None
-    if trials_path is not None:
+    if trials_path is not None and not whole_trace:
         click.echo(f"Loading trials from {trials_path}...")
         trials = pd.read_csv(trials_path)
 
     with timer.Timer(message="Extracting connectivity"), warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always", UserWarning)
         try:
-            table = pc.connectivity_table(
-                perievent,
-                response=response,
-                trials=trials,
-                mask_response=mask_response,
-                min_rt=min_rt,
-                min_trials=min_trials,
-                max_lag=max_lag,
-                mi_neighbours=mi_neighbours,
-                mutual_info=mutual_info,
-            )
+            if whole_trace:
+                table = pc.trace_table(table_in, max_lag=max_lag, mi_neighbours=mi_neighbours, mutual_info=mutual_info)
+            else:
+                table = pc.connectivity_table(
+                    table_in,
+                    response=response,
+                    trials=trials,
+                    mask_response=mask_response,
+                    min_rt=min_rt,
+                    min_trials=min_trials,
+                    max_lag=max_lag,
+                    mi_neighbours=mi_neighbours,
+                    mutual_info=mutual_info,
+                )
         except ValueError as error:
-            msg = f"{path}: {error} Expected the columns written by `process peri-event`."
+            stage = "regions" if whole_trace else "peri-event"
+            msg = f"{path}: {error} Expected the columns written by `process {stage}`."
             raise click.ClickException(msg) from error
     _echo_warnings(caught)
 
