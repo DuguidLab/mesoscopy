@@ -4621,6 +4621,7 @@ def test_connectivity_cmd(output_dir, tmp_path):
     table = pd.read_csv(output)
     pd.testing.assert_frame_equal(table, pc.connectivity_table(pd.read_csv(path)), check_dtype=False)
     assert len(table) == 27
+    assert not (pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_connectivity-rolling.csv").exists()
 
 
 def test_connectivity_cmd_options(output_dir, tmp_path):
@@ -4675,6 +4676,45 @@ def test_connectivity_cmd_transfer_entropy_options(output_dir, tmp_path):
     assert result.exit_code == 0, result.output
     table = pd.read_csv(pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_connectivity.csv")
     assert list(table.columns) == DEFAULT_COLUMNS
+
+
+def test_connectivity_cmd_rolling(output_dir, tmp_path):
+    path = tmp_path / "ses-01_regions_event-cueonset_perievent.csv"
+    _connectivity_perievent().to_csv(path, index=False)
+    result = CliRunner().invoke(
+        mesoscopy.cli,
+        args=f"process connectivity {path} -o {output_dir} --with-rolling --rolling-window 0.2 --rolling-step 0.12"
+        " --min-trials 5 --min-rt 0.5 --mi-neighbours 4 --no-mi",
+    )
+    assert result.exit_code == 0, result.output
+    output = pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_connectivity-rolling.csv"
+    assert f"Saved rolling connectivity metrics at {output}" in result.output
+    assert (pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_connectivity.csv").exists()
+    table = pd.read_csv(output)
+    expected = pc.rolling_table(pd.read_csv(path), window=0.2, step=0.12, min_rt=0.5, min_trials=5, mi_neighbours=4)
+    pd.testing.assert_frame_equal(table, expected, check_dtype=False)
+    # --no-mi applies to the epoch table only.
+    assert table[table["group"] == "all"]["mi"].notna().all()
+
+
+def test_connectivity_cmd_rolling_window_too_long(output_dir, tmp_path):
+    path = tmp_path / "ses-01_regions_event-cueonset_perievent.csv"
+    _connectivity_perievent().to_csv(path, index=False)
+    result = CliRunner().invoke(
+        mesoscopy.cli, args=f"process connectivity {path} -o {output_dir} --with-rolling --rolling-window 10"
+    )
+    assert result.exit_code == 1
+    assert "longer than the 101 samples" in result.output
+    assert "Check --rolling-window and --rolling-step." in result.output
+
+
+def test_connectivity_cmd_rolling_warns_once(metrics_perievent_csv, output_dir):
+    result = CliRunner().invoke(
+        mesoscopy.cli, args=f"process connectivity {metrics_perievent_csv} -o {output_dir} --with-rolling"
+    )
+    assert result.exit_code == 0, result.output
+    assert result.output.count("Warning: Skipping trial groups: no sdt_type column") == 1
+    assert "Saved rolling connectivity metrics" in result.output
 
 
 def test_connectivity_cmd_joins_trials(output_dir, tmp_path):
@@ -4746,6 +4786,16 @@ def test_connectivity_cmd_regions_ignores_trial_options(output_dir, tmp_path):
     table = pd.read_csv(pathlib.Path(output_dir) / "ses-01_regions_connectivity.csv")
     assert "mi" not in table.columns
     assert table["group"].tolist() == ["all"] * 3
+
+
+def test_connectivity_cmd_regions_skips_rolling(output_dir, tmp_path):
+    path = tmp_path / "ses-01_regions.csv"
+    _connectivity_regions().to_csv(path, index=False)
+    result = CliRunner().invoke(mesoscopy.cli, args=f"process connectivity {path} -o {output_dir} --with-rolling")
+    assert result.exit_code == 0, result.output
+    assert "Warning: --with-rolling takes a peri-event file; the rolling table is skipped." in result.output
+    assert (pathlib.Path(output_dir) / "ses-01_regions_connectivity.csv").exists()
+    assert not (pathlib.Path(output_dir) / "ses-01_regions_connectivity-rolling.csv").exists()
 
 
 def test_connectivity_cmd_regions_missing_columns(output_dir, tmp_path):
