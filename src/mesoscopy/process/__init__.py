@@ -1140,7 +1140,7 @@ def metrics_cmd(
     default=200,
     show_default=True,
     help="Surrogates for the transfer entropy z-scores: trial shuffles on peri-event input, circular shifts on a"
-    " regions CSV. 0 leaves the z-scores empty.",
+    " regions CSV. 0 leaves the z-scores out.",
 )
 @click.option(
     "--with-te/--no-te",

@@ -61,8 +61,9 @@ It writes `<stem>_connectivity.csv` next to the epoch table, so `recording_smoot
 `recording_smoothed_regions_connectivity.csv` and its peri-event file gives
 `recording_smoothed_regions_event-cueonset_connectivity.csv`. The rows are the `all` group only. `r_residual`,
 `r_trials_avg` and `mi_residual` have no column, since there are no trials to take them over, `n_trials` is
-empty, and `n_samples` is the number of frames. With `--with-te` the transfer entropy is taken over the raw traces, with circular
-shifts of the source as surrogates. The trial options are ignored. This table is the baseline the epoch tables depart from.
+empty, and `n_samples` is the number of frames. With `--with-te` the transfer entropy is taken over the raw
+traces, with circular shifts of the source as surrogates. The trial options are ignored. This table is the
+baseline the epoch tables depart from.
 
 ## Reading the table
 
@@ -86,12 +87,12 @@ leave the columns out.
 
 `te_ab` is the information `region_a` adds to predicting `region_b` beyond what `region_b`'s own past gives, and
 `te_ba` the reverse, so the two together give the direction of a coupling. The columns only appear when the
-command runs with `--with-te`. The estimator is the Gaussian one, half
-the Granger log-ratio, conditioned on `--te-history` (default 1) past samples of the target and taken at the
-source lag within `--max-lag` that gives the most. On the epoch tables it is taken over the residuals, like
-`r_residual`. The values are small, since the target's own past already explains most of its next sample. A
-value of 0.03 bits means the source explains 4% of what is left, and the whole-trace values of a recording run
-from 0.01 to 0.1 bits. Read them against other pairs, groups and sessions rather than against the `mi` scale.
+command runs with `--with-te`. The estimator is the Gaussian one, half the Granger log-ratio, conditioned on
+`--te-history` (default 1) past samples of the target and taken at the source lag within `--max-lag` that gives
+the most. On the epoch tables it is taken over the residuals, like `r_residual`. The values are small, since the
+target's own past already explains most of its next sample. A value of 0.03 bits means the source explains 4% of
+what is left, and the whole-trace values of a recording run from 0.01 to 0.1 bits. Read them against other pairs,
+groups and sessions rather than against the `mi` scale.
 
 `te_ab_z` says how far the value sits above surrogates with the same source but no time alignment to the target,
 trial shuffles on the epoch tables and circular shifts on the whole trace, so it is the significance of the
