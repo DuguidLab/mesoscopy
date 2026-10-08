@@ -12,6 +12,10 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 - `process connectivity` leaves the `mi` and `mi_residual` columns out with `--no-mi`, and the transfer entropy columns without `--with-te` or their z-scores with `--te-surrogates 0`, instead of writing them empty. The `--mi` flag is renamed `--with-mi` ([#191](https://github.com/DuguidLab/mesoscopy/issues/191)).
 - `process connectivity` takes a `_regions.csv` and writes the connectivity metrics over the whole recording to `<stem>_connectivity.csv`, as the `all` rows only, without the residual and per-trial columns. Library entry point `connectivity.trace_table` ([#190](https://github.com/DuguidLab/mesoscopy/issues/190)).
 
+### Fixed
+
+- Writing HDF5 output could hang when garbage collection closed an open NWB file while a dask array was being written. `io.write_h5` now computes dask arrays before handing them to h5py.
+
 ## [0.15.0] - 2026-10-06
 
 ### Added

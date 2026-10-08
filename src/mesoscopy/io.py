@@ -117,9 +117,13 @@ def write_h5(path: str, data: dict, compression: str = "lzf", attributes: dict =
         >>> data = {"dataset1": np.array([1, 2, 3]), "dataset2": np.array([[1, 2], [3, 4]])}
         >>> write_h5("output.h5", data)
     """
+    from dask import array as da
+
     with h5py.File(path, "w") as h5file:
         for key, value in data.items():
-            h5file.create_dataset(key, data=value, compression=compression)
+            # Compute dask arrays before h5py takes its global lock; h5py calls in dask's threads would deadlock.
+            array = value.compute() if isinstance(value, da.Array) else value
+            h5file.create_dataset(key, data=array, compression=compression)
         if attributes:
             h5file.attrs.update(attributes)
     return path
