@@ -19,7 +19,10 @@
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
 
-"""Pairwise connectivity between regions over the cue-to-response epoch of peri-event traces, or whole traces."""
+"""Pairwise connectivity between regions over the cue-to-response epoch of peri-event traces, or whole traces.
+
+The transfer entropy is the Gaussian estimator, equal to half the Granger log-ratio.
+"""
 
 from __future__ import annotations
 
@@ -35,8 +38,11 @@ from mesoscopy.process import metrics as pm
 if typing.TYPE_CHECKING:
     import pandas as pd
 
+# Transfer entropy columns: source `region_a` to target `region_b` and back, with their surrogate z-scores.
+TE_METRICS = ("te_ab", "te_ba", "te_ab_z", "te_ba_z")
+
 # Connectivity metrics per region pair, in output column order.
-PAIR_METRICS = ("r", "r_residual", "r_trials_avg", "mi", "mi_residual", "partial_r", "lag", "r_lag")
+PAIR_METRICS = ("r", "r_residual", "r_trials_avg", "mi", "mi_residual", "partial_r", "lag", "r_lag", *TE_METRICS)
 
 # Columns of the connectivity table, in order.
 TABLE_COLUMNS = ("region_a", "region_b", "group", *PAIR_METRICS, "n_trials", "n_samples")
@@ -259,6 +265,243 @@ def peak_lag(lagged: npt.NDArray[np.float64]) -> tuple[npt.NDArray[np.int64], np
     return index, peak
 
 
+def embedded_samples(
+    epochs: npt.NDArray, history: int, lag: int, source: npt.NDArray | None = None
+) -> npt.NDArray[np.float64]:
+    """Rows of every region now, its past samples and every region `lag` samples back, pooled within trials.
+
+    Args:
+        epochs (npt.NDArray): Masked traces of shape `(n_trials, n_samples, n_regions)`.
+        history (int): Past samples of each region to embed.
+        lag (int): Samples the source columns look back.
+        source (npt.NDArray | None, optional): Traces the source columns are taken from, same shape as `epochs`.
+            Defaults to `epochs`.
+
+    Returns:
+        npt.NDArray[np.float64]: Samples of shape `(n_rows, n_regions * (history + 2))`, the columns being each
+        region at `t`, then each region at `t - 1` through `t - history`, then each source region at `t - lag`.
+        Rows with a NaN are dropped.
+    """
+    values = np.asarray(epochs, dtype=np.float64)
+    source = values if source is None else np.asarray(source, dtype=np.float64)
+    n_samples = values.shape[1]
+    offset = max(history, lag)
+    if offset >= n_samples:
+        return np.empty((0, values.shape[-1] * (history + 2)))
+    columns = [values[:, offset:]]
+    columns += [values[:, offset - past : n_samples - past] for past in range(1, history + 1)]
+    columns.append(source[:, offset - lag : n_samples - lag])
+    rows = np.concatenate(columns, axis=-1).reshape(-1, values.shape[-1] * (history + 2))
+    return rows[np.isfinite(rows).all(axis=1)]
+
+
+def transfer_entropy_from_covariance(covariance: npt.NDArray, history: int) -> npt.NDArray[np.float64]:
+    """Gaussian transfer entropy of every directed pair from the covariance of `embedded_samples` columns.
+
+    Args:
+        covariance (npt.NDArray): Covariance of shape `(n_columns, n_columns)` over the columns of
+            `embedded_samples`.
+        history (int): Past samples embedded per region.
+
+    Returns:
+        npt.NDArray[np.float64]: Transfer entropy in bits, shape `(n_regions, n_regions)`; entry `[i, j]` is from
+        source `i` to target `j`, minus half the log of one minus the squared partial correlation between the
+        target now and the source back, given the target's past. NaN on the diagonal and where undefined; a
+        source that determines the target exactly gives about 26 bits.
+    """
+    n_regions = covariance.shape[0] // (history + 2)
+    targets = np.arange(n_regions)
+    sources = np.arange(n_regions * (history + 1), n_regions * (history + 2))
+    past = np.stack([n_regions * step + targets for step in range(1, history + 1)], axis=1)  # (n_regions, history)
+    kept = np.concatenate([targets[:, None], np.broadcast_to(sources, (n_regions, n_regions))], axis=1)
+    past_past = covariance[past[:, :, None], past[:, None, :]]
+    kept_past = covariance[kept[:, :, None], past[:, None, :]]
+    kept_kept = covariance[kept[:, :, None], kept[:, None, :]]
+    with np.errstate(invalid="ignore", divide="ignore"):
+        conditional = kept_kept - kept_past @ np.linalg.pinv(past_past) @ kept_past.transpose(0, 2, 1)
+        scale = np.sqrt(np.diagonal(conditional, axis1=1, axis2=2))
+        rho = conditional[:, 0, 1:] / (scale[:, :1] * scale[:, 1:])  # [target, source]
+        te = -0.5 * np.log2(1.0 - np.clip(rho**2, 0.0, 1.0 - np.finfo(float).eps)).T
+    np.fill_diagonal(te, np.nan)
+    return te
+
+
+def transfer_entropy(
+    epochs: npt.NDArray, history: int, max_lag: int, source: npt.NDArray | None = None
+) -> npt.NDArray[np.float64]:
+    """Transfer entropy of every directed pair, the largest over source lags `1` to `max_lag`.
+
+    Args:
+        epochs (npt.NDArray): Masked traces of shape `(n_trials, n_samples, n_regions)`.
+        history (int): Past samples of the target to condition on.
+        max_lag (int): Largest source lag searched, in samples.
+        source (npt.NDArray | None, optional): Traces the sources are taken from, for surrogates. Defaults to
+            `epochs`.
+
+    Returns:
+        npt.NDArray[np.float64]: Transfer entropy in bits, shape `(n_regions, n_regions)`, as
+        `transfer_entropy_from_covariance`. NaN where fewer than `history + 3` rows remain at every lag.
+    """
+    n_regions = np.shape(epochs)[-1]
+    best = np.full((n_regions, n_regions), np.nan)
+    for lag in range(1, max_lag + 1):
+        rows = embedded_samples(epochs, history, lag, source)
+        if len(rows) < history + 3:
+            continue
+        te = transfer_entropy_from_covariance(np.cov(rows, rowvar=False), history)
+        best = np.where(np.isnan(best), te, np.fmax(best, te))
+    return best
+
+
+def circular_covariances(traces: npt.NDArray, lags: typing.Iterable[int]) -> dict[int, npt.NDArray[np.float64]]:
+    """Circular cross-covariance between every pair of whole traces at the given lags, via FFT.
+
+    Args:
+        traces (npt.NDArray): Traces of shape `(n_samples, n_regions)` without NaN.
+        lags (typing.Iterable[int]): Lags in samples, any sign.
+
+    Returns:
+        dict[int, npt.NDArray[np.float64]]: Per lag `d`, the matrix whose entry `[j, i]` is the mean over `t` of
+        region `j` at `t` times region `i` at `t - d`, wrapping around the trace ends.
+    """
+    values = np.asarray(traces, dtype=np.float64) - np.mean(traces, axis=0)
+    n_samples, n_regions = values.shape
+    wanted = sorted(set(lags))
+    index = np.array(wanted) % n_samples
+    spectrum = np.fft.rfft(values, axis=0)
+    out = np.empty((len(wanted), n_regions, n_regions))
+    for i in range(n_regions):
+        full = np.fft.irfft(spectrum * np.conj(spectrum[:, i : i + 1]), n=n_samples, axis=0) / n_samples
+        out[:, :, i] = full[index]
+    return {lag: out[q] for q, lag in enumerate(wanted)}
+
+
+def transfer_entropy_circular(
+    traces: npt.NDArray, history: int, max_lag: int, shifts: npt.NDArray
+) -> npt.NDArray[np.float64]:
+    """Transfer entropy of whole traces, with every source rolled by each shift, from circular covariances.
+
+    Args:
+        traces (npt.NDArray): Traces of shape `(n_samples, n_regions)` without NaN.
+        history (int): Past samples of the target to condition on.
+        max_lag (int): Largest source lag searched, in samples.
+        shifts (npt.NDArray): Samples to roll the sources by, shape `(n_shifts,)`; 0 is the unshifted estimate.
+
+    Returns:
+        npt.NDArray[np.float64]: Transfer entropy in bits, shape `(n_shifts, n_regions, n_regions)`, as
+        `transfer_entropy`, differing from it only by the wrap-around at the trace ends.
+    """
+    n_regions = np.shape(traces)[-1]
+    shifts = np.asarray(shifts, dtype=int)
+    steps = range(history + 1)
+    lags = {lag + shift - step for lag in range(1, max_lag + 1) for shift in shifts for step in steps}
+    at = circular_covariances(traces, lags | {b - a for a in steps for b in steps})
+    size = n_regions * (history + 2)
+    blocks = [slice(n_regions * step, n_regions * (step + 1)) for step in range(history + 2)]
+    out = np.full((len(shifts), n_regions, n_regions), np.nan)
+    for q, shift in enumerate(shifts):
+        for lag in range(1, max_lag + 1):
+            covariance = np.empty((size, size))
+            for a in steps:
+                for b in steps:
+                    covariance[blocks[a], blocks[b]] = at[b - a]
+                covariance[blocks[a], blocks[-1]] = at[lag + shift - a]
+                covariance[blocks[-1], blocks[a]] = at[lag + shift - a].T
+            covariance[blocks[-1], blocks[-1]] = at[0]
+            te = transfer_entropy_from_covariance(covariance, history)
+            out[q] = np.where(np.isnan(out[q]), te, np.fmax(out[q], te))
+    return out
+
+
+def surrogate_z(value: npt.NDArray, surrogates: npt.NDArray) -> npt.NDArray[np.float64]:
+    """Z-score of a matrix against its surrogates.
+
+    Args:
+        value (npt.NDArray): Matrix of shape `(n_regions, n_regions)`.
+        surrogates (npt.NDArray): Surrogate matrices of shape `(n_surrogates, n_regions, n_regions)`.
+
+    Returns:
+        npt.NDArray[np.float64]: `(value - mean) / sd` over the surrogates, NaN without at least two of them or
+        where their spread is zero.
+    """
+    if len(surrogates) < 2:  # noqa: PLR2004
+        return np.full(np.shape(value), np.nan)
+    spread = np.std(surrogates, axis=0)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        return np.where(spread > 0, (value - np.mean(surrogates, axis=0)) / spread, np.nan)
+
+
+def epoch_transfer_entropy(
+    epochs: npt.NDArray, history: int, max_lag: int, n_surrogates: int, rng: np.random.Generator
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    """Transfer entropy of epochs and its z-score against trial-shuffled sources.
+
+    Args:
+        epochs (npt.NDArray): Masked traces of shape `(n_trials, n_samples, n_regions)`.
+        history (int): Past samples of the target to condition on.
+        max_lag (int): Largest source lag searched, in samples.
+        n_surrogates (int): Surrogates, each pairing the targets with the sources of a permutation of the trials.
+        rng (np.random.Generator): Random generator for the permutations.
+
+    Returns:
+        tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]: Transfer entropy and its `surrogate_z`, each
+        shape `(n_regions, n_regions)`.
+    """
+    te = transfer_entropy(epochs, history, max_lag)
+    n_trials = np.shape(epochs)[0]
+    surrogates = (
+        np.stack(
+            [
+                transfer_entropy(epochs, history, max_lag, np.asarray(epochs)[rng.permutation(n_trials)])
+                for _ in range(n_surrogates)
+            ]
+        )
+        if n_surrogates
+        else np.empty((0, *te.shape))
+    )
+    return te, surrogate_z(te, surrogates)
+
+
+def trace_transfer_entropy(
+    traces: npt.NDArray, history: int, max_lag: int, n_surrogates: int, rng: np.random.Generator
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    """Transfer entropy of whole traces and its z-score against circularly shifted sources.
+
+    Args:
+        traces (npt.NDArray): Traces of shape `(n_samples, n_regions)` without NaN.
+        history (int): Past samples of the target to condition on.
+        max_lag (int): Largest source lag searched, in samples.
+        n_surrogates (int): Surrogates, each rolling the sources by a random shift of at least
+            `max_lag + history` samples from either end.
+        rng (np.random.Generator): Random generator for the shifts.
+
+    Returns:
+        tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]: Transfer entropy via `transfer_entropy_circular`
+        and its `surrogate_z`, each shape `(n_regions, n_regions)`. The z-score is NaN when the trace is too short
+        for a shift.
+    """
+    n_samples, n_regions = np.shape(traces)
+    margin = max_lag + history
+    if n_samples < margin + 3:
+        return np.full((n_regions, n_regions), np.nan), np.full((n_regions, n_regions), np.nan)
+    shifts = rng.integers(margin, n_samples - margin, size=n_surrogates) if n_samples > 2 * margin else np.empty(0)
+    estimates = transfer_entropy_circular(traces, history, max_lag, np.array([0, *shifts], dtype=int))
+    return estimates[0], surrogate_z(estimates[0], estimates[1:])
+
+
+def directed_metrics(te: npt.NDArray, z: npt.NDArray) -> dict[str, npt.NDArray[np.float64]]:
+    """The `TE_METRICS` matrices, indexed `[a, b]` like the symmetric ones, from a directed `[source, target]` pair.
+
+    Args:
+        te (npt.NDArray): Transfer entropy, shape `(n_regions, n_regions)`.
+        z (npt.NDArray): Its z-score, same shape.
+
+    Returns:
+        dict[str, npt.NDArray[np.float64]]: `te_ab`, `te_ba`, `te_ab_z` and `te_ba_z`.
+    """
+    return {"te_ab": np.asarray(te), "te_ba": np.asarray(te).T, "te_ab_z": np.asarray(z), "te_ba_z": np.asarray(z).T}
+
+
 def epoch_bounds(
     trial_info: pd.DataFrame,
     event: str | None,
@@ -380,27 +623,43 @@ def pair_metrics(
     min_trial_samples: int = 3,
     mi_neighbours: int = 3,
     mutual_info: bool = True,
+    te_history: int = 1,
+    te_surrogates: int = 200,
+    transfer_entropy: bool = False,
+    rng: np.random.Generator | None = None,
 ) -> dict[str, typing.Any]:
     """Connectivity matrices of one trial group.
 
     Args:
         epochs (npt.NDArray): Masked traces of shape `(n_trials, n_samples, n_regions)`.
-        lag_samples (int): Largest lag searched for the peak cross-correlation, in samples.
+        lag_samples (int): Largest lag searched for the peak cross-correlation and transfer entropy, in samples.
         min_trial_samples (int, optional): Samples a trial needs for `trial_correlation`. Defaults to 3.
         mi_neighbours (int, optional): Neighbours for `mutual_information`. Defaults to 3.
         mutual_info (bool, optional): Estimate `mi` and `mi_residual`; False leaves them NaN. Defaults to True.
+        te_history (int, optional): Target past samples for `epoch_transfer_entropy`. Defaults to 1.
+        te_surrogates (int, optional): Trial-shuffle surrogates for the transfer entropy z-scores; 0 leaves them
+            NaN. Defaults to 200.
+        transfer_entropy (bool, optional): Estimate the `TE_METRICS` on the residual epochs; False leaves them
+            NaN. Defaults to False.
+        rng (np.random.Generator | None, optional): Random generator for the surrogates. Defaults to a fresh one.
 
     Returns:
         dict[str, typing.Any]: One `(n_regions, n_regions)` matrix per `PAIR_METRICS` name, with `lag` in
         samples, plus `n_samples`, the pooled samples used.
     """
-    residuals = pooled_samples(residual_epochs(epochs))
+    residual = residual_epochs(epochs)
+    residuals = pooled_samples(residual)
     empty = np.full((residuals.shape[1], residuals.shape[1]), np.nan)
-    return pooled_metrics(epochs, lag_samples, mi_neighbours, mutual_info) | {
+    metrics = pooled_metrics(epochs, lag_samples, mi_neighbours, mutual_info) | {
         "r_residual": correlation_matrix(residuals),
         "r_trials_avg": trial_correlation(epochs, min_trial_samples),
         "mi_residual": mutual_information_matrix(residuals, mi_neighbours) if mutual_info else empty,
     }
+    if not transfer_entropy:
+        return metrics | directed_metrics(empty, empty)
+    rng = rng if rng is not None else np.random.default_rng()
+    te, z = epoch_transfer_entropy(residual, te_history, lag_samples, te_surrogates, rng)
+    return metrics | directed_metrics(te, z)
 
 
 def trace_samples(regions: pd.DataFrame) -> tuple[npt.NDArray[np.float64], list[str], float]:
@@ -442,20 +701,30 @@ def trace_table(
     max_lag: float = 0.5,
     mi_neighbours: int = 3,
     mutual_info: bool = True,
+    te_history: int = 1,
+    te_surrogates: int = 200,
+    transfer_entropy: bool = False,
+    seed: int | None = 42,
 ) -> pd.DataFrame:
     """Pairwise connectivity between regions over their whole traces, from a long-format regions table.
 
     Args:
         regions (pd.DataFrame): Regions table, as for `trace_samples`.
-        max_lag (float, optional): Largest lag searched for the peak cross-correlation, in seconds. Defaults to
-            0.5.
+        max_lag (float, optional): Largest lag searched for the peak cross-correlation and transfer entropy, in
+            seconds. Defaults to 0.5.
         mi_neighbours (int, optional): Neighbours for `mutual_information`. Defaults to 3.
         mutual_info (bool, optional): Estimate `mi`; False leaves it NaN. Defaults to True.
+        te_history (int, optional): Target past samples for `trace_transfer_entropy`. Defaults to 1.
+        te_surrogates (int, optional): Circular-shift surrogates for the transfer entropy z-scores; 0 leaves them
+            NaN. Defaults to 200.
+        transfer_entropy (bool, optional): Estimate the `TE_METRICS`; False leaves them NaN. Defaults to False.
+        seed (int | None, optional): Seed for the surrogates. Defaults to 42.
 
     Returns:
         pd.DataFrame: One `all` row per unordered region pair with `TABLE_COLUMNS`, as for `connectivity_table`.
         `r_residual`, `r_trials_avg`, `mi_residual` and `n_trials` are NaN, having no meaning without trials, and
-        `n_samples` is the frames where every region is finite.
+        `n_samples` is the frames where every region is finite. The transfer entropy is taken over those frames
+        with the wrap-around of `transfer_entropy_circular`.
 
     Example:
         >>> regions = pd.read_csv("ses-01_regions.csv")
@@ -463,8 +732,13 @@ def trace_table(
         >>> table.nlargest(5, "partial_r")
     """
     traces, names, step = trace_samples(regions)
-    metrics = pooled_metrics(traces[None], round(max_lag / step), mi_neighbours, mutual_info)
+    lag_samples = round(max_lag / step)
+    metrics = pooled_metrics(traces[None], lag_samples, mi_neighbours, mutual_info)
     metrics["lag"] *= step
+    if transfer_entropy:
+        rng = np.random.default_rng(seed)
+        te, z = trace_transfer_entropy(pooled_samples(traces[None]), te_history, lag_samples, te_surrogates, rng)
+        metrics |= directed_metrics(te, z)
     return _rows(names, {"all": {"n_trials": np.nan, **metrics}})
 
 
@@ -480,6 +754,10 @@ def connectivity_table(
     min_trial_samples: int = 3,
     mi_neighbours: int = 3,
     mutual_info: bool = True,
+    te_history: int = 1,
+    te_surrogates: int = 200,
+    transfer_entropy: bool = False,
+    seed: int | None = 42,
 ) -> pd.DataFrame:
     """Pairwise connectivity between regions, per trial group, from a long-format peri-event table.
 
@@ -502,11 +780,17 @@ def connectivity_table(
             0.2.
         min_trials (int, optional): Groups with fewer trials get NaN metrics; the all-trials metrics are always
             taken. Defaults to 10.
-        max_lag (float, optional): Largest lag searched for the peak cross-correlation, in seconds. Defaults to
-            0.5.
+        max_lag (float, optional): Largest lag searched for the peak cross-correlation and transfer entropy, in
+            seconds. Defaults to 0.5.
         min_trial_samples (int, optional): Samples a trial needs to count towards `r_trials_avg`. Defaults to 3.
         mi_neighbours (int, optional): Neighbours for `mutual_information`. Defaults to 3.
         mutual_info (bool, optional): Estimate `mi` and `mi_residual`; False leaves them NaN. Defaults to True.
+        te_history (int, optional): Target past samples for `epoch_transfer_entropy`. Defaults to 1.
+        te_surrogates (int, optional): Trial-shuffle surrogates per group for the transfer entropy z-scores; 0
+            leaves them NaN. Defaults to 200.
+        transfer_entropy (bool, optional): Estimate the `TE_METRICS` on the residual epochs; False leaves them
+            NaN. Defaults to False.
+        seed (int | None, optional): Seed for the surrogates. Defaults to 42.
 
     Returns:
         pd.DataFrame: One row per unordered region pair per trial group, with `TABLE_COLUMNS`: `region_a` and
@@ -515,7 +799,9 @@ def connectivity_table(
         (`trial_correlation`), `mi` and `mi_residual` (`mutual_information` of the pooled samples and of the
         residuals, in bits), `partial_r` (`partial_correlation`), `lag` and `r_lag` (lag in seconds and value
         of the peak absolute cross-correlation within `max_lag`; positive when `region_b` lags `region_a`),
-        `n_trials` (trials used) and `n_samples` (pooled samples used).
+        `te_ab` and `te_ba` (transfer entropy of the residual epochs from `region_a` to `region_b` and back, in
+        bits, the largest over source lags within `max_lag`), `te_ab_z` and `te_ba_z` (their z-scores against
+        trial-shuffled sources), `n_trials` (trials used) and `n_samples` (pooled samples used).
 
     Example:
         >>> perievent = pd.read_csv("ses-01_regions_event-cueonset_perievent.csv")
@@ -540,6 +826,7 @@ def connectivity_table(
     step = float(np.median(np.diff(time))) if len(time) > 1 else 1.0
     lag_samples = round(max_lag / step)
 
+    rng = np.random.default_rng(seed)
     per_group: dict[str, dict[str, typing.Any]] = {}
     for name, mask in groups.items():
         used = mask & keep
@@ -547,7 +834,17 @@ def connectivity_table(
         if name != "all" and n_trials < min_trials:
             per_group[name] = {"n_trials": n_trials, "n_samples": 0}
             continue
-        metrics = pair_metrics(cube[used], lag_samples, min_trial_samples, mi_neighbours, mutual_info)
+        metrics = pair_metrics(
+            cube[used],
+            lag_samples,
+            min_trial_samples,
+            mi_neighbours,
+            mutual_info,
+            te_history,
+            te_surrogates,
+            transfer_entropy,
+            rng,
+        )
         metrics["lag"] *= step
         per_group[name] = {"n_trials": n_trials, **metrics}
 
