@@ -1150,6 +1150,28 @@ def metrics_cmd(
     help="Estimate the transfer entropy of each pair in both directions.",
 )
 @click.option(
+    "--with-rolling/--no-rolling",
+    "rolling",
+    default=False,
+    show_default=True,
+    help="Also take r, r_residual, mi and mi_residual in windows sliding over the whole peri-event window, written"
+    " to <stem>_connectivity-rolling.csv. Peri-event input only.",
+)
+@click.option(
+    "--rolling-window",
+    type=click.FloatRange(min=0, min_open=True),
+    default=0.5,
+    show_default=True,
+    help="Length of the rolling windows, in seconds, rounded to whole samples.",
+)
+@click.option(
+    "--rolling-step",
+    type=click.FloatRange(min=0, min_open=True),
+    default=0.1,
+    show_default=True,
+    help="Time between the starts of consecutive rolling windows, in seconds, rounded to whole samples.",
+)
+@click.option(
     "--seed",
     type=int,
     default=42,
@@ -1170,6 +1192,9 @@ def connectivity_cmd(
     te_history: int,
     te_surrogates: int,
     transfer_entropy: bool,
+    rolling: bool,
+    rolling_window: float,
+    rolling_step: float,
     seed: int,
 ) -> None:
     """Measure pairwise connectivity between regions, over the cue-to-response epoch or over whole traces.
@@ -1182,10 +1207,12 @@ def connectivity_cmd(
     the transfer entropy of the residuals in each direction with its z-score against surrogates. Epochs run from
     the cue to each trial's response, as for the reliability metrics of `process metrics`; without the cue_onset
     and response_time columns the whole response window is used. Go/no-go sessions are grouped by sdt_type,
-    go/no-go stimulus and lever push, as well as all trials.
+    go/no-go stimulus and lever push, as well as all trials. With --with-rolling it also writes
+    <stem>_connectivity-rolling.csv, with the correlations and mutual information in windows sliding over the whole
+    peri-event window, one row per region pair, trial group and window.
 
     A regions CSV gives the metrics over the whole recording instead, as the all-trials rows only, without the
-    residual and per-trial columns. The trial options do not apply.
+    residual and per-trial columns. The trial options and --with-rolling do not apply.
     """  # noqa: DOC501
     import pandas as pd
 
@@ -1194,6 +1221,9 @@ def connectivity_cmd(
         Path(out_dir).mkdir(parents=True)
 
     whole_trace = Path(path).stem.endswith("_regions")
+    if rolling and whole_trace:
+        click.echo("Warning: --with-rolling takes a peri-event file; the rolling table is skipped.")
+        rolling = False
     click.echo(f"Loading {'region' if whole_trace else 'peri-event'} traces from {path}...")
     table_in = pd.read_csv(path)
     if table_in.empty:
@@ -1234,6 +1264,31 @@ def connectivity_cmd(
             raise click.ClickException(msg) from error
     _echo_warnings(caught)
 
-    output = out_dir + os.sep + Path(path).stem.removesuffix("_perievent") + "_connectivity.csv"
+    stem = out_dir + os.sep + Path(path).stem.removesuffix("_perievent")
+    output = stem + "_connectivity.csv"
     table.to_csv(output, index=False)
     click.echo(f"Saved connectivity metrics at {output}")
+    if not rolling:
+        return
+
+    echoed = {str(warning.message) for warning in caught}
+    with timer.Timer(message="Extracting rolling connectivity"), warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", UserWarning)
+        try:
+            rolling_table = pc.rolling_table(
+                table_in,
+                window=rolling_window,
+                step=rolling_step,
+                trials=trials,
+                min_rt=min_rt,
+                min_trials=min_trials,
+                mi_neighbours=mi_neighbours,
+            )
+        except ValueError as error:
+            msg = f"{path}: {error} Check --rolling-window and --rolling-step."
+            raise click.ClickException(msg) from error
+    _echo_warnings([warning for warning in caught if str(warning.message) not in echoed])
+
+    output = stem + "_connectivity-rolling.csv"
+    rolling_table.to_csv(output, index=False)
+    click.echo(f"Saved rolling connectivity metrics at {output}")
