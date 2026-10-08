@@ -229,9 +229,11 @@
             for (const g of c.groups) for (let k = m * nR * nR; k < (m + 1) * nR * nR; k++) { const v = cubes[g][k]; if (!Number.isNaN(v)) all.push(v); }
             all.sort((a, b) => a - b);
             const lo = all[0] ?? 0, hi = all[all.length - 1] ?? 0, lim = Math.max(Math.abs(lo), Math.abs(hi)) || 1;
-            // Mutual information saturates at the 99th percentile, so a few near-identical pairs do not flatten the rest.
+            // Mutual information and transfer entropy saturate at the 99th percentile, so a few near-identical pairs do not flatten the rest.
             const cap = all.length ? all[Math.floor(0.99 * (all.length - 1))] : 0;
-            range[metric] = metric.startsWith('mi') ? {zmin: 0, zmax: cap > 0 ? cap : 1, colorscale: 'Viridis', reversescale: false}
+            const abs = all.map(Math.abs).sort((a, b) => a - b), zcap = abs.length ? abs[Math.floor(0.99 * (abs.length - 1))] : 0;
+            range[metric] = metric.startsWith('mi') || metric === 'te' ? {zmin: 0, zmax: cap > 0 ? cap : 1, colorscale: 'Viridis', reversescale: false}
+                : metric === 'te_z' ? {zmin: -(zcap || 1), zmax: zcap || 1, colorscale: 'RdBu', reversescale: false}
                 : metric === 'lag' ? {zmin: -lim, zmax: lim, colorscale: 'RdBu', reversescale: false}
                 : {zmin: -1, zmax: 1, colorscale: 'RdBu', reversescale: false};
         });
@@ -483,11 +485,11 @@
     // ---------- connectivity section ----------
     function renderConnectivity() {
         const metric = $('pev-conn-metric').value, group = $('pev-conn-group').value;
-        const counts = CONN.counts[group], r = CONN.range[metric], sel = ri[state.region];
-        $('pev-conn-subtitle').textContent = `${metric}, ${GROUP_LABELS[group] ?? group}, ${counts.n_trials} trials, ${counts.n_samples} samples`;
+        const counts = CONN.counts[group], r = CONN.range[metric], sel = ri[state.region], directed = (CONN.directed ?? []).includes(metric);
+        $('pev-conn-subtitle').textContent = `${metric}, ${GROUP_LABELS[group] ?? group}, ${counts.n_trials} trials, ${counts.n_samples} samples${directed ? ', row to column' : ''}`;
         const trace = {type: 'heatmap', x: DATA.regions, y: DATA.regions, z: CONN.matrix(group, CONN.metrics.indexOf(metric)), zmin: r.zmin, zmax: r.zmax,
             colorscale: r.colorscale, reversescale: r.reversescale, hoverongaps: false, xgap: 1, ygap: 1,
-            colorbar: {title: {text: metric}, thickness: 12, tickfont: {size: 10}}, hovertemplate: '%{y} and %{x}<br>' + metric + ' = %{z:.3f}<extra></extra>'};
+            colorbar: {title: {text: metric}, thickness: 12, tickfont: {size: 10}}, hovertemplate: (directed ? '%{y} to %{x}<br>' : '%{y} and %{x}<br>') + metric + ' = %{z:.3f}<extra></extra>'};
         // Outline the selected region's row and column.
         const band = (x0, x1, y0, y1) => ({type: 'rect', xref: 'x', yref: 'y', x0, x1, y0, y1, line: {color: fg(), width: 1}});
         const shapes = sel === undefined ? [] : [band(-0.5, nR - 0.5, sel - 0.5, sel + 0.5), band(sel - 0.5, sel + 0.5, -0.5, nR - 0.5)];

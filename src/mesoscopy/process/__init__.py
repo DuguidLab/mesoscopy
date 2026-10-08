@@ -1121,11 +1121,40 @@ def metrics_cmd(
     help="Neighbours for the mutual information estimator.",
 )
 @click.option(
-    "--mi/--no-mi",
+    "--with-mi/--no-mi",
     "mutual_info",
     default=True,
     show_default=True,
     help="Estimate the mutual information of each pair, the slowest part.",
+)
+@click.option(
+    "--te-history",
+    type=click.IntRange(min=1),
+    default=1,
+    show_default=True,
+    help="Past samples of the target the transfer entropy conditions on.",
+)
+@click.option(
+    "--te-surrogates",
+    type=click.IntRange(min=0),
+    default=200,
+    show_default=True,
+    help="Surrogates for the transfer entropy z-scores: trial shuffles on peri-event input, circular shifts on a"
+    " regions CSV. 0 leaves the z-scores out.",
+)
+@click.option(
+    "--with-te/--no-te",
+    "transfer_entropy",
+    default=False,
+    show_default=True,
+    help="Estimate the transfer entropy of each pair in both directions.",
+)
+@click.option(
+    "--seed",
+    type=int,
+    default=42,
+    show_default=True,
+    help="Random seed for the surrogates.",
 )
 def connectivity_cmd(
     path: str,
@@ -1138,6 +1167,10 @@ def connectivity_cmd(
     max_lag: float,
     mi_neighbours: int,
     mutual_info: bool,
+    te_history: int,
+    te_surrogates: int,
+    transfer_entropy: bool,
+    seed: int,
 ) -> None:
     """Measure pairwise connectivity between regions, over the cue-to-response epoch or over whole traces.
 
@@ -1145,13 +1178,14 @@ def connectivity_cmd(
     `process regions`. Writes <stem>_connectivity.csv with one row per region pair and trial group: the Pearson
     correlation of the pooled epoch samples, the same after removing the group's mean response, the mean of the
     per-trial correlations, the mutual information of the pooled samples and of the residuals in bits, the
-    partial correlation given every other region, and the lag and value of the peak cross-correlation. Epochs run
-    from the cue to each trial's response, as for the reliability metrics of `process metrics`; without the
-    cue_onset and response_time columns the whole response window is used. Go/no-go sessions are grouped by
-    sdt_type, go/no-go stimulus and lever push, as well as all trials.
+    partial correlation given every other region, the lag and value of the peak cross-correlation, and with --with-te
+    the transfer entropy of the residuals in each direction with its z-score against surrogates. Epochs run from
+    the cue to each trial's response, as for the reliability metrics of `process metrics`; without the cue_onset
+    and response_time columns the whole response window is used. Go/no-go sessions are grouped by sdt_type,
+    go/no-go stimulus and lever push, as well as all trials.
 
-    A regions CSV gives the metrics over the whole recording instead, as the all-trials rows only, with the
-    residual and per-trial columns empty. The trial options do not apply.
+    A regions CSV gives the metrics over the whole recording instead, as the all-trials rows only, without the
+    residual and per-trial columns. The trial options do not apply.
     """  # noqa: DOC501
     import pandas as pd
 
@@ -1173,8 +1207,17 @@ def connectivity_cmd(
     with timer.Timer(message="Extracting connectivity"), warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always", UserWarning)
         try:
+            options: dict[str, typing.Any] = {
+                "max_lag": max_lag,
+                "mi_neighbours": mi_neighbours,
+                "mutual_info": mutual_info,
+                "te_history": te_history,
+                "te_surrogates": te_surrogates,
+                "transfer_entropy": transfer_entropy,
+                "seed": seed,
+            }
             if whole_trace:
-                table = pc.trace_table(table_in, max_lag=max_lag, mi_neighbours=mi_neighbours, mutual_info=mutual_info)
+                table = pc.trace_table(table_in, **options)
             else:
                 table = pc.connectivity_table(
                     table_in,
@@ -1183,9 +1226,7 @@ def connectivity_cmd(
                     mask_response=mask_response,
                     min_rt=min_rt,
                     min_trials=min_trials,
-                    max_lag=max_lag,
-                    mi_neighbours=mi_neighbours,
-                    mutual_info=mutual_info,
+                    **options,
                 )
         except ValueError as error:
             stage = "regions" if whole_trace else "peri-event"

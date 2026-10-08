@@ -74,7 +74,8 @@ def perievent_dir(tmp_path_factory):
     )
     assert result.exit_code == 0, result.output
     result = CliRunner().invoke(
-        mesoscopy.cli, args=f"process connectivity {data / f'{STEM}_perievent.csv'} -o {data} --min-trials 1"
+        mesoscopy.cli,
+        args=f"process connectivity {data / f'{STEM}_perievent.csv'} -o {data} --min-trials 1 --with-te --te-surrogates 20",
     )
     assert result.exit_code == 0, result.output
     return data
@@ -175,31 +176,47 @@ def test_connectivity_path():
     assert path == pathlib.Path("/data/ses-01_regions_event-cueonset_connectivity.csv")
 
 
+ALL_CONNECTIVITY_METRICS = [*pevreport.CONNECTIVITY_METRICS, *pevreport.DIRECTED_METRICS]
+
+
 class TestConnectivityPayload:
     def test_packs_symmetric_cubes(self, perievent_csv):
         table = pd.read_csv(pevreport.connectivity_path(perievent_csv))
         payload = pevreport.connectivity_payload(table, REGIONS)
-        assert payload["metrics"] == pevreport.CONNECTIVITY_METRICS
+        assert payload["metrics"] == ALL_CONNECTIVITY_METRICS
+        assert payload["directed"] == ["te", "te_z"]
         assert payload["groups"] == list(table["group"].unique())
         assert payload["counts"]["all"] == {"n_trials": 5, "n_samples": int(table["n_samples"].iloc[0])}
-        cube = pevreport.unpack_float32(payload["values"]["all"], (8, 3, 3))
+        cube = pevreport.unpack_float32(payload["values"]["all"], (10, 3, 3))
         rows = table[table["group"] == "all"].set_index(["region_a", "region_b"])
-        for m, metric in enumerate(payload["metrics"]):
+        for m, metric in enumerate(pevreport.CONNECTIVITY_METRICS):
             assert np.isnan(np.diag(cube[m])).all()
             np.testing.assert_allclose(cube[m], cube[m].T, equal_nan=True)
             assert cube[m, 0, 2] == pytest.approx(rows.loc[(REGIONS[0], REGIONS[2]), metric], rel=1e-6, nan_ok=True)
 
-    def test_skips_empty_metrics(self, perievent_csv):
+    def test_packs_directed_cubes(self, perievent_csv):
         table = pd.read_csv(pevreport.connectivity_path(perievent_csv))
-        table[["mi", "mi_residual"]] = np.nan
         payload = pevreport.connectivity_payload(table, REGIONS)
-        assert payload["metrics"] == [m for m in pevreport.CONNECTIVITY_METRICS if not m.startswith("mi")]
-        assert pevreport.unpack_float32(payload["values"]["all"], (6, 3, 3)).shape == (6, 3, 3)
+        cube = pevreport.unpack_float32(payload["values"]["all"], (10, 3, 3))
+        rows = table[table["group"] == "all"].set_index(["region_a", "region_b"])
+        for metric, (forward, backward) in pevreport.DIRECTED_METRICS.items():
+            m = payload["metrics"].index(metric)
+            assert np.isnan(np.diag(cube[m])).all()
+            assert cube[m, 0, 2] == pytest.approx(rows.loc[(REGIONS[0], REGIONS[2]), forward], rel=1e-6, nan_ok=True)
+            assert cube[m, 2, 0] == pytest.approx(rows.loc[(REGIONS[0], REGIONS[2]), backward], rel=1e-6, nan_ok=True)
+
+    def test_skips_empty_metrics(self, perievent_csv):
+        table = pd.read_csv(pevreport.connectivity_path(perievent_csv)).drop(columns=["mi", "mi_residual"])
+        table["te_ab_z"] = np.nan
+        payload = pevreport.connectivity_payload(table, REGIONS)
+        assert payload["metrics"] == [m for m in ALL_CONNECTIVITY_METRICS if not m.startswith("mi") and m != "te_z"]
+        assert payload["directed"] == ["te"]
+        assert pevreport.unpack_float32(payload["values"]["all"], (7, 3, 3)).shape == (7, 3, 3)
 
     def test_ignores_unknown_regions(self, perievent_csv):
         table = pd.read_csv(pevreport.connectivity_path(perievent_csv))
         payload = pevreport.connectivity_payload(table, REGIONS[:2])
-        cube = pevreport.unpack_float32(payload["values"]["all"], (8, 2, 2))
+        cube = pevreport.unpack_float32(payload["values"]["all"], (10, 2, 2))
         expected = table[(table["group"] == "all") & (table["region_b"] == REGIONS[1])]["r"].iloc[0]
         assert cube[0, 0, 1] == pytest.approx(expected, rel=1e-6)
 
@@ -239,7 +256,7 @@ def test_report_cmd_writes_perievent_report(perievent_csv, output_dir):
     assert set(payload["trial_metrics"][0]) == set(pevreport.TRIAL_METRIC_COLUMNS)
     assert "L_MOp1" in payload["atlas"]["paths"]
     assert 'id="pev-conn-metric"' in html
-    assert payload["connectivity"]["metrics"] == pevreport.CONNECTIVITY_METRICS
+    assert payload["connectivity"]["metrics"] == ALL_CONNECTIVITY_METRICS
     assert payload["connectivity"]["groups"][0] == "all"
     assert set(payload["connectivity"]["values"]) == set(payload["connectivity"]["groups"])
 

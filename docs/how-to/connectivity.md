@@ -27,10 +27,13 @@ file.
 | `mi`, `mi_residual` | The mutual information between the two regions in bits, over the same samples as `r` and `r_residual`. |
 | `partial_r` | The partial correlation between the two regions, given every other region. |
 | `lag`, `r_lag` | The lag of the peak cross-correlation within `--max-lag` (default 0.5 s), in seconds, and the correlation at that lag. A positive lag means `region_b` follows `region_a`. |
+| `te_ab`, `te_ba` | With `--with-te`, the transfer entropy from `region_a` to `region_b` and back, in bits, over the same samples as `r_residual`. |
+| `te_ab_z`, `te_ba_z` | Their z-scores against `--te-surrogates` (default 200) surrogates; absent with 0. |
 | `n_trials`, `n_samples` | The trials used and the samples pooled across them. |
 
 Groups with fewer than `--min-trials` trials (default 10) keep their `n_trials` and are otherwise empty. The `all`
-rows are always filled. A session without the `sdt_type` column gets the `all` rows only.
+rows are always filled. A session without the `sdt_type` column gets the `all` rows only. Metrics the command does
+not estimate, the mutual information with `--no-mi` and the transfer entropy without `--with-te`, have no column.
 
 Keep the table next to the peri-event file and `mesoscopy report` on that file shows it as a heatmap, one metric
 and trial group at a time. See [Reports](reports.md#peri-event-report).
@@ -57,9 +60,10 @@ mesoscopy process connectivity /path/to/recording_smoothed_regions.csv
 It writes `<stem>_connectivity.csv` next to the epoch table, so `recording_smoothed_regions.csv` gives
 `recording_smoothed_regions_connectivity.csv` and its peri-event file gives
 `recording_smoothed_regions_event-cueonset_connectivity.csv`. The rows are the `all` group only. `r_residual`,
-`r_trials_avg`, `mi_residual` and `n_trials` are empty, since there are no trials to take them over, and
-`n_samples` is the number of frames. The trial options are ignored. This table is the baseline the epoch tables
-depart from.
+`r_trials_avg` and `mi_residual` have no column, since there are no trials to take them over, `n_trials` is
+empty, and `n_samples` is the number of frames. With `--with-te` the transfer entropy is taken over the raw
+traces, with circular shifts of the source as surrogates. The trial options are ignored. This table is the
+baseline the epoch tables depart from.
 
 ## Reading the table
 
@@ -73,12 +77,28 @@ close.
 `mi` captures dependence of any shape, where `r` captures linear dependence only. A Gaussian pair has
 `-0.5 * log2(1 - r²)` bits, so a `mi` well above that marks a non-linear relation. Independent regions land near
 zero, on either side of it. The estimator is the Kraskov-Stögbauer-Grassberger nearest-neighbour method with
-`--mi-neighbours` (default 3) neighbours. It is the slowest part of the command. Pass `--no-mi` to skip it.
+`--mi-neighbours` (default 3) neighbours. It is the slowest part of the command. Pass `--no-mi` to skip it and
+leave the columns out.
 
 `partial_r` removes what a pair shares with every other region, including the global signal. A pair with a strong
 `r` and a `partial_r` near zero is coupled through the rest of the cortex.
 
 `lag` moves in steps of the sample interval. A lag sitting at `--max-lag` means the peak lies beyond it.
+
+`te_ab` is the information `region_a` adds to predicting `region_b` beyond what `region_b`'s own past gives, and
+`te_ba` the reverse, so the two together give the direction of a coupling. The columns only appear when the
+command runs with `--with-te`. The estimator is the Gaussian one, half the Granger log-ratio, conditioned on
+`--te-history` (default 1) past samples of the target and taken at the source lag within `--max-lag` that gives
+the most. On the epoch tables it is taken over the residuals, like `r_residual`. The values are small, since the
+target's own past already explains most of its next sample. A value of 0.03 bits means the source explains 4% of
+what is left, and the whole-trace values of a recording run from 0.01 to 0.1 bits. Read them against other pairs,
+groups and sessions rather than against the `mi` scale.
+
+`te_ab_z` says how far the value sits above surrogates with the same source but no time alignment to the target,
+trial shuffles on the epoch tables and circular shifts on the whole trace, so it is the significance of the
+direction. The epoch values are noisy and are to be read with it. On the whole trace every pair comes out
+significant, so rank by `te_ab` there. The estimate is seeded by `--seed` (default 42). Pass `--te-surrogates 0`
+to skip the surrogates and leave the z-score columns out.
 
 ## As a library
 
@@ -97,4 +117,5 @@ n_regions)` array, built by `connectivity.epoch_cube` from the per-trial bounds 
 `connectivity.pooled_metrics` returns the metrics that need no trials, which is what `trace_table` takes over the
 traces of `connectivity.trace_samples`.
 `correlation_matrix`, `residual_epochs`, `trial_correlation`, `mutual_information`, `partial_correlation`,
-`lagged_correlation` and `peak_lag` work on their own.
+`lagged_correlation`, `peak_lag`, `transfer_entropy` and `transfer_entropy_circular` work on their own, and
+`epoch_transfer_entropy` and `trace_transfer_entropy` add the surrogate z-scores.

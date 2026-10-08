@@ -39,5 +39,6 @@ columns have no trial types. Pass the trials CSV with `-t/--trials` to recover t
 
 When the `*_connectivity.csv` from `process connectivity` sits next to the input, the report adds a
 [connectivity](connectivity.md) section. It shows the chosen metric for the chosen trial group as a region by
-region heatmap, and the trial group follows the selector above the session table. Click a cell to select its row
-region in the rest of the report.
+region heatmap, and the trial group follows the selector above the session table. The transfer entropy and its
+z-score are directed, from the row region to the column region. Click a cell to select its row region in the rest
+of the report.
