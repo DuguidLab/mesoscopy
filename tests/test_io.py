@@ -27,6 +27,21 @@ def test_h5_write(tmp_path):
     assert io.read_h5(path)["dataset2"][0][0] == 1
 
 
+def test_h5_write_dask_using_h5py(tmp_path):
+    other = tmp_path / "other.h5"
+    io.write_h5(other, {"x": np.zeros(1)})
+
+    def touch(block):
+        # h5py calls in dask's worker threads, as when garbage collection closes an open file.
+        with h5py.File(other, "r"):
+            return block
+
+    path = tmp_path / "test.h5"
+    io.write_h5(path, {"F": da.ones((4, 3), chunks=(2, 3)).map_blocks(touch)})
+    with h5py.File(path, "r") as f:
+        np.testing.assert_array_equal(f["F"][:], np.ones((4, 3)))
+
+
 def test_read_start_time_raw_h5(raw_h5):
     with h5py.File(raw_h5, "r") as f:
         expected = f["/timestamps"][0].decode("utf-8")

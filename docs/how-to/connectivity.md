@@ -44,7 +44,8 @@ Each trial contributes the samples between the cue and its response. Misses and 
 median response time of the trials that did respond, and lever-aligned windows run from the cue to the push.
 `--response START END` bounds the epoch (default all post-event samples), and trials with a response time below
 `--min-rt` (default 0.2 s) are left out. This is the same epoch the [reliability](metrics.md#reliability) metrics
-use. Pass `--no-mask-response` to use the whole response window instead.
+use. `--response-pad` extends each epoch past the response by a fixed time (default 0 s) to account for the lag
+in calcium indicators. Pass `--no-mask-response` to use the whole response window instead.
 
 The epoch needs the `cue_onset` and `response_time` trials columns. Without them the command falls back to the
 whole response window and warns.
@@ -60,9 +61,10 @@ mesoscopy process connectivity /path/to/recording_smoothed_regions_event-cueonse
 ```
 
 Each window pools its samples over the trials of the group, as the epoch table pools the epoch. The windows run
-from before the cue to past the response, so `--response` and `--mask-response` do not apply, while `--min-rt` and
-`--min-trials` do. `--rolling-window` (default 0.5 s) sets the window length and `--rolling-step` (default 0.1 s) the
-time between windows, both rounded to whole samples. At 25 Hz the defaults give windows of 0.48 s every 0.08 s.
+from before the cue to past the response, so `--response`, `--mask-response` and `--response-pad` do not apply,
+while `--min-rt` and `--min-trials` do. `--rolling-window` (default 0.5 s) sets the window length and
+`--rolling-step` (default 0.1 s) the time between windows, both rounded to whole samples. At 25 Hz the defaults give
+windows of 0.48 s every 0.08 s.
 
 The table has one row per pair, trial group and window. `time` is the centre of the window relative to the event,
 and `n_samples` is the number of samples pooled in it. The other columns read as in the epoch table. A rise in

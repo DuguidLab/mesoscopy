@@ -4028,6 +4028,40 @@ class TestEpochBounds:
         assert (end < 3.0001).all()
         assert keep.all()
 
+    @pytest.mark.parametrize(("event", "window"), [("cue_onset", (0.0, 3.0)), ("trial_start", (0.0, 10.0))])
+    def test_response_pad_extends_epochs(self, event, window):
+        info = _gonogo_info(event)
+        start, end, keep = pc.epoch_bounds(info, event, window, response_pad=0.05)
+        expected = pm.reliability_epochs(info, event, window)
+        np.testing.assert_array_equal(start, expected[0])
+        np.testing.assert_allclose(end, expected[1] + 0.05)
+        np.testing.assert_array_equal(keep, expected[3])
+
+    def test_response_pad_capped_at_response_window(self):
+        _, end, _ = pc.epoch_bounds(_gonogo_info(), "cue_onset", (0.0, 1.0), response_pad=0.3)
+        np.testing.assert_allclose(end[:6], [0.7, 0.9, 1.0, 1.0, 1.0, 1.0])
+        assert end.max() == pytest.approx(1.0)
+        assert end.max() > 1.0
+
+    def test_response_pad_leaves_unmasked_epochs(self):
+        info = _gonogo_info()
+        padded = pc.epoch_bounds(info, "cue_onset", (0.0, 3.0), mask_response=False, response_pad=0.3)
+        for actual, expected in zip(padded, pc.epoch_bounds(info, "cue_onset", (0.0, 3.0), False), strict=True):
+            np.testing.assert_array_equal(actual, expected)
+
+    def test_response_pad_extends_lever_epochs(self):
+        info = _gonogo_info("response")
+        start, end, _ = pc.epoch_bounds(info, "response", (0.0, 0.1), response_pad=0.3)
+        np.testing.assert_allclose(start, -info["response_time"])
+        # Lever-aligned epochs are not capped at the response window.
+        np.testing.assert_allclose(end, 0.3)
+
+    def test_response_pad_ignored_on_fallback(self):
+        info = _gonogo_info().drop(columns="response_time")
+        with pytest.warns(UserWarning, match="Using the response window as the epoch"):
+            _, end, _ = pc.epoch_bounds(info, "cue_onset", (0.0, 3.0), response_pad=0.3)
+        assert (end < 3.0001).all()
+
 
 class TestConnectivityTable:
     @staticmethod
@@ -4115,6 +4149,16 @@ class TestConnectivityTable:
     def test_response_window(self):
         table = pc.connectivity_table(_connectivity_perievent(), response=(0.0, 0.5))
         assert table[table["group"] == "all"]["n_samples"].tolist() == [36 * _post_event_samples(0.5) - 2 * 3] * 3
+
+    def test_response_pad_adds_samples(self):
+        padded = pc.connectivity_table(_connectivity_perievent(), response_pad=0.1)
+        info = _gonogo_info()
+        start, end, keep = pc.epoch_bounds(info, "cue_onset", (0.0, 3.0), response_pad=0.1)
+        inside = ~np.isnan(pm.epoch_traces(np.zeros((len(info), len(METRICS_GRID))), METRICS_GRID, start, end))
+        assert padded[padded["group"] == "all"]["n_samples"].tolist() == [int(inside[keep].sum())] * 3
+        masked = pc.connectivity_table(_connectivity_perievent())
+        taken = masked["n_samples"] > 0
+        assert (padded["n_samples"][taken] > masked["n_samples"][taken]).all()
 
     def test_without_groups_warns(self):
         with pytest.warns(UserWarning, match="Skipping trial groups: no sdt_type column"):
@@ -4640,6 +4684,15 @@ def test_connectivity_cmd_options(output_dir, tmp_path):
     pd.testing.assert_frame_equal(table, expected, check_dtype=False)
     assert table[table["group"] == "sdt-miss"]["r"].notna().all()
     assert table["lag"].abs().max() <= 0.2 + 1e-9
+
+
+def test_connectivity_cmd_response_pad(output_dir, tmp_path):
+    path = tmp_path / "ses-01_regions_event-cueonset_perievent.csv"
+    _connectivity_perievent().to_csv(path, index=False)
+    result = CliRunner().invoke(mesoscopy.cli, args=f"process connectivity {path} -o {output_dir} --response-pad 0.1")
+    assert result.exit_code == 0, result.output
+    table = pd.read_csv(pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_connectivity.csv")
+    pd.testing.assert_frame_equal(table, pc.connectivity_table(pd.read_csv(path), response_pad=0.1), check_dtype=False)
 
 
 def test_connectivity_cmd_mutual_info_options(output_dir, tmp_path):
