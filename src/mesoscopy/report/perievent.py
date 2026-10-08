@@ -47,6 +47,9 @@ TRIAL_METRIC_COLUMNS = [
 # Connectivity metrics embedded for the pair heatmap, in `process connectivity` column order.
 CONNECTIVITY_METRICS = ["r", "r_residual", "r_trials_avg", "mi", "mi_residual", "partial_r", "lag", "r_lag"]
 
+# Directed connectivity metrics for the heatmap, each from its `region_a` to `region_b` column and the reverse.
+DIRECTED_METRICS = {"te": ("te_ab", "te_ba"), "te_z": ("te_ab_z", "te_ba_z")}
+
 UNLABELLED = "unlabelled"
 
 
@@ -201,11 +204,19 @@ def connectivity_payload(table: pd.DataFrame, regions: list[str]) -> dict:
         regions (list[str]): Regions on the heatmap axes, in order. Pairs with other regions are left out.
 
     Returns:
-        dict: `metrics`, the `CONNECTIVITY_METRICS` the table has values for; `groups` in table order; `counts`, the
-            `n_trials` and `n_samples` of each group; and `values`, one packed `(n_metrics, n_regions, n_regions)`
-            cube per group, NaN on the diagonal and for missing pairs.
+        dict: `metrics`, the `CONNECTIVITY_METRICS` the table has values for, then the `DIRECTED_METRICS` it has;
+            `directed`, the latter; `groups` in table order; `counts`, the `n_trials` and `n_samples` of each
+            group; and `values`, one packed `(n_metrics, n_regions, n_regions)` cube per group, NaN on the
+            diagonal and for missing pairs. Directed metrics have the source on the row and the target on the
+            column.
     """
-    metrics = [metric for metric in CONNECTIVITY_METRICS if metric in table.columns and table[metric].notna().any()]
+    present = [metric for metric in CONNECTIVITY_METRICS if metric in table.columns and table[metric].notna().any()]
+    directed = [
+        metric
+        for metric, columns in DIRECTED_METRICS.items()
+        if all(column in table.columns and table[column].notna().any() for column in columns)
+    ]
+    metrics = present + directed
     index = {region: i for i, region in enumerate(regions)}
     known = table[table["region_a"].isin(index) & table["region_b"].isin(index)]
     groups = list(table["group"].unique())
@@ -217,11 +228,16 @@ def connectivity_payload(table: pd.DataFrame, regions: list[str]) -> dict:
         b = rows["region_b"].map(index).to_numpy(dtype=int)
         cube = np.full((len(metrics), len(regions), len(regions)), np.nan, dtype=np.float32)
         for m, metric in enumerate(metrics):
-            cube[m, a, b] = cube[m, b, a] = rows[metric].to_numpy(dtype=np.float32)
+            if metric in DIRECTED_METRICS:
+                forward, backward = DIRECTED_METRICS[metric]
+                cube[m, a, b] = rows[forward].to_numpy(dtype=np.float32)
+                cube[m, b, a] = rows[backward].to_numpy(dtype=np.float32)
+            else:
+                cube[m, a, b] = cube[m, b, a] = rows[metric].to_numpy(dtype=np.float32)
         first = table[table["group"] == group].iloc[0]
         counts[group] = {"n_trials": int(first["n_trials"]), "n_samples": int(first["n_samples"])}
         values[group] = pack_float32(cube)
-    return {"metrics": metrics, "groups": groups, "counts": counts, "values": values}
+    return {"metrics": metrics, "directed": directed, "groups": groups, "counts": counts, "values": values}
 
 
 def _records(table: pd.DataFrame) -> list[dict]:
