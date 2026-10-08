@@ -518,11 +518,13 @@ def epoch_bounds(
     response: tuple[float, float],
     mask_response: bool = True,
     min_rt: float = 0.2,
+    response_pad: float = 0.0,
 ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64], npt.NDArray[np.bool_]]:
     """Per-trial epoch `[start, end)` relative to the event, from `metrics.reliability_epochs`.
 
-    Falls back to the response window for every trial, with a warning, when the trials columns the epoch needs
-    are missing, the aligned event is unknown, or the windows are reward-aligned.
+    `response_pad` extends each epoch end, up to the response window end for cue- and trial-start-aligned
+    windows. Falls back to the response window for every trial, with a warning, when the trials columns the epoch
+    needs are missing, the aligned event is unknown, or the windows are reward-aligned.
 
     Args:
         trial_info (pd.DataFrame): One row per trial with `event_time` and, for the cue-to-response epoch,
@@ -531,19 +533,24 @@ def epoch_bounds(
         response (tuple[float, float]): Response window `[start, end]`, in seconds.
         mask_response (bool, optional): End cue-aligned epochs at the response. Defaults to True.
         min_rt (float, optional): Trials with a response time below this are dropped. Defaults to 0.2.
+        response_pad (float, optional): Seconds added to each epoch end. Defaults to 0.
 
     Returns:
         tuple[npt.NDArray[np.float64], npt.NDArray[np.float64], npt.NDArray[np.bool_]]: Epoch start and end
         relative to the event, and which trials are kept; each shape `(n_trials,)`.
     """
     reason = _epoch_skip_reason(trial_info, event)
+    # The response window end is inclusive.
+    window_end = np.nextafter(float(response[1]), np.inf)
     if reason is None:
         start, end, _, keep = pm.reliability_epochs(trial_info, str(event), response, mask_response, min_rt)
+        end += response_pad
+        if event != "response":
+            end = np.minimum(end, window_end)
         return start, end, keep
     warnings.warn(f"Using the response window as the epoch: {reason}", stacklevel=2)
     n_trials = len(trial_info)
-    end = np.nextafter(float(response[1]), np.inf)
-    return np.full(n_trials, float(response[0])), np.full(n_trials, end), np.ones(n_trials, dtype=bool)
+    return np.full(n_trials, float(response[0])), np.full(n_trials, window_end), np.ones(n_trials, dtype=bool)
 
 
 def _epoch_skip_reason(trial_info: pd.DataFrame, event: str | None) -> str | None:
@@ -821,6 +828,7 @@ def connectivity_table(
     event: str | None = None,
     mask_response: bool = True,
     min_rt: float = 0.2,
+    response_pad: float = 0.0,
     min_trials: int = 10,
     max_lag: float = 0.5,
     min_trial_samples: int = 3,
@@ -850,6 +858,8 @@ def connectivity_table(
         mask_response (bool, optional): End cue-aligned epochs at each trial's response. Defaults to True.
         min_rt (float, optional): Trials with a response time below this, in seconds, are dropped. Defaults to
             0.2.
+        response_pad (float, optional): Seconds added to the end of each trial's epoch, via `epoch_bounds`.
+            Defaults to 0.
         min_trials (int, optional): Groups with fewer trials get NaN metrics; the all-trials metrics are always
             taken. Defaults to 10.
         max_lag (float, optional): Largest lag searched for the peak cross-correlation and transfer entropy, in
@@ -888,7 +898,7 @@ def connectivity_table(
         info = pm.join_trials(trial_info, trials.drop(columns=extra_columns, errors="ignore"))
     response = response if response is not None else (0.0, float(time[-1]))
     event = event if event is not None else pm.infer_event(info)
-    start, end, keep = epoch_bounds(info, event, response, mask_response, min_rt)
+    start, end, keep = epoch_bounds(info, event, response, mask_response, min_rt, response_pad)
     group_skip = pm.group_skip_reason(info)
     if group_skip:
         warnings.warn(f"Skipping trial groups: {group_skip}", stacklevel=2)

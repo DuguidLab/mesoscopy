@@ -1107,6 +1107,14 @@ def metrics_cmd(
     help="Drop trials with a response time below this, in seconds. Peri-event input only.",
 )
 @click.option(
+    "--response-pad",
+    type=click.FloatRange(min=0),
+    default=0.0,
+    show_default=True,
+    help="Extend each epoch past the response by this, in seconds. Cue-aligned epochs still end within the response"
+    " window. Peri-event input only.",
+)
+@click.option(
     "--max-lag",
     type=click.FloatRange(min=0),
     default=0.5,
@@ -1186,6 +1194,7 @@ def connectivity_cmd(
     min_trials: int,
     mask_response: bool,
     min_rt: float,
+    response_pad: float,
     max_lag: float,
     mi_neighbours: int,
     mutual_info: bool,
@@ -1205,11 +1214,11 @@ def connectivity_cmd(
     per-trial correlations, the mutual information of the pooled samples and of the residuals in bits, the
     partial correlation given every other region, the lag and value of the peak cross-correlation, and with --with-te
     the transfer entropy of the residuals in each direction with its z-score against surrogates. Epochs run from
-    the cue to each trial's response, as for the reliability metrics of `process metrics`; without the cue_onset
-    and response_time columns the whole response window is used. Go/no-go sessions are grouped by sdt_type,
-    go/no-go stimulus and lever push, as well as all trials. With --with-rolling it also writes
-    <stem>_connectivity-rolling.csv, with the correlations and mutual information in windows sliding over the whole
-    peri-event window, one row per region pair, trial group and window.
+    the cue to each trial's response, as for the reliability metrics of `process metrics`, extended past the
+    response by --response-pad; without the cue_onset and response_time columns the whole response window is used.
+    Go/no-go sessions are grouped by sdt_type, go/no-go stimulus and lever push, as well as all trials. With
+    --with-rolling it also writes <stem>_connectivity-rolling.csv, with the correlations and mutual information in
+    windows sliding over the whole peri-event window, one row per region pair, trial group and window.
 
     A regions CSV gives the metrics over the whole recording instead, as the all-trials rows only, without the
     residual and per-trial columns. The trial options and --with-rolling do not apply.
@@ -1255,6 +1264,7 @@ def connectivity_cmd(
                     trials=trials,
                     mask_response=mask_response,
                     min_rt=min_rt,
+                    response_pad=response_pad,
                     min_trials=min_trials,
                     **options,
                 )
