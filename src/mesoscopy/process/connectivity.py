@@ -21,7 +21,8 @@
 
 """Pairwise connectivity between regions over the cue-to-response epoch of peri-event traces, or whole traces.
 
-The transfer entropy is the Gaussian estimator, equal to half the Granger log-ratio.
+The rolling table takes some of the metrics in windows sliding over the peri-event window. The transfer entropy
+is the Gaussian estimator, equal to half the Granger log-ratio.
 """
 
 from __future__ import annotations
@@ -46,6 +47,12 @@ PAIR_METRICS = ("r", "r_residual", "r_trials_avg", "mi", "mi_residual", "partial
 
 # Columns of the connectivity table, in order; the metrics not estimated are left out.
 TABLE_COLUMNS = ("region_a", "region_b", "group", *PAIR_METRICS, "n_trials", "n_samples")
+
+# Metrics of the rolling table, in output column order.
+ROLLING_METRICS = ("r", "r_residual", "mi", "mi_residual")
+
+# Columns of the rolling table, in order.
+ROLLING_COLUMNS = ("region_a", "region_b", "group", "time", *ROLLING_METRICS, "n_trials", "n_samples")
 
 # Trials columns the cue-to-response epoch needs.
 EPOCH_COLUMNS = frozenset({"cue_onset", "response_time"})
@@ -666,6 +673,67 @@ def pair_metrics(
     return metrics | directed_metrics(te, z if te_surrogates else None)
 
 
+def window_starts(n_samples: int, window: int, step: int) -> npt.NDArray[np.int64]:
+    """First sample of each window sliding over `n_samples` samples.
+
+    Args:
+        n_samples (int): Samples to slide over.
+        window (int): Samples per window.
+        step (int): Samples between the starts of consecutive windows.
+
+    Returns:
+        npt.NDArray[np.int64]: Window starts, shape `(n_windows,)`.
+
+    Raises:
+        ValueError: If `window` or `step` is below one sample, or `window` is longer than `n_samples`.
+    """
+    if window < 1 or step < 1:
+        msg = f"Windows need a length and step of at least one sample, not {window} and {step}."
+        raise ValueError(msg)
+    if window > n_samples:
+        msg = f"A window of {window} samples is longer than the {n_samples} samples of the traces."
+        raise ValueError(msg)
+    return np.arange(0, n_samples - window + 1, step)
+
+
+def rolling_metrics(
+    epochs: npt.NDArray,
+    window: int,
+    step: int,
+    mi_neighbours: int = 3,
+) -> dict[str, npt.NDArray]:
+    """Connectivity matrices of one trial group in windows sliding over the samples, pooled over trials.
+
+    The residuals are taken over the whole traces, as in `pair_metrics`, before they are windowed.
+
+    Args:
+        epochs (npt.NDArray): Traces of shape `(n_trials, n_samples, n_regions)`, NaN where missing.
+        window (int): Samples per window.
+        step (int): Samples between the starts of consecutive windows.
+        mi_neighbours (int, optional): Neighbours for `mutual_information`. Defaults to 3.
+
+    Returns:
+        dict[str, npt.NDArray]: `start`, the first sample of each window from `window_starts`, one
+        `(n_windows, n_regions, n_regions)` array per `ROLLING_METRICS` name, and `n_samples`, the pooled samples
+        of each window.
+    """
+    values = np.asarray(epochs, dtype=np.float64)
+    _, n_samples, n_regions = values.shape
+    starts = window_starts(n_samples, window, step)
+    residual = residual_epochs(values)
+    metrics = {name: np.full((len(starts), n_regions, n_regions), np.nan) for name in ROLLING_METRICS}
+    counts = np.zeros(len(starts), dtype=np.int64)
+    for i, start in enumerate(starts):
+        pooled = pooled_samples(values[:, start : start + window])
+        residuals = pooled_samples(residual[:, start : start + window])
+        metrics["r"][i] = correlation_matrix(pooled)
+        metrics["r_residual"][i] = correlation_matrix(residuals)
+        metrics["mi"][i] = mutual_information_matrix(pooled, mi_neighbours)
+        metrics["mi_residual"][i] = mutual_information_matrix(residuals, mi_neighbours)
+        counts[i] = pooled.shape[0]
+    return {"start": starts, **metrics, "n_samples": counts}
+
+
 def trace_samples(regions: pd.DataFrame) -> tuple[npt.NDArray[np.float64], list[str], float]:
     """Whole traces of a long-format regions table, one column per region in order of appearance.
 
@@ -856,6 +924,77 @@ def connectivity_table(
     return _rows(regions, per_group)
 
 
+def rolling_table(
+    perievent: pd.DataFrame,
+    window: float = 0.5,
+    step: float = 0.1,
+    trials: pd.DataFrame | None = None,
+    min_rt: float = 0.2,
+    min_trials: int = 10,
+    mi_neighbours: int = 3,
+) -> pd.DataFrame:
+    """Pairwise connectivity between regions in windows sliding over the peri-event window, per trial group.
+
+    Each window's samples are pooled over the group's trials, by `rolling_metrics`. The windows cover the whole
+    peri-event window rather than the cue-to-response epoch. Trials responding faster than `min_rt` are dropped,
+    as in `connectivity_table`. `window` and `step` are rounded to whole samples.
+
+    Args:
+        perievent (pd.DataFrame): Peri-event table, as for `connectivity_table`.
+        window (float, optional): Window length, in seconds. Defaults to 0.5.
+        step (float, optional): Time between the starts of consecutive windows, in seconds. Defaults to 0.1.
+        trials (pd.DataFrame | None, optional): Trials table to join by row index, via `metrics.join_trials`, for
+            peri-event tables without trials columns. Defaults to None.
+        min_rt (float, optional): Trials with a response time below this, in seconds, are dropped. Defaults to
+            0.2.
+        min_trials (int, optional): Groups with fewer trials get NaN metrics; the all-trials metrics are always
+            taken. Defaults to 10.
+        mi_neighbours (int, optional): Neighbours for `mutual_information`. Defaults to 3.
+
+    Returns:
+        pd.DataFrame: One row per unordered region pair, trial group and window, with the `ROLLING_COLUMNS`:
+        `region_a`, `region_b`, `group`, `time` (the window centre, relative to the event), `r`, `r_residual`,
+        `mi` and `mi_residual` (as in `connectivity_table`, over the window), `n_trials` (trials used) and
+        `n_samples` (pooled samples of the window).
+
+    Example:
+        >>> perievent = pd.read_csv("ses-01_regions_event-cueonset_perievent.csv")
+        >>> rolling = rolling_table(perievent)
+        >>> rolling[rolling["group"] == "all"].pivot_table(index="time", columns="region_a", values="mi_residual")
+    """
+    time, info = pm.perievent_trials(perievent)
+    if trials is not None:
+        extra_columns = [column for column in info.columns if column not in {"trial_index", "event_time"}]
+        info = pm.join_trials(info, trials.drop(columns=extra_columns, errors="ignore"))
+    group_skip = pm.group_skip_reason(info)
+    if group_skip:
+        warnings.warn(f"Skipping trial groups: {group_skip}", stacklevel=2)
+    groups = {"all": np.ones(len(info), dtype=bool)} if group_skip else pm.trial_groups(info)
+    keep = pm.kept_trials(info, min_rt)
+
+    regions = list(perievent["region"].unique())
+    unbounded = np.full(len(info), np.inf)
+    cube = epoch_cube(perievent, info["trial_index"].to_numpy(), time, regions, -unbounded, unbounded)
+    interval = float(np.median(np.diff(time))) if len(time) > 1 else 1.0
+    window_samples, step_samples = round(window / interval), round(step / interval)
+    starts = window_starts(len(time), window_samples, step_samples)
+    centres = (time[starts] + time[starts + window_samples - 1]) / 2
+
+    n_regions = len(regions)
+    per_group: dict[str, dict[str, typing.Any]] = {}
+    for name, mask in groups.items():
+        used = mask & keep
+        n_trials = int(used.sum())
+        if name != "all" and n_trials < min_trials:
+            empty = {metric: np.full((len(starts), n_regions, n_regions), np.nan) for metric in ROLLING_METRICS}
+            per_group[name] = {"n_trials": n_trials, **empty, "n_samples": np.zeros(len(starts), dtype=np.int64)}
+            continue
+        metrics = rolling_metrics(cube[used], window_samples, step_samples, mi_neighbours)
+        per_group[name] = {"n_trials": n_trials, **metrics}
+
+    return _rolling_rows(regions, centres, per_group)
+
+
 def _rows(regions: list[str], per_group: dict[str, dict[str, typing.Any]]) -> pd.DataFrame:
     """Table of `TABLE_COLUMNS` from each group's metric matrices.
 
@@ -878,3 +1017,40 @@ def _rows(regions: list[str], per_group: dict[str, dict[str, typing.Any]]) -> pd
                 row |= {metric: values[metric][a, b] if metric in values else np.nan for metric in metrics}
                 rows.append(row | {"n_trials": values["n_trials"], "n_samples": values["n_samples"]})
     return pd.DataFrame(rows, columns=["region_a", "region_b", "group", *metrics, "n_trials", "n_samples"])
+
+
+def _rolling_rows(
+    regions: list[str], centres: npt.NDArray[np.float64], per_group: dict[str, dict[str, typing.Any]]
+) -> pd.DataFrame:
+    """Table of `ROLLING_COLUMNS` from each group's `rolling_metrics` arrays.
+
+    Args:
+        regions (list[str]): Region names in order.
+        centres (npt.NDArray[np.float64]): Window centres, shape `(n_windows,)`.
+        per_group (dict[str, dict[str, typing.Any]]): Per group, its `rolling_metrics` arrays and `n_trials`.
+
+    Returns:
+        pd.DataFrame: One row per unordered region pair, group and window, in that order.
+    """
+    import pandas as pd
+
+    a, b = np.triu_indices(len(regions), k=1)
+    names = np.asarray(regions, dtype=object)
+    groups = list(per_group)
+    shape = (len(a), len(groups), len(centres))
+
+    def spread(values: npt.NDArray, axes: tuple[int, ...]) -> npt.NDArray:
+        return np.broadcast_to(np.expand_dims(values, axes), shape).ravel()
+
+    columns: dict[str, npt.NDArray] = {
+        "region_a": spread(names[a], (1, 2)),
+        "region_b": spread(names[b], (1, 2)),
+        "group": spread(np.asarray(groups, dtype=object), (0, 2)),
+        "time": spread(centres, (0, 1)),
+    }
+    for metric in ROLLING_METRICS:
+        stacked = np.stack([per_group[name][metric] for name in groups])
+        columns[metric] = stacked[:, :, a, b].transpose(2, 0, 1).ravel()
+    columns["n_trials"] = spread(np.array([per_group[name]["n_trials"] for name in groups]), (0, 2))
+    columns["n_samples"] = spread(np.stack([per_group[name]["n_samples"] for name in groups]), (0,))
+    return pd.DataFrame(columns, columns=list(ROLLING_COLUMNS))
