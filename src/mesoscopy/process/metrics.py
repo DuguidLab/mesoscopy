@@ -979,6 +979,24 @@ def _reliability_skip_reason(trial_info: pd.DataFrame, event: str | None) -> str
     return None
 
 
+def kept_trials(trial_info: pd.DataFrame, min_rt: float = 0.2) -> npt.NDArray[np.bool_]:
+    """Trials without a response faster than `min_rt`.
+
+    Args:
+        trial_info (pd.DataFrame): One row per trial, with `response_time` in seconds from the cue when known.
+        min_rt (float, optional): Shortest response time kept, in seconds. Defaults to 0.2.
+
+    Returns:
+        npt.NDArray[np.bool_]: Mask of shape `(n_trials,)`, all True without a `response_time` column.
+    """
+    import pandas as pd
+
+    if "response_time" not in trial_info.columns:
+        return np.ones(len(trial_info), dtype=bool)
+    response_time = pd.to_numeric(trial_info["response_time"], errors="coerce").to_numpy(dtype=np.float64)
+    return ~((response_time >= 0) & (response_time < min_rt))
+
+
 def reliability_epochs(
     trial_info: pd.DataFrame,
     event: str,
@@ -1013,7 +1031,7 @@ def reliability_epochs(
     n_trials = len(trial_info)
     response_time = pd.to_numeric(trial_info["response_time"], errors="coerce").to_numpy(dtype=np.float64)
     responded = response_time >= 0
-    keep = ~(responded & (response_time < min_rt))
+    keep = kept_trials(trial_info, min_rt)
     cue = trial_info["cue_onset"].to_numpy(dtype=np.float64) - trial_info["event_time"].to_numpy(dtype=np.float64)
 
     if event == "response":

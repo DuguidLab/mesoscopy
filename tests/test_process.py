@@ -3082,6 +3082,15 @@ class TestReliabilityEpochs:
             pm.reliability_epochs(_gonogo_info(), "reward", (0.0, 3.0))
 
 
+class TestKeptTrials:
+    def test_drops_fast_responses(self):
+        rt = np.asarray(GONOGO_RT)
+        np.testing.assert_array_equal(pm.kept_trials(_gonogo_info(), 0.65), ~(rt < 0.65))
+
+    def test_without_response_time_keeps_all(self):
+        assert pm.kept_trials(_gonogo_info().drop(columns="response_time"), 10.0).all()
+
+
 class TestEpochTraces:
     def test_masks_outside_epoch(self):
         t = np.array([-0.5, 0.0, 0.5, 1.0])
@@ -3738,6 +3747,15 @@ def _post_event_samples(end=3.0):
     return int(((grid >= 0) & (grid <= np.nextafter(end, np.inf))).sum())
 
 
+def _onset_coupled_cube(rho=0.6, n_trials=500, n_samples=40, onset=20, seed=0):
+    """Two unit-variance Gaussian regions, independent before sample `onset` and correlated by `rho` from it on."""
+    rng = np.random.default_rng(seed)
+    first, other = rng.standard_normal((2, n_trials, n_samples))
+    coupled = np.arange(n_samples) >= onset
+    second = np.where(coupled, rho * first + np.sqrt(1 - rho**2) * other, other)
+    return np.stack([first, second], axis=-1)
+
+
 class TestPerieventTrials:
     def test_time_and_trials(self):
         time, info = pm.perievent_trials(_connectivity_perievent())
@@ -4161,6 +4179,153 @@ class TestConnectivityTable:
         assert list(table.columns) == DEFAULT_COLUMNS
 
 
+class TestWindowStarts:
+    def test_starts(self):
+        np.testing.assert_array_equal(pc.window_starts(10, 4, 3), [0, 3, 6])
+        np.testing.assert_array_equal(pc.window_starts(10, 10, 1), [0])
+
+    @pytest.mark.parametrize(
+        ("window", "step", "match"),
+        [(0, 1, "at least one sample"), (2, 0, "at least one sample"), (11, 1, "longer than")],
+    )
+    def test_invalid(self, window, step, match):
+        with pytest.raises(ValueError, match=match):
+            pc.window_starts(10, window, step)
+
+
+class TestRollingMetrics:
+    def test_matches_each_window(self):
+        cube = _connectivity_cube()
+        rolling = pc.rolling_metrics(cube, 12, 2)
+        starts = pc.window_starts(cube.shape[1], 12, 2)
+        np.testing.assert_array_equal(rolling["start"], starts)
+        assert rolling["mi"].shape == (len(starts), 3, 3)
+        # The residuals are taken over the whole traces, then windowed.
+        residual = pc.residual_epochs(cube)
+        for i in (0, len(starts) // 2, len(starts) - 1):
+            window = slice(starts[i], starts[i] + 12)
+            pooled = pc.pooled_samples(cube[:, window])
+            residuals = pc.pooled_samples(residual[:, window])
+            np.testing.assert_allclose(rolling["r"][i], pc.correlation_matrix(pooled))
+            np.testing.assert_allclose(rolling["r_residual"][i], pc.correlation_matrix(residuals))
+            np.testing.assert_allclose(rolling["mi"][i], pc.mutual_information_matrix(pooled), equal_nan=True)
+            np.testing.assert_allclose(
+                rolling["mi_residual"][i], pc.mutual_information_matrix(residuals), equal_nan=True
+            )
+        assert (rolling["n_samples"] == 36 * 12).all()
+
+    def test_gaussian_coupling_after_onset(self):
+        rho = 0.6
+        rolling = pc.rolling_metrics(_onset_coupled_cube(rho), 10, 5)
+        before = rolling["start"] + 10 <= 20
+        after = rolling["start"] >= 20
+        assert before.sum() == 3
+        assert after.sum() == 3
+        for metric in ("mi", "mi_residual"):
+            np.testing.assert_allclose(rolling[metric][before, 0, 1], 0.0, atol=0.05)
+            np.testing.assert_allclose(rolling[metric][after, 0, 1], -0.5 * np.log2(1 - rho**2), atol=0.05)
+        np.testing.assert_allclose(rolling["r_residual"][after, 0, 1], rho, atol=0.05)
+
+    def test_missing_samples(self):
+        cube = _connectivity_cube()
+        cube[0, :5, 1] = np.nan
+        rolling = pc.rolling_metrics(cube, 5, 5)
+        assert rolling["n_samples"][0] == 35 * 5
+        assert (rolling["n_samples"][1:] == 36 * 5).all()
+
+
+class TestRollingTable:
+    @staticmethod
+    def _rows(table, pair, group):
+        return table[(table["region_a"] == pair[0]) & (table["region_b"] == pair[1]) & (table["group"] == group)]
+
+    def test_layout(self):
+        table = pc.rolling_table(_connectivity_perievent())
+        groups = list(pm.trial_groups(_gonogo_info()))
+        # 0.5 s and 0.1 s round to 12 and 2 samples at 25 Hz.
+        starts = pc.window_starts(len(METRICS_GRID), 12, 2)
+        centres = (METRICS_GRID[starts] + METRICS_GRID[starts + 11]) / 2
+        assert list(table.columns) == list(pc.ROLLING_COLUMNS)
+        assert len(table) == len(CONNECTIVITY_PAIRS) * len(groups) * len(starts)
+        assert list(zip(table["region_a"], table["region_b"], strict=True)) == [
+            p for p in CONNECTIVITY_PAIRS for _ in range(len(groups) * len(starts))
+        ]
+        assert table["group"].tolist() == [g for g in groups for _ in starts] * len(CONNECTIVITY_PAIRS)
+        np.testing.assert_allclose(table["time"], np.tile(centres, len(CONNECTIVITY_PAIRS) * len(groups)))
+        assert table["time"].iloc[0] == pytest.approx(-0.78)
+
+    def test_matches_rolling_metrics(self):
+        table = pc.rolling_table(_connectivity_perievent())
+        cube = _connectivity_cube()
+        hits = (_gonogo_info()["sdt_type"] == "hit").to_numpy()
+        for group, used in (("all", slice(None)), ("sdt-hit", hits)):
+            rolling = pc.rolling_metrics(cube[used], 12, 2)
+            for (a, b), pair in zip([(0, 1), (0, 2), (1, 2)], CONNECTIVITY_PAIRS, strict=True):
+                rows = self._rows(table, pair, group)
+                for metric in pc.ROLLING_METRICS:
+                    np.testing.assert_allclose(rows[metric], rolling[metric][:, a, b])
+                np.testing.assert_array_equal(rows["n_samples"], rolling["n_samples"])
+        assert self._rows(table, CONNECTIVITY_PAIRS[0], "sdt-hit")["n_trials"].eq(12).all()
+
+    def test_covers_whole_window(self):
+        rows = self._rows(pc.rolling_table(_connectivity_perievent()), CONNECTIVITY_PAIRS[0], "all")
+        # Every trial gives every sample, before the cue and after its response.
+        assert rows["n_samples"].eq(36 * 12).all()
+        assert rows[list(pc.ROLLING_METRICS)].notna().all().all()
+        before = rows[rows["time"] < -0.3]
+        rising = rows[(rows["time"] >= 0.2) & (rows["time"] <= 0.3)]
+        assert (before["r"].abs() < 0.2).all()
+        assert (rising["r"] > 0.8).all()
+        assert (rising["r_residual"].abs() < 0.2).all()
+        assert (rising["mi"] > rising["mi_residual"] + 0.3).all()
+
+    def test_min_trials(self):
+        default = pc.rolling_table(_connectivity_perievent())
+        assert default[default["group"] == "sdt-miss"][list(pc.ROLLING_METRICS)].isna().all().all()
+        strict = pc.rolling_table(_connectivity_perievent(), min_trials=100)
+        others = strict[strict["group"] != "all"]
+        assert others[list(pc.ROLLING_METRICS)].isna().all().all()
+        assert others["n_samples"].eq(0).all()
+        assert others[others["group"] == "sdt-miss"]["n_trials"].eq(6).all()
+        assert strict[strict["group"] == "all"]["mi"].notna().all()
+
+    def test_min_rt_drops_trials(self):
+        table = pc.rolling_table(_connectivity_perievent(), min_rt=0.5)
+        rows = table[table["group"] == "all"]
+        # Two hits respond at 0.4 s.
+        assert rows["n_trials"].eq(34).all()
+        assert rows["n_samples"].eq(34 * 12).all()
+
+    def test_window_and_step_round_to_samples(self):
+        table = pc.rolling_table(_connectivity_perievent(), window=0.2, step=0.12)
+        np.testing.assert_allclose(np.diff(np.unique(table["time"])), 0.12)
+        assert table["n_samples"].max() == 36 * 5
+
+    def test_invalid_window(self):
+        with pytest.raises(ValueError, match="longer than"):
+            pc.rolling_table(_connectivity_perievent(), window=10.0)
+        with pytest.raises(ValueError, match="at least one sample"):
+            pc.rolling_table(_connectivity_perievent(), step=0.01)
+
+    def test_without_groups_warns(self):
+        with pytest.warns(UserWarning, match="Skipping trial groups: no sdt_type column"):
+            table = pc.rolling_table(_connectivity_perievent().drop(columns="sdt_type"))
+        assert set(table["group"]) == {"all"}
+
+    def test_joins_trials(self):
+        perievent = _connectivity_perievent()
+        columns = [column for column in perievent.columns if column not in pm.PERIEVENT_COLUMNS]
+        trials = perievent.drop_duplicates("trial_index")[columns].reset_index(drop=True)
+        joined = pc.rolling_table(perievent.drop(columns=columns), trials=trials)
+        pd.testing.assert_frame_equal(joined, pc.rolling_table(perievent))
+
+    def test_single_region(self):
+        perievent = _connectivity_perievent()
+        table = pc.rolling_table(perievent[perievent["region"] == "L_MOp"])
+        assert table.empty
+        assert list(table.columns) == list(pc.ROLLING_COLUMNS)
+
+
 class TestEmbeddedSamples:
     def test_columns_and_within_trial_rows(self):
         cube = np.arange(2 * 6 * 2, dtype=float).reshape(2, 6, 2)
@@ -4456,6 +4621,7 @@ def test_connectivity_cmd(output_dir, tmp_path):
     table = pd.read_csv(output)
     pd.testing.assert_frame_equal(table, pc.connectivity_table(pd.read_csv(path)), check_dtype=False)
     assert len(table) == 27
+    assert not (pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_connectivity-rolling.csv").exists()
 
 
 def test_connectivity_cmd_options(output_dir, tmp_path):
@@ -4510,6 +4676,45 @@ def test_connectivity_cmd_transfer_entropy_options(output_dir, tmp_path):
     assert result.exit_code == 0, result.output
     table = pd.read_csv(pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_connectivity.csv")
     assert list(table.columns) == DEFAULT_COLUMNS
+
+
+def test_connectivity_cmd_rolling(output_dir, tmp_path):
+    path = tmp_path / "ses-01_regions_event-cueonset_perievent.csv"
+    _connectivity_perievent().to_csv(path, index=False)
+    result = CliRunner().invoke(
+        mesoscopy.cli,
+        args=f"process connectivity {path} -o {output_dir} --with-rolling --rolling-window 0.2 --rolling-step 0.12"
+        " --min-trials 5 --min-rt 0.5 --mi-neighbours 4 --no-mi",
+    )
+    assert result.exit_code == 0, result.output
+    output = pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_connectivity-rolling.csv"
+    assert f"Saved rolling connectivity metrics at {output}" in result.output
+    assert (pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_connectivity.csv").exists()
+    table = pd.read_csv(output)
+    expected = pc.rolling_table(pd.read_csv(path), window=0.2, step=0.12, min_rt=0.5, min_trials=5, mi_neighbours=4)
+    pd.testing.assert_frame_equal(table, expected, check_dtype=False)
+    # --no-mi applies to the epoch table only.
+    assert table[table["group"] == "all"]["mi"].notna().all()
+
+
+def test_connectivity_cmd_rolling_window_too_long(output_dir, tmp_path):
+    path = tmp_path / "ses-01_regions_event-cueonset_perievent.csv"
+    _connectivity_perievent().to_csv(path, index=False)
+    result = CliRunner().invoke(
+        mesoscopy.cli, args=f"process connectivity {path} -o {output_dir} --with-rolling --rolling-window 10"
+    )
+    assert result.exit_code == 1
+    assert "longer than the 101 samples" in result.output
+    assert "Check --rolling-window and --rolling-step." in result.output
+
+
+def test_connectivity_cmd_rolling_warns_once(metrics_perievent_csv, output_dir):
+    result = CliRunner().invoke(
+        mesoscopy.cli, args=f"process connectivity {metrics_perievent_csv} -o {output_dir} --with-rolling"
+    )
+    assert result.exit_code == 0, result.output
+    assert result.output.count("Warning: Skipping trial groups: no sdt_type column") == 1
+    assert "Saved rolling connectivity metrics" in result.output
 
 
 def test_connectivity_cmd_joins_trials(output_dir, tmp_path):
@@ -4581,6 +4786,16 @@ def test_connectivity_cmd_regions_ignores_trial_options(output_dir, tmp_path):
     table = pd.read_csv(pathlib.Path(output_dir) / "ses-01_regions_connectivity.csv")
     assert "mi" not in table.columns
     assert table["group"].tolist() == ["all"] * 3
+
+
+def test_connectivity_cmd_regions_skips_rolling(output_dir, tmp_path):
+    path = tmp_path / "ses-01_regions.csv"
+    _connectivity_regions().to_csv(path, index=False)
+    result = CliRunner().invoke(mesoscopy.cli, args=f"process connectivity {path} -o {output_dir} --with-rolling")
+    assert result.exit_code == 0, result.output
+    assert "Warning: --with-rolling takes a peri-event file; the rolling table is skipped." in result.output
+    assert (pathlib.Path(output_dir) / "ses-01_regions_connectivity.csv").exists()
+    assert not (pathlib.Path(output_dir) / "ses-01_regions_connectivity-rolling.csv").exists()
 
 
 def test_connectivity_cmd_regions_missing_columns(output_dir, tmp_path):
