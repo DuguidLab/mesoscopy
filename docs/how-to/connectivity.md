@@ -49,6 +49,27 @@ use. Pass `--no-mask-response` to use the whole response window instead.
 The epoch needs the `cue_onset` and `response_time` trials columns. Without them the command falls back to the
 whole response window and warns.
 
+## Rolling
+
+Pass `--with-rolling` to follow the coupling through the trial. The command then also writes
+`<stem>_connectivity-rolling.csv`, with `r`, `r_residual`, `mi` and `mi_residual` taken in windows that slide over the
+whole peri-event window.
+
+```bash
+mesoscopy process connectivity /path/to/recording_smoothed_regions_event-cueonset_perievent.csv --with-rolling
+```
+
+Each window pools its samples over the trials of the group, as the epoch table pools the epoch. The windows run
+from before the cue to past the response, so `--response` and `--mask-response` do not apply, while `--min-rt` and
+`--min-trials` do. `--rolling-window` (default 0.5 s) sets the window length and `--rolling-step` (default 0.1 s) the
+time between windows, both rounded to whole samples. At 25 Hz the defaults give windows of 0.48 s every 0.08 s.
+
+The table has one row per pair, trial group and window. `time` is the centre of the window relative to the event,
+and `n_samples` is the number of samples pooled in it. The other columns read as in the epoch table. A rise in
+`mi_residual` after the cue means the two regions covary more from trial to trial, beyond their shared response.
+The rolling table is the slowest part of the command, since every window estimates the mutual information of every
+pair twice.
+
 ## Whole recording
 
 A `_regions.csv` from `process regions` gives the same table over the whole recording.
@@ -62,8 +83,8 @@ It writes `<stem>_connectivity.csv` next to the epoch table, so `recording_smoot
 `recording_smoothed_regions_event-cueonset_connectivity.csv`. The rows are the `all` group only. `r_residual`,
 `r_trials_avg` and `mi_residual` have no column, since there are no trials to take them over, `n_trials` is
 empty, and `n_samples` is the number of frames. With `--with-te` the transfer entropy is taken over the raw
-traces, with circular shifts of the source as surrogates. The trial options are ignored. This table is the
-baseline the epoch tables depart from.
+traces, with circular shifts of the source as surrogates. The trial options and `--with-rolling` are ignored.
+This table is the baseline the epoch tables depart from.
 
 ## Reading the table
 
@@ -110,12 +131,14 @@ perievent = pd.read_csv("recording_smoothed_regions_event-cueonset_perievent.csv
 table = connectivity.connectivity_table(perievent)
 ```
 
-`connectivity.trace_table` takes the regions table of a `_regions.csv` instead.
+`connectivity.trace_table` takes the regions table of a `_regions.csv` instead, and `connectivity.rolling_table`
+takes the peri-event table and returns the rolling table.
 
 `connectivity.pair_metrics` returns the matrices of one trial group from a masked `(n_trials, n_samples,
 n_regions)` array, built by `connectivity.epoch_cube` from the per-trial bounds of `connectivity.epoch_bounds`.
 `connectivity.pooled_metrics` returns the metrics that need no trials, which is what `trace_table` takes over the
-traces of `connectivity.trace_samples`.
+traces of `connectivity.trace_samples`. `connectivity.rolling_metrics` returns the rolling matrices of one trial
+group, in the windows of `connectivity.window_starts`.
 `correlation_matrix`, `residual_epochs`, `trial_correlation`, `mutual_information`, `partial_correlation`,
 `lagged_correlation`, `peak_lag`, `transfer_entropy` and `transfer_entropy_circular` work on their own, and
 `epoch_transfer_entropy` and `trace_transfer_entropy` add the surrogate z-scores.
