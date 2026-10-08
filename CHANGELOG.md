@@ -4,6 +4,8 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 ## Unreleased
 
+## [0.16.0] - 2026-10-08
+
 ### Added
 
 - `process connectivity --response-pad` extends each trial's epoch past the response by a fixed time, in seconds (default 0) ([#197](https://github.com/DuguidLab/mesoscopy/issues/197)).
