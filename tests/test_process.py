@@ -3697,6 +3697,38 @@ def _connectivity_regions(n_frames=500, seed=0, time_aligned=True):
     return table if time_aligned else table.drop(columns="time_aligned")
 
 
+def _coupled_traces(n_samples=4000, coupling=0.5, lag=1, seed=0):
+    """Two AR(1) traces where the second follows the first `lag` samples back, plus an independent third."""
+    rng = np.random.default_rng(seed)
+    noise = rng.standard_normal((n_samples, 3))
+    traces = np.zeros((n_samples, 3))
+    for t in range(1, n_samples):
+        traces[t, 0] = 0.8 * traces[t - 1, 0] + noise[t, 0]
+        traces[t, 1] = 0.8 * traces[t - 1, 1] + coupling * traces[max(t - lag, 0), 0] + noise[t, 1]
+        traces[t, 2] = 0.8 * traces[t - 1, 2] + noise[t, 2]
+    return traces
+
+
+def _pairwise_transfer_entropy(epochs, history, lag):
+    """Transfer entropy by an explicit regression per directed pair, for checking the covariance form."""
+    rows = pc.embedded_samples(epochs, history, lag)
+    n_regions = epochs.shape[-1]
+    te = np.full((n_regions, n_regions), np.nan)
+    for target in range(n_regions):
+        past = np.column_stack(
+            [np.ones(len(rows)), *[rows[:, n_regions * step + target] for step in range(1, history + 1)]]
+        )
+        residual = lambda column: column - past @ np.linalg.lstsq(past, column, rcond=None)[0]  # noqa: E731
+        target_residual = residual(rows[:, target])
+        for source in range(n_regions):
+            if source == target:
+                continue
+            source_residual = residual(rows[:, n_regions * (history + 1) + source])
+            rho = np.corrcoef(target_residual, source_residual)[0, 1]
+            te[source, target] = -0.5 * np.log2(1 - rho**2)
+    return te
+
+
 def _post_event_samples(end=3.0):
     """Samples of the grid within `[0, end]`."""
     grid = METRICS_GRID
@@ -4038,7 +4070,7 @@ class TestConnectivityTable:
         assert misses["n_samples"].tolist() == [0] * 3
         assert misses[list(pc.PAIR_METRICS)].isna().all().all()
 
-        lowered = pc.connectivity_table(_connectivity_perievent(), min_trials=5)
+        lowered = pc.connectivity_table(_connectivity_perievent(), min_trials=5, transfer_entropy=True, te_surrogates=5)
         assert lowered[lowered["group"] == "sdt-miss"][list(pc.PAIR_METRICS)].notna().all().all()
 
         # The all-trials metrics are always taken.
@@ -4080,6 +4112,23 @@ class TestConnectivityTable:
         joined = pc.connectivity_table(perievent.drop(columns=columns), trials=trials)
         pd.testing.assert_frame_equal(joined, pc.connectivity_table(perievent))
 
+    def test_transfer_entropy_columns(self):
+        perievent = _connectivity_perievent()
+        table = pc.connectivity_table(perievent, transfer_entropy=True, te_surrogates=20, seed=7)
+        rows = table[table["group"] == "all"]
+        assert rows[list(pc.TE_METRICS)].notna().all().all()
+        delayed = self._row(table, CONNECTIVITY_PAIRS[1], "all")
+        assert delayed["te_ab"] > delayed["te_ba"]
+        assert delayed["te_ab_z"] > 5
+        pd.testing.assert_frame_equal(
+            table, pc.connectivity_table(perievent, transfer_entropy=True, te_surrogates=20, seed=7)
+        )
+        off = pc.connectivity_table(perievent)
+        assert off[list(pc.TE_METRICS)].isna().all().all()
+        bare = pc.connectivity_table(perievent, transfer_entropy=True, te_surrogates=0)
+        pd.testing.assert_series_equal(bare["te_ab"], table["te_ab"])
+        assert bare[["te_ab_z", "te_ba_z"]].isna().all().all()
+
     def test_without_mutual_info(self):
         perievent = _connectivity_perievent()
         skipped = pc.connectivity_table(perievent, mutual_info=False)
@@ -4109,6 +4158,157 @@ class TestConnectivityTable:
         assert list(table.columns) == list(pc.TABLE_COLUMNS)
 
 
+class TestEmbeddedSamples:
+    def test_columns_and_within_trial_rows(self):
+        cube = np.arange(2 * 6 * 2, dtype=float).reshape(2, 6, 2)
+        rows = pc.embedded_samples(cube, history=2, lag=3)
+        assert rows.shape == (2 * (6 - 3), 2 * 4)
+        first = rows[0]
+        np.testing.assert_array_equal(first[:2], cube[0, 3])
+        np.testing.assert_array_equal(first[2:4], cube[0, 2])
+        np.testing.assert_array_equal(first[4:6], cube[0, 1])
+        np.testing.assert_array_equal(first[6:], cube[0, 0])
+        np.testing.assert_array_equal(rows[3, :2], cube[1, 3])
+
+    def test_drops_nan_rows_and_takes_sources_elsewhere(self):
+        cube = np.ones((1, 5, 2))
+        cube[0, 1, 0] = np.nan
+        source = np.full((1, 5, 2), 7.0)
+        rows = pc.embedded_samples(cube, history=1, lag=1, source=source)
+        assert rows.shape == (2, 6)
+        np.testing.assert_array_equal(rows[:, 4:], 7.0)
+
+    def test_too_short(self):
+        assert pc.embedded_samples(np.ones((3, 2, 2)), history=2, lag=1).shape == (0, 8)
+
+
+class TestTransferEntropy:
+    @pytest.mark.parametrize("history", [1, 2])
+    def test_matches_pairwise_regression(self, history):
+        cube = _coupled_traces(500).reshape(5, 100, 3)
+        cube[:, :10] = np.nan
+        for lag in (1, 3):
+            rows = pc.embedded_samples(cube, history, lag)
+            te = pc.transfer_entropy_from_covariance(np.cov(rows, rowvar=False), history)
+            np.testing.assert_allclose(te, _pairwise_transfer_entropy(cube, history, lag), atol=1e-12)
+            assert np.isnan(np.diag(te)).all()
+
+    def test_direction_and_analytic_value(self):
+        traces = _coupled_traces(20000, coupling=0.5)
+        te = pc.transfer_entropy(traces[None], history=1, max_lag=1)
+        # x_t = 0.8 x_{t-1} + e, y_t = 0.8 y_{t-1} + 0.5 x_{t-1} + e. The stationary covariance of (x, y) solves
+        # the Lyapunov equation, and the partial correlation of y_t and x_{t-1} given y_{t-1} follows from it.
+        import scipy.linalg
+
+        a = np.array([[0.8, 0.0], [0.5, 0.8]])
+        same = scipy.linalg.solve_discrete_lyapunov(a, np.eye(2))
+        back = a @ same  # cov(z_t, z_{t-1})
+        r_yx = back[1, 0] / np.sqrt(same[1, 1] * same[0, 0])
+        r_yh = back[1, 1] / same[1, 1]
+        r_xh = same[1, 0] / np.sqrt(same[1, 1] * same[0, 0])
+        partial = (r_yx - r_yh * r_xh) / np.sqrt((1 - r_yh**2) * (1 - r_xh**2))
+        expected = -0.5 * np.log2(1 - partial**2)
+        assert te[0, 1] == pytest.approx(expected, rel=0.05)
+        assert te[1, 0] < 0.01
+        assert te[0, 2] < 0.01
+        assert te[2, 1] < 0.01
+
+    def test_max_over_lags_finds_delayed_coupling(self):
+        traces = _coupled_traces(20000, coupling=0.5, lag=3)
+        one = pc.transfer_entropy(traces[None], history=1, max_lag=1)
+        three = pc.transfer_entropy(traces[None], history=1, max_lag=3)
+        assert three[0, 1] > 2 * one[0, 1]
+        assert three[0, 1] > 0.2
+
+    def test_too_few_samples(self):
+        te = pc.transfer_entropy(np.ones((1, 3, 2)), history=1, max_lag=1)
+        assert np.isnan(te).all()
+
+    def test_circular_matches_direct(self):
+        traces = _coupled_traces(5000)
+        direct = pc.transfer_entropy(traces[None], history=2, max_lag=4)
+        circular = pc.transfer_entropy_circular(traces, history=2, max_lag=4, shifts=np.array([0]))[0]
+        np.testing.assert_allclose(circular, direct, atol=2e-3, equal_nan=True)
+        assert np.nanmax(np.abs(circular - direct)) < 0.1 * np.nanmax(direct)
+
+    def test_circular_shift_breaks_coupling(self):
+        traces = _coupled_traces(5000)
+        estimates = pc.transfer_entropy_circular(traces, history=1, max_lag=2, shifts=np.array([0, 1000, 2500]))
+        assert estimates[0, 0, 1] > 0.1
+        assert estimates[1:, 0, 1].max() < 0.01
+
+
+class TestCircularCovariances:
+    def test_matches_rolled_products(self):
+        traces = np.random.default_rng(1).standard_normal((50, 3))
+        centred = traces - traces.mean(axis=0)
+        at = pc.circular_covariances(traces, [-2, 0, 3])
+        for lag, matrix in at.items():
+            expected = centred.T @ np.roll(centred, lag, axis=0) / len(traces)
+            np.testing.assert_allclose(matrix, expected, atol=1e-12)
+
+
+class TestSurrogateZ:
+    def test_z_score(self):
+        value = np.array([[np.nan, 3.0], [1.0, np.nan]])
+        surrogates = np.array(
+            [[[np.nan, 1.0], [1.0, np.nan]], [[np.nan, 2.0], [1.0, np.nan]], [[np.nan, 3.0], [1.0, np.nan]]]
+        )
+        z = pc.surrogate_z(value, surrogates)
+        assert z[0, 1] == pytest.approx((3.0 - 2.0) / np.std([1.0, 2.0, 3.0]))
+        assert np.isnan(z[1, 0])
+
+    def test_too_few_surrogates(self):
+        assert np.isnan(pc.surrogate_z(np.ones((2, 2)), np.ones((1, 2, 2)))).all()
+        assert np.isnan(pc.surrogate_z(np.ones((2, 2)), np.empty((0, 2, 2)))).all()
+
+
+class TestEpochTransferEntropy:
+    def test_z_separates_coupled_from_independent(self):
+        cube = _coupled_traces(6000).reshape(60, 100, 3)
+        te, z = pc.epoch_transfer_entropy(cube, history=1, max_lag=2, n_surrogates=50, rng=np.random.default_rng(0))
+        assert te[0, 1] > 0.1
+        assert z[0, 1] > 10
+        assert abs(z[1, 0]) < 4
+        assert abs(z[2, 1]) < 4
+
+    def test_without_surrogates(self):
+        cube = _coupled_traces(600).reshape(6, 100, 3)
+        te, z = pc.epoch_transfer_entropy(cube, 1, 2, 0, np.random.default_rng(0))
+        np.testing.assert_allclose(te, pc.transfer_entropy(cube, 1, 2), equal_nan=True)
+        assert np.isnan(z).all()
+
+
+class TestTraceTransferEntropy:
+    def test_z_separates_coupled_from_independent(self):
+        traces = _coupled_traces(5000)
+        te, z = pc.trace_transfer_entropy(traces, history=1, max_lag=2, n_surrogates=50, rng=np.random.default_rng(0))
+        assert te[0, 1] > 0.1
+        assert z[0, 1] > 10
+        assert abs(z[1, 0]) < 4
+        np.testing.assert_allclose(te, pc.transfer_entropy_circular(traces, 1, 2, np.array([0]))[0], equal_nan=True)
+
+    def test_short_traces(self):
+        te, z = pc.trace_transfer_entropy(np.ones((3, 2)), 1, 2, 10, np.random.default_rng(0))
+        assert np.isnan(te).all()
+        assert np.isnan(z).all()
+        te, z = pc.trace_transfer_entropy(_coupled_traces(6), 1, 2, 10, np.random.default_rng(0))
+        assert np.isfinite(te[0, 1])
+        assert np.isnan(z).all()
+
+
+class TestDirectedMetrics:
+    def test_orientation(self):
+        te = np.array([[np.nan, 1.0], [2.0, np.nan]])
+        z = np.array([[np.nan, 3.0], [4.0, np.nan]])
+        metrics = pc.directed_metrics(te, z)
+        assert set(metrics) == set(pc.TE_METRICS)
+        assert metrics["te_ab"][0, 1] == 1.0
+        assert metrics["te_ba"][0, 1] == 2.0
+        assert metrics["te_ab_z"][0, 1] == 3.0
+        assert metrics["te_ba_z"][0, 1] == 4.0
+
+
 class TestPooledMetrics:
     def test_pair_metrics_extends_it(self):
         cube = _connectivity_cube()
@@ -4123,6 +4323,26 @@ class TestPooledMetrics:
         pooled = pc.pooled_metrics(_connectivity_cube(), 5, mutual_info=False)
         assert np.isnan(pooled["mi"]).all()
         assert not np.isnan(pooled["r"]).any()
+
+
+class TestPairMetricsTransferEntropy:
+    def test_on_residual_epochs_with_trial_shuffles(self):
+        cube = _connectivity_cube()
+        rng = np.random.default_rng(3)
+        pair = pc.pair_metrics(cube, 5, te_surrogates=20, transfer_entropy=True, rng=np.random.default_rng(3))
+        te, z = pc.epoch_transfer_entropy(pc.residual_epochs(cube), 1, 5, 20, rng)
+        np.testing.assert_allclose(pair["te_ab"], te, equal_nan=True)
+        np.testing.assert_allclose(pair["te_ba"], te.T, equal_nan=True)
+        np.testing.assert_allclose(pair["te_ab_z"], z, equal_nan=True)
+        assert pair["te_ab"][0, 2] > pair["te_ba"][0, 2]  # the third region is the first delayed by two samples
+
+    def test_history_and_disabled(self):
+        cube = _connectivity_cube()
+        two = pc.pair_metrics(cube, 5, te_history=2, te_surrogates=0, transfer_entropy=True)
+        one = pc.pair_metrics(cube, 5, te_surrogates=0, transfer_entropy=True)
+        assert not np.allclose(two["te_ab"], one["te_ab"], equal_nan=True)
+        off = pc.pair_metrics(cube, 5)
+        assert all(np.isnan(off[metric]).all() for metric in pc.TE_METRICS)
 
 
 class TestTraceSamples:
@@ -4169,8 +4389,16 @@ class TestTraceTable:
     def test_matches_direct_metrics(self):
         regions = _connectivity_regions()
         traces, _, _ = pc.trace_samples(regions)
-        table = pc.trace_table(regions, max_lag=0.2, mi_neighbours=4)
+        table = pc.trace_table(regions, max_lag=0.2, mi_neighbours=4, transfer_entropy=True, te_surrogates=20, seed=5)
         expected = pc.pooled_metrics(traces[None], 5, mi_neighbours=4)
+        te, z = pc.trace_transfer_entropy(traces, 1, 5, 20, np.random.default_rng(5))
+        expected |= pc.directed_metrics(te, z)
+        for metric in pc.TE_METRICS:
+            assert table[metric].tolist() == pytest.approx(
+                [expected[metric][a, b] for a, b in [(0, 1), (0, 2), (1, 2)]]
+            )
+        assert table["te_ab"].iloc[1] > table["te_ba"].iloc[1]  # the third region is the first delayed by two frames
+        assert table["te_ab_z"].iloc[1] > 5
         for metric in ("r", "mi", "partial_r", "r_lag"):
             assert table[metric].tolist() == pytest.approx(
                 [expected[metric][a, b] for a, b in [(0, 1), (0, 2), (1, 2)]]
@@ -4194,6 +4422,19 @@ class TestTraceTable:
         table = pc.trace_table(_connectivity_regions(), mutual_info=False)
         assert table["mi"].isna().all()
         assert table["r"].notna().all()
+
+    def test_transfer_entropy_options(self):
+        regions = _connectivity_regions()
+        off = pc.trace_table(regions)
+        assert off[list(pc.TE_METRICS)].isna().all().all()
+        no_surrogates = pc.trace_table(regions, transfer_entropy=True, te_surrogates=0)
+        assert no_surrogates[["te_ab", "te_ba"]].notna().all().all()
+        assert no_surrogates[["te_ab_z", "te_ba_z"]].isna().all().all()
+        seeded = pc.trace_table(regions, transfer_entropy=True, te_surrogates=10, seed=1)
+        pd.testing.assert_frame_equal(seeded, pc.trace_table(regions, transfer_entropy=True, te_surrogates=10, seed=1))
+        assert not seeded["te_ab_z"].equals(
+            pc.trace_table(regions, transfer_entropy=True, te_surrogates=10, seed=2)["te_ab_z"]
+        )
 
     def test_single_region(self):
         regions = _connectivity_regions()
@@ -4247,6 +4488,25 @@ def test_connectivity_cmd_mutual_info_options(output_dir, tmp_path):
     table = pd.read_csv(pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_connectivity.csv")
     assert table[["mi", "mi_residual"]].isna().all().all()
     assert table["r"].notna().sum() == expected["r"].notna().sum()
+
+
+def test_connectivity_cmd_transfer_entropy_options(output_dir, tmp_path):
+    path = tmp_path / "ses-01_regions_event-cueonset_perievent.csv"
+    _connectivity_perievent().to_csv(path, index=False)
+    result = CliRunner().invoke(
+        mesoscopy.cli,
+        args=f"process connectivity {path} -o {output_dir} --with-te --te-history 2 --te-surrogates 10 --seed 3",
+    )
+    assert result.exit_code == 0, result.output
+    table = pd.read_csv(pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_connectivity.csv")
+    expected = pc.connectivity_table(pd.read_csv(path), transfer_entropy=True, te_history=2, te_surrogates=10, seed=3)
+    pd.testing.assert_frame_equal(table, expected, check_dtype=False)
+    assert table[table["group"] == "all"][list(pc.TE_METRICS)].notna().all().all()
+
+    result = CliRunner().invoke(mesoscopy.cli, args=f"process connectivity {path} -o {output_dir}")
+    assert result.exit_code == 0, result.output
+    table = pd.read_csv(pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_connectivity.csv")
+    assert table[list(pc.TE_METRICS)].isna().all().all()
 
 
 def test_connectivity_cmd_joins_trials(output_dir, tmp_path):
