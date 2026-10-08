@@ -206,8 +206,8 @@ class TestConnectivityPayload:
             assert cube[m, 2, 0] == pytest.approx(rows.loc[(REGIONS[0], REGIONS[2]), backward], rel=1e-6, nan_ok=True)
 
     def test_skips_empty_metrics(self, perievent_csv):
-        table = pd.read_csv(pevreport.connectivity_path(perievent_csv))
-        table[["mi", "mi_residual", "te_ab_z"]] = np.nan
+        table = pd.read_csv(pevreport.connectivity_path(perievent_csv)).drop(columns=["mi", "mi_residual"])
+        table["te_ab_z"] = np.nan
         payload = pevreport.connectivity_payload(table, REGIONS)
         assert payload["metrics"] == [m for m in ALL_CONNECTIVITY_METRICS if not m.startswith("mi") and m != "te_z"]
         assert payload["directed"] == ["te"]

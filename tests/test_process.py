@@ -3641,6 +3641,9 @@ def test_perievent_cmd_with_metrics_bootstrap(perievent_regions_csv, perievent_t
 
 
 CONNECTIVITY_REGIONS = ["L_MOp", "R_MOp", "L_SSp-ul"]
+DEFAULT_METRICS = [metric for metric in pc.PAIR_METRICS if metric not in pc.TE_METRICS]
+DEFAULT_COLUMNS = [column for column in pc.TABLE_COLUMNS if column not in pc.TE_METRICS]
+TRACE_COLUMNS = [column for column in DEFAULT_COLUMNS if column not in {"r_residual", "r_trials_avg", "mi_residual"}]
 CONNECTIVITY_PAIRS = [("L_MOp", "R_MOp"), ("L_MOp", "L_SSp-ul"), ("R_MOp", "L_SSp-ul")]
 
 
@@ -4018,7 +4021,7 @@ class TestConnectivityTable:
     def test_layout(self):
         table = pc.connectivity_table(_connectivity_perievent())
         groups = list(pm.trial_groups(_gonogo_info()))
-        assert list(table.columns) == list(pc.TABLE_COLUMNS)
+        assert list(table.columns) == DEFAULT_COLUMNS
         assert list(zip(table["region_a"], table["region_b"], strict=True)) == [
             p for p in CONNECTIVITY_PAIRS for _ in groups
         ]
@@ -4050,7 +4053,7 @@ class TestConnectivityTable:
         assert cube.shape == (36, len(METRICS_GRID), 3)
         expected = pc.pair_metrics(cube[hits & keep], 5)
         rows = table[table["group"] == "sdt-hit"]
-        for metric in pc.PAIR_METRICS:
+        for metric in DEFAULT_METRICS:
             matrix = expected[metric] * (0.04 if metric == "lag" else 1.0)
             assert rows[metric].tolist() == pytest.approx([matrix[0, 1], matrix[0, 2], matrix[1, 2]], nan_ok=True)
         assert rows["n_samples"].tolist() == [expected["n_samples"]] * 3
@@ -4068,10 +4071,10 @@ class TestConnectivityTable:
         misses = table[table["group"] == "sdt-miss"]
         assert misses["n_trials"].tolist() == [6] * 3
         assert misses["n_samples"].tolist() == [0] * 3
-        assert misses[list(pc.PAIR_METRICS)].isna().all().all()
+        assert misses[DEFAULT_METRICS].isna().all().all()
 
         lowered = pc.connectivity_table(_connectivity_perievent(), min_trials=5, transfer_entropy=True, te_surrogates=5)
-        assert lowered[lowered["group"] == "sdt-miss"][list(pc.PAIR_METRICS)].notna().all().all()
+        assert lowered[lowered["group"] == "sdt-miss"][[*DEFAULT_METRICS, *pc.TE_METRICS]].notna().all().all()
 
         # The all-trials metrics are always taken.
         strict = pc.connectivity_table(_connectivity_perievent(), min_trials=100)
@@ -4124,16 +4127,16 @@ class TestConnectivityTable:
             table, pc.connectivity_table(perievent, transfer_entropy=True, te_surrogates=20, seed=7)
         )
         off = pc.connectivity_table(perievent)
-        assert off[list(pc.TE_METRICS)].isna().all().all()
+        assert not set(pc.TE_METRICS) & set(off.columns)
         bare = pc.connectivity_table(perievent, transfer_entropy=True, te_surrogates=0)
         pd.testing.assert_series_equal(bare["te_ab"], table["te_ab"])
-        assert bare[["te_ab_z", "te_ba_z"]].isna().all().all()
+        assert list(bare.columns) == [*DEFAULT_COLUMNS[:-2], "te_ab", "te_ba", "n_trials", "n_samples"]
 
     def test_without_mutual_info(self):
         perievent = _connectivity_perievent()
         skipped = pc.connectivity_table(perievent, mutual_info=False)
-        assert skipped[["mi", "mi_residual"]].isna().all().all()
-        others = [column for column in pc.TABLE_COLUMNS if column not in {"mi", "mi_residual"}]
+        assert not {"mi", "mi_residual"} & set(skipped.columns)
+        others = [column for column in DEFAULT_COLUMNS if column not in {"mi", "mi_residual"}]
         pd.testing.assert_frame_equal(skipped[others], pc.connectivity_table(perievent)[others])
 
     def test_mi_neighbours(self):
@@ -4155,7 +4158,7 @@ class TestConnectivityTable:
         perievent = _connectivity_perievent()
         table = pc.connectivity_table(perievent[perievent["region"] == "L_MOp"])
         assert table.empty
-        assert list(table.columns) == list(pc.TABLE_COLUMNS)
+        assert list(table.columns) == DEFAULT_COLUMNS
 
 
 class TestEmbeddedSamples:
@@ -4315,13 +4318,13 @@ class TestPooledMetrics:
         pooled = pc.pooled_metrics(cube, 5)
         pair = pc.pair_metrics(cube, 5)
         assert set(pooled) == {"r", "mi", "partial_r", "lag", "r_lag", "n_samples"}
-        assert set(pair) == {*pc.PAIR_METRICS, "n_samples"}
+        assert set(pair) == {*pc.PAIR_METRICS, "n_samples"} - set(pc.TE_METRICS)
         for key, value in pooled.items():
             np.testing.assert_array_equal(pair[key], value)
 
     def test_without_mutual_info(self):
         pooled = pc.pooled_metrics(_connectivity_cube(), 5, mutual_info=False)
-        assert np.isnan(pooled["mi"]).all()
+        assert "mi" not in pooled
         assert not np.isnan(pooled["r"]).any()
 
 
@@ -4342,7 +4345,7 @@ class TestPairMetricsTransferEntropy:
         one = pc.pair_metrics(cube, 5, te_surrogates=0, transfer_entropy=True)
         assert not np.allclose(two["te_ab"], one["te_ab"], equal_nan=True)
         off = pc.pair_metrics(cube, 5)
-        assert all(np.isnan(off[metric]).all() for metric in pc.TE_METRICS)
+        assert not set(pc.TE_METRICS) & set(off)
 
 
 class TestTraceSamples:
@@ -4379,10 +4382,10 @@ class TestTraceTable:
 
     def test_layout(self):
         table = pc.trace_table(_connectivity_regions())
-        assert list(table.columns) == list(pc.TABLE_COLUMNS)
+        assert list(table.columns) == TRACE_COLUMNS
         assert list(zip(table["region_a"], table["region_b"], strict=True)) == CONNECTIVITY_PAIRS
         assert table["group"].tolist() == ["all"] * 3
-        assert table[["r_residual", "r_trials_avg", "mi_residual", "n_trials"]].isna().all().all()
+        assert table["n_trials"].isna().all()
         assert table["n_samples"].tolist() == [500] * 3
         assert table[["r", "mi", "partial_r", "lag", "r_lag"]].notna().all().all()
 
@@ -4420,16 +4423,16 @@ class TestTraceTable:
 
     def test_without_mutual_info(self):
         table = pc.trace_table(_connectivity_regions(), mutual_info=False)
-        assert table["mi"].isna().all()
+        assert "mi" not in table.columns
         assert table["r"].notna().all()
 
     def test_transfer_entropy_options(self):
         regions = _connectivity_regions()
         off = pc.trace_table(regions)
-        assert off[list(pc.TE_METRICS)].isna().all().all()
+        assert list(off.columns) == TRACE_COLUMNS
         no_surrogates = pc.trace_table(regions, transfer_entropy=True, te_surrogates=0)
         assert no_surrogates[["te_ab", "te_ba"]].notna().all().all()
-        assert no_surrogates[["te_ab_z", "te_ba_z"]].isna().all().all()
+        assert not {"te_ab_z", "te_ba_z"} & set(no_surrogates.columns)
         seeded = pc.trace_table(regions, transfer_entropy=True, te_surrogates=10, seed=1)
         pd.testing.assert_frame_equal(seeded, pc.trace_table(regions, transfer_entropy=True, te_surrogates=10, seed=1))
         assert not seeded["te_ab_z"].equals(
@@ -4440,7 +4443,7 @@ class TestTraceTable:
         regions = _connectivity_regions()
         table = pc.trace_table(regions[regions["region"] == "L_MOp"])
         assert table.empty
-        assert list(table.columns) == list(pc.TABLE_COLUMNS)
+        assert list(table.columns) == TRACE_COLUMNS
 
 
 def test_connectivity_cmd(output_dir, tmp_path):
@@ -4486,7 +4489,7 @@ def test_connectivity_cmd_mutual_info_options(output_dir, tmp_path):
     result = CliRunner().invoke(mesoscopy.cli, args=f"process connectivity {path} -o {output_dir} --no-mi")
     assert result.exit_code == 0, result.output
     table = pd.read_csv(pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_connectivity.csv")
-    assert table[["mi", "mi_residual"]].isna().all().all()
+    assert not {"mi", "mi_residual"} & set(table.columns)
     assert table["r"].notna().sum() == expected["r"].notna().sum()
 
 
@@ -4506,7 +4509,7 @@ def test_connectivity_cmd_transfer_entropy_options(output_dir, tmp_path):
     result = CliRunner().invoke(mesoscopy.cli, args=f"process connectivity {path} -o {output_dir}")
     assert result.exit_code == 0, result.output
     table = pd.read_csv(pathlib.Path(output_dir) / "ses-01_regions_event-cueonset_connectivity.csv")
-    assert table[list(pc.TE_METRICS)].isna().all().all()
+    assert list(table.columns) == DEFAULT_COLUMNS
 
 
 def test_connectivity_cmd_joins_trials(output_dir, tmp_path):
@@ -4576,7 +4579,7 @@ def test_connectivity_cmd_regions_ignores_trial_options(output_dir, tmp_path):
     assert result.exit_code == 0, result.output
     assert "Loading trials" not in result.output
     table = pd.read_csv(pathlib.Path(output_dir) / "ses-01_regions_connectivity.csv")
-    assert table["mi"].isna().all()
+    assert "mi" not in table.columns
     assert table["group"].tolist() == ["all"] * 3
 
 

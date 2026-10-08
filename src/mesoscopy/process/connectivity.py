@@ -44,7 +44,7 @@ TE_METRICS = ("te_ab", "te_ba", "te_ab_z", "te_ba_z")
 # Connectivity metrics per region pair, in output column order.
 PAIR_METRICS = ("r", "r_residual", "r_trials_avg", "mi", "mi_residual", "partial_r", "lag", "r_lag", *TE_METRICS)
 
-# Columns of the connectivity table, in order.
+# Columns of the connectivity table, in order; the metrics not estimated are left out.
 TABLE_COLUMNS = ("region_a", "region_b", "group", *PAIR_METRICS, "n_trials", "n_samples")
 
 # Trials columns the cue-to-response epoch needs.
@@ -489,17 +489,20 @@ def trace_transfer_entropy(
     return estimates[0], surrogate_z(estimates[0], estimates[1:])
 
 
-def directed_metrics(te: npt.NDArray, z: npt.NDArray) -> dict[str, npt.NDArray[np.float64]]:
+def directed_metrics(te: npt.NDArray, z: npt.NDArray | None = None) -> dict[str, npt.NDArray[np.float64]]:
     """The `TE_METRICS` matrices, indexed `[a, b]` like the symmetric ones, from a directed `[source, target]` pair.
 
     Args:
         te (npt.NDArray): Transfer entropy, shape `(n_regions, n_regions)`.
-        z (npt.NDArray): Its z-score, same shape.
+        z (npt.NDArray | None, optional): Its z-score, same shape. Defaults to None, leaving the z-scores out.
 
     Returns:
-        dict[str, npt.NDArray[np.float64]]: `te_ab`, `te_ba`, `te_ab_z` and `te_ba_z`.
+        dict[str, npt.NDArray[np.float64]]: `te_ab` and `te_ba`, plus `te_ab_z` and `te_ba_z` given `z`.
     """
-    return {"te_ab": np.asarray(te), "te_ba": np.asarray(te).T, "te_ab_z": np.asarray(z), "te_ba_z": np.asarray(z).T}
+    metrics = {"te_ab": np.asarray(te), "te_ba": np.asarray(te).T}
+    if z is not None:
+        metrics |= {"te_ab_z": np.asarray(z), "te_ba_z": np.asarray(z).T}
+    return metrics
 
 
 def epoch_bounds(
@@ -598,23 +601,24 @@ def pooled_metrics(
         epochs (npt.NDArray): Masked traces of shape `(n_trials, n_samples, n_regions)`.
         lag_samples (int): Largest lag searched for the peak cross-correlation, in samples.
         mi_neighbours (int, optional): Neighbours for `mutual_information`. Defaults to 3.
-        mutual_info (bool, optional): Estimate `mi`; False leaves it NaN. Defaults to True.
+        mutual_info (bool, optional): Estimate `mi`; False leaves it out. Defaults to True.
 
     Returns:
-        dict[str, typing.Any]: `(n_regions, n_regions)` matrices `r`, `mi`, `partial_r`, `lag` (in samples) and
-        `r_lag`, plus `n_samples`, the pooled samples used.
+        dict[str, typing.Any]: `(n_regions, n_regions)` matrices `r`, `partial_r`, `lag` (in samples), `r_lag`
+        and, with `mutual_info`, `mi`, plus `n_samples`, the pooled samples used.
     """
     pooled = pooled_samples(epochs)
     index, r_lag = peak_lag(lagged_correlation(epochs, lag_samples))
-    empty = np.full((pooled.shape[1], pooled.shape[1]), np.nan)
-    return {
+    metrics = {
         "r": correlation_matrix(pooled),
-        "mi": mutual_information_matrix(pooled, mi_neighbours) if mutual_info else empty,
         "partial_r": partial_correlation(pooled),
         "lag": np.where(np.isnan(r_lag), np.nan, index - lag_samples),
         "r_lag": r_lag,
         "n_samples": pooled.shape[0],
     }
+    if mutual_info:
+        metrics["mi"] = mutual_information_matrix(pooled, mi_neighbours)
+    return metrics
 
 
 def pair_metrics(
@@ -635,31 +639,31 @@ def pair_metrics(
         lag_samples (int): Largest lag searched for the peak cross-correlation and transfer entropy, in samples.
         min_trial_samples (int, optional): Samples a trial needs for `trial_correlation`. Defaults to 3.
         mi_neighbours (int, optional): Neighbours for `mutual_information`. Defaults to 3.
-        mutual_info (bool, optional): Estimate `mi` and `mi_residual`; False leaves them NaN. Defaults to True.
+        mutual_info (bool, optional): Estimate `mi` and `mi_residual`; False leaves them out. Defaults to True.
         te_history (int, optional): Target past samples for `epoch_transfer_entropy`. Defaults to 1.
         te_surrogates (int, optional): Trial-shuffle surrogates for the transfer entropy z-scores; 0 leaves them
-            NaN. Defaults to 200.
+            out. Defaults to 200.
         transfer_entropy (bool, optional): Estimate the `TE_METRICS` on the residual epochs; False leaves them
-            NaN. Defaults to False.
+            out. Defaults to False.
         rng (np.random.Generator | None, optional): Random generator for the surrogates. Defaults to a fresh one.
 
     Returns:
-        dict[str, typing.Any]: One `(n_regions, n_regions)` matrix per `PAIR_METRICS` name, with `lag` in
-        samples, plus `n_samples`, the pooled samples used.
+        dict[str, typing.Any]: One `(n_regions, n_regions)` matrix per `PAIR_METRICS` name estimated, with `lag`
+        in samples, plus `n_samples`, the pooled samples used.
     """
     residual = residual_epochs(epochs)
     residuals = pooled_samples(residual)
-    empty = np.full((residuals.shape[1], residuals.shape[1]), np.nan)
     metrics = pooled_metrics(epochs, lag_samples, mi_neighbours, mutual_info) | {
         "r_residual": correlation_matrix(residuals),
         "r_trials_avg": trial_correlation(epochs, min_trial_samples),
-        "mi_residual": mutual_information_matrix(residuals, mi_neighbours) if mutual_info else empty,
     }
+    if mutual_info:
+        metrics["mi_residual"] = mutual_information_matrix(residuals, mi_neighbours)
     if not transfer_entropy:
-        return metrics | directed_metrics(empty, empty)
+        return metrics
     rng = rng if rng is not None else np.random.default_rng()
     te, z = epoch_transfer_entropy(residual, te_history, lag_samples, te_surrogates, rng)
-    return metrics | directed_metrics(te, z)
+    return metrics | directed_metrics(te, z if te_surrogates else None)
 
 
 def trace_samples(regions: pd.DataFrame) -> tuple[npt.NDArray[np.float64], list[str], float]:
@@ -713,18 +717,18 @@ def trace_table(
         max_lag (float, optional): Largest lag searched for the peak cross-correlation and transfer entropy, in
             seconds. Defaults to 0.5.
         mi_neighbours (int, optional): Neighbours for `mutual_information`. Defaults to 3.
-        mutual_info (bool, optional): Estimate `mi`; False leaves it NaN. Defaults to True.
+        mutual_info (bool, optional): Estimate `mi`; False leaves it out. Defaults to True.
         te_history (int, optional): Target past samples for `trace_transfer_entropy`. Defaults to 1.
         te_surrogates (int, optional): Circular-shift surrogates for the transfer entropy z-scores; 0 leaves them
-            NaN. Defaults to 200.
-        transfer_entropy (bool, optional): Estimate the `TE_METRICS`; False leaves them NaN. Defaults to False.
+            out. Defaults to 200.
+        transfer_entropy (bool, optional): Estimate the `TE_METRICS`; False leaves them out. Defaults to False.
         seed (int | None, optional): Seed for the surrogates. Defaults to 42.
 
     Returns:
-        pd.DataFrame: One `all` row per unordered region pair with `TABLE_COLUMNS`, as for `connectivity_table`.
-        `r_residual`, `r_trials_avg`, `mi_residual` and `n_trials` are NaN, having no meaning without trials, and
-        `n_samples` is the frames where every region is finite. The transfer entropy is taken over those frames
-        with the wrap-around of `transfer_entropy_circular`.
+        pd.DataFrame: One `all` row per unordered region pair with the `TABLE_COLUMNS` estimated, as for
+        `connectivity_table`. `r_residual`, `r_trials_avg` and `mi_residual` have no meaning without trials and
+        are left out, `n_trials` is NaN, and `n_samples` is the frames where every region is finite. The transfer
+        entropy is taken over those frames with the wrap-around of `transfer_entropy_circular`.
 
     Example:
         >>> regions = pd.read_csv("ses-01_regions.csv")
@@ -738,7 +742,7 @@ def trace_table(
     if transfer_entropy:
         rng = np.random.default_rng(seed)
         te, z = trace_transfer_entropy(pooled_samples(traces[None]), te_history, lag_samples, te_surrogates, rng)
-        metrics |= directed_metrics(te, z)
+        metrics |= directed_metrics(te, z if te_surrogates else None)
     return _rows(names, {"all": {"n_trials": np.nan, **metrics}})
 
 
@@ -784,16 +788,17 @@ def connectivity_table(
             seconds. Defaults to 0.5.
         min_trial_samples (int, optional): Samples a trial needs to count towards `r_trials_avg`. Defaults to 3.
         mi_neighbours (int, optional): Neighbours for `mutual_information`. Defaults to 3.
-        mutual_info (bool, optional): Estimate `mi` and `mi_residual`; False leaves them NaN. Defaults to True.
+        mutual_info (bool, optional): Estimate `mi` and `mi_residual`; False leaves them out. Defaults to True.
         te_history (int, optional): Target past samples for `epoch_transfer_entropy`. Defaults to 1.
         te_surrogates (int, optional): Trial-shuffle surrogates per group for the transfer entropy z-scores; 0
-            leaves them NaN. Defaults to 200.
+            leaves them out. Defaults to 200.
         transfer_entropy (bool, optional): Estimate the `TE_METRICS` on the residual epochs; False leaves them
-            NaN. Defaults to False.
+            out. Defaults to False.
         seed (int | None, optional): Seed for the surrogates. Defaults to 42.
 
     Returns:
-        pd.DataFrame: One row per unordered region pair per trial group, with `TABLE_COLUMNS`: `region_a` and
+        pd.DataFrame: One row per unordered region pair per trial group, with the `TABLE_COLUMNS` estimated:
+        `region_a` and
         `region_b` in the order the regions appear, `group`, `r` (Pearson correlation of the pooled samples),
         `r_residual` (the same after removing the group's mean response at each sample), `r_trials_avg`
         (`trial_correlation`), `mi` and `mi_residual` (`mutual_information` of the pooled samples and of the
@@ -860,15 +865,16 @@ def _rows(regions: list[str], per_group: dict[str, dict[str, typing.Any]]) -> pd
             metrics a group lacks are NaN.
 
     Returns:
-        pd.DataFrame: One row per unordered region pair and group.
+        pd.DataFrame: One row per unordered region pair and group, with the `TABLE_COLUMNS` some group has.
     """
     import pandas as pd
 
+    metrics = [metric for metric in PAIR_METRICS if any(metric in values for values in per_group.values())]
     rows = []
     for a, region_a in enumerate(regions):
         for b in range(a + 1, len(regions)):
             for name, values in per_group.items():
                 row: dict[str, typing.Any] = {"region_a": region_a, "region_b": regions[b], "group": name}
-                row |= {metric: values[metric][a, b] if metric in values else np.nan for metric in PAIR_METRICS}
+                row |= {metric: values[metric][a, b] if metric in values else np.nan for metric in metrics}
                 rows.append(row | {"n_trials": values["n_trials"], "n_samples": values["n_samples"]})
-    return pd.DataFrame(rows, columns=list(TABLE_COLUMNS))
+    return pd.DataFrame(rows, columns=["region_a", "region_b", "group", *metrics, "n_trials", "n_samples"])

@@ -1121,7 +1121,7 @@ def metrics_cmd(
     help="Neighbours for the mutual information estimator.",
 )
 @click.option(
-    "--mi/--no-mi",
+    "--with-mi/--no-mi",
     "mutual_info",
     default=True,
     show_default=True,
@@ -1184,8 +1184,8 @@ def connectivity_cmd(
     and response_time columns the whole response window is used. Go/no-go sessions are grouped by sdt_type,
     go/no-go stimulus and lever push, as well as all trials.
 
-    A regions CSV gives the metrics over the whole recording instead, as the all-trials rows only, with the
-    residual and per-trial columns empty. The trial options do not apply.
+    A regions CSV gives the metrics over the whole recording instead, as the all-trials rows only, without the
+    residual and per-trial columns. The trial options do not apply.
     """  # noqa: DOC501
     import pandas as pd
 

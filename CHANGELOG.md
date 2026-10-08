@@ -7,7 +7,8 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 ### Added
 
 - Transfer entropy in `process connectivity` with `--with-te`: `te_ab` and `te_ba`, the Gaussian transfer entropy in bits from `region_a` to `region_b` and back at the best source lag within `--max-lag`, conditioned on `--te-history` past samples of the target, with `te_ab_z` and `te_ba_z` against `--te-surrogates` trial shuffles on peri-event input or circular shifts on a regions CSV, seeded by `--seed`. The peri-event report shows them as directed heatmaps ([#191](https://github.com/DuguidLab/mesoscopy/issues/191)).
-- `process connectivity` takes a `_regions.csv` and writes the connectivity metrics over the whole recording to `<stem>_connectivity.csv`, as the `all` rows only, with the residual and per-trial columns empty. Library entry point `connectivity.trace_table` ([#190](https://github.com/DuguidLab/mesoscopy/issues/190)).
+- `process connectivity` leaves the `mi` and `mi_residual` columns out with `--no-mi`, and the transfer entropy columns without `--with-te` or their z-scores with `--te-surrogates 0`, instead of writing them empty. The `--mi` flag is renamed `--with-mi` ([#191](https://github.com/DuguidLab/mesoscopy/issues/191)).
+- `process connectivity` takes a `_regions.csv` and writes the connectivity metrics over the whole recording to `<stem>_connectivity.csv`, as the `all` rows only, without the residual and per-trial columns. Library entry point `connectivity.trace_table` ([#190](https://github.com/DuguidLab/mesoscopy/issues/190)).
 
 ## [0.15.0] - 2026-10-06
 
