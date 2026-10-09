@@ -23,8 +23,9 @@
 
 Each region, and all regions together, is used to classify the trials of a go/no-go session with a logistic
 regression and a linear discriminant decoder under repeated stratified cross-validation, against a label-shuffle
-null. The one-feature decoders are fitted in numpy over every region, fold and shuffle at once; the population
-decoder goes through scikit-learn.
+null, over the cue-to-response epoch or in windows sliding over the peri-event window. The one-feature decoders are
+fitted in numpy over every region, window, fold and shuffle at once; the population decoder goes through
+scikit-learn.
 """
 
 from __future__ import annotations
@@ -78,6 +79,20 @@ NULL_SCORES = (
 
 # Columns of the decoding table, in order.
 TABLE_COLUMNS = ("decoder", "label", "region", "group", *SCORES, *NULL_SCORES, "n_trials", "n_class_a", "n_class_b")
+
+# Columns of the rolling table, in order.
+ROLLING_COLUMNS = (
+    "decoder",
+    "label",
+    "region",
+    "group",
+    "time",
+    *SCORES,
+    *NULL_SCORES,
+    "n_trials",
+    "n_class_a",
+    "n_class_b",
+)
 
 # Elements of the per-fit standardised feature tensor processed at once by the vectorised decoders.
 _CHUNK_ELEMENTS = 4_000_000
@@ -822,22 +837,7 @@ def decoding_table(
         >>> tables = decoding_table(perievent)
         >>> tables.table.query("decoder == 'lda' and group == 'all'").nlargest(5, "balanced_accuracy")
     """
-    if label not in LABELS:
-        msg = f"Unknown label {label!r}; expected one of {', '.join(LABELS)}."
-        raise ValueError(msg)
-    if folds < 2:  # noqa: PLR2004
-        msg = f"folds must be at least 2, got {folds}."
-        raise ValueError(msg)
-    if repeats < 1:
-        msg = f"repeats must be at least 1, got {repeats}."
-        raise ValueError(msg)
-    if shuffles < 0:
-        msg = f"shuffles must be at least 0, got {shuffles}."
-        raise ValueError(msg)
-    if min_trials < folds:
-        msg = f"min_trials must be at least folds ({folds}), got {min_trials}."
-        raise ValueError(msg)
-
+    _check_options(label, folds, repeats, shuffles, min_trials)
     time, trial_info = pm.perievent_trials(perievent)
     info = trial_info
     if trials is not None:
@@ -873,6 +873,261 @@ def decoding_table(
         )
 
     return DecodingTables(_rows(label, regions, per_group), _weight_rows(label, regions, per_group))
+
+
+def window_features(
+    cube: npt.NDArray[np.float64], starts: npt.NDArray[np.int64], window: int
+) -> npt.NDArray[np.float64]:
+    """Mean of each region's trace over each window.
+
+    Args:
+        cube (npt.NDArray[np.float64]): Traces of shape `(n_trials, n_samples, n_regions)`.
+        starts (npt.NDArray[np.int64]): First sample of each window, from `connectivity.window_starts`.
+        window (int): Samples per window.
+
+    Returns:
+        npt.NDArray[np.float64]: Features of shape `(n_trials, n_windows, n_regions)`.
+    """
+    return np.stack([cube[:, start : start + window].mean(axis=1) for start in starts], axis=1)
+
+
+def _null_scores(
+    baseline: npt.NDArray[np.float64],
+    y: npt.NDArray[np.int64],
+    folds: int,
+    shuffles: int,
+    rng: np.random.Generator,
+    decoder: str,
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    """Accuracy and balanced accuracy per shuffle of each region and of all regions, on the baseline features.
+
+    Returns:
+        tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]: Each of shape `(n_shuffles, n_regions + 1)`, the
+        population last.
+    """
+    labels, splits = shuffled_labels(y, folds, shuffles, rng)
+    fold_of = np.array([fold_ids(s, folds, len(y))[0] for s in splits], dtype=np.int64)
+    scores = problem_scores(region_decisions(baseline, labels, fold_of, decoder), labels, fold_of)
+    population = [fit_scores(baseline, row, s, decoder, folds) for row, s in zip(labels, splits, strict=True)]
+    accuracy = np.column_stack([scores["accuracy"].mean(axis=1), [p["accuracy"].mean() for p in population]])
+    balanced = scores["balanced_accuracy"].mean(axis=1)
+    return accuracy, np.column_stack([balanced, [p["balanced_accuracy"].mean() for p in population]])
+
+
+def rolling_decoding(
+    features: npt.NDArray[np.float64],
+    baseline: npt.NDArray[np.float64],
+    y: npt.NDArray[np.int64],
+    present: npt.NDArray[np.bool_],
+    folds: int,
+    repeats: int,
+    shuffles: int,
+    seed: int | None,
+) -> dict[str, list[list[dict[str, float]]]]:
+    """Scores of every decoder on each region and on all regions in every window, for one trial group.
+
+    The one-feature decoders of every window and region are fitted at once through `region_decisions` and the
+    population decoder is fitted per window through `fit_scores`. The null is taken once on `baseline` and applied
+    to every window.
+
+    Args:
+        features (npt.NDArray[np.float64]): Window features of the group's trials, shape `(n_trials, n_windows,
+            n_regions)`.
+        baseline (npt.NDArray[np.float64]): Baseline features of the same trials, shape `(n_trials, n_regions)`.
+        y (npt.NDArray[np.int64]): Class per trial, shape `(n_trials,)`.
+        present (npt.NDArray[np.bool_]): Regions with a value, shape `(n_regions,)`; the others are left out.
+        folds (int): Folds per repeat.
+        repeats (int): Repeats of the k-fold.
+        shuffles (int): Label shuffles for the `NULL_SCORES`; 0 leaves them out.
+        seed (int | None): Seed for the splits and the shuffles.
+
+    Returns:
+        dict[str, list[list[dict[str, float]]]]: Per decoder, one list per region in column order, then the
+        population, each with one `score_summary` (and `null_summary`, with shuffles) per window; a region without
+        a value gets empty dicts.
+    """
+    rng = np.random.default_rng(seed)
+    splits = cross_validation_splits(y, folds, repeats, seed)
+    fold_of = fold_ids(splits, folds, len(y))
+    labels = np.broadcast_to(y, (repeats, len(y)))
+    columns = np.flatnonzero(present)
+    n_trials, n_windows, n_regions = features.shape
+    x = features[:, :, columns].reshape(n_trials, n_windows * len(columns))
+    result: dict[str, list[list[dict[str, float]]]] = {}
+    for decoder in DECODERS:
+        observed = problem_scores(region_decisions(x, labels, fold_of, decoder), labels, fold_of)
+        null = _null_scores(baseline[:, columns], y, folds, shuffles, rng, decoder) if shuffles else None
+        per_region: list[list[dict[str, float]]] = [[{} for _ in range(n_windows)] for _ in range(n_regions + 1)]
+        for i, column in enumerate(columns):
+            for w in range(n_windows):
+                flat = w * len(columns) + i
+                summary = score_summary(
+                    {
+                        "accuracy": observed["accuracy"][:, :, flat].ravel(),
+                        "balanced_accuracy": observed["balanced_accuracy"][:, :, flat].ravel(),
+                        "auroc": observed["auroc"][:, flat],
+                        **{name: observed[name][:, flat].mean() for name in ("tp", "fn", "fp", "tn")},
+                    }
+                )
+                if null is not None:
+                    summary |= null_summary(summary["balanced_accuracy"], null[0][:, i], null[1][:, i])
+                per_region[column][w] = summary
+        for w in range(n_windows):
+            summary = score_summary(fit_scores(features[:, w, columns], y, splits, decoder, folds))
+            if null is not None:
+                summary |= null_summary(summary["balanced_accuracy"], null[0][:, -1], null[1][:, -1])
+            per_region[n_regions][w] = summary
+        result[decoder] = per_region
+    return result
+
+
+def rolling_table(
+    perievent: pd.DataFrame,
+    label: str = "stim",
+    trials: pd.DataFrame | None = None,
+    window: float = 0.5,
+    step: float = 0.1,
+    baseline: tuple[float, float] | None = None,
+    min_rt: float = 0.2,
+    min_trials: int = 10,
+    folds: int = 5,
+    repeats: int = 10,
+    shuffles: int = 200,
+    seed: int | None = 42,
+) -> pd.DataFrame:
+    """Decode the stimulus or the response in windows sliding over the peri-event window, per trial group.
+
+    The feature of each trial in a window is each region's mean over the window's samples. The windows cover the
+    whole peri-event window and `window` and `step` are rounded to whole samples. The chance level is taken once
+    per decoder, region and group on the `baseline` features.
+
+    Args:
+        perievent (pd.DataFrame): Peri-event table, as for `decoding_table`.
+        label (str, optional): `stim` or `response`, as for `decoding_table`. Defaults to `stim`.
+        trials (pd.DataFrame | None, optional): Trials table to join by row index. Defaults to None.
+        window (float, optional): Window length, in seconds. Defaults to 0.5.
+        step (float, optional): Time between the starts of consecutive windows, in seconds. Defaults to 0.1.
+        baseline (tuple[float, float] | None, optional): Window `[start, end)` relative to the event whose mean
+            gives the null features. Defaults to every sample before the event.
+        min_rt (float, optional): Trials with a response time below this, in seconds, are dropped. Defaults to
+            0.2.
+        min_trials (int, optional): Trials each class needs in a group. Defaults to 10.
+        folds (int, optional): Folds per repeat. Defaults to 5.
+        repeats (int, optional): Repeats of the k-fold. Defaults to 10.
+        shuffles (int, optional): Label shuffles for the `NULL_SCORES`; 0 leaves the columns out. Defaults to 200.
+        seed (int | None, optional): Seed for the splits and the shuffles. Defaults to 42.
+
+    Returns:
+        pd.DataFrame: One row per decoder, region (plus `all` for the population decoder), group and window, with
+        the `ROLLING_COLUMNS`; `time` is the window centre relative to the event.
+
+    Raises:
+        ValueError: As for `decoding_table`, or if the baseline window has no sample, or `window` is shorter than a
+            sample or longer than the traces.
+
+    Example:
+        >>> perievent = pd.read_csv("ses-01_regions_event-cueonset_perievent.csv")
+        >>> rolling = rolling_table(perievent)
+        >>> rolling.query("decoder == 'lda' and group == 'all'").pivot(index="time", columns="region", values="auroc")
+    """
+    _check_options(label, folds, repeats, shuffles, min_trials)
+    time, info = pm.perievent_trials(perievent)
+    if trials is not None:
+        extra_columns = [column for column in info.columns if column not in {"trial_index", "event_time"}]
+        info = pm.join_trials(info, trials.drop(columns=extra_columns, errors="ignore"))
+    group_skip = pm.group_skip_reason(info)
+    if group_skip:
+        msg = f"Cannot label the trials: {group_skip}"
+        raise ValueError(msg)
+    keep = pm.kept_trials(info, min_rt)
+
+    regions = list(perievent["region"].unique())
+    unbounded = np.full(len(info), np.inf)
+    cube = pc.epoch_cube(perievent, info["trial_index"].to_numpy(), time, regions, -unbounded, unbounded)
+    interval = float(np.median(np.diff(time))) if len(time) > 1 else 1.0
+    window_samples, step_samples = round(window / interval), round(step / interval)
+    starts = pc.window_starts(len(time), window_samples, step_samples)
+    centres = (time[starts] + time[starts + window_samples - 1]) / 2
+    baseline = baseline if baseline is not None else (float(time[0]), 0.0)
+    in_baseline = (time >= baseline[0]) & (time < baseline[1])
+    if not in_baseline.any():
+        msg = f"No sample within the baseline window [{baseline[0]}, {baseline[1]}) for the null."
+        raise ValueError(msg)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        features = window_features(cube, starts, window_samples)
+        baseline_features = cube[:, in_baseline].mean(axis=1)
+    present = ~np.isnan(features).all(axis=(0, 1)) & ~np.isnan(baseline_features).all(axis=0)
+    complete = present.any() & ~np.isnan(features[:, :, present]).any(axis=(1, 2))
+    complete &= ~np.isnan(baseline_features[:, present]).any(axis=1)
+    y, labelled = trial_labels(info, label)
+    usable = keep & complete & labelled
+
+    _, group_names = LABELS[label]
+    groups = pm.trial_groups(info)
+    per_group: dict[str, dict[str, typing.Any]] = {}
+    for name in group_names:
+        used = groups[name] & usable
+        counts = {"n_trials": int(used.sum()), "n_class_a": int(y[used].sum()), "n_class_b": int((1 - y[used]).sum())}
+        if min(counts["n_class_a"], counts["n_class_b"]) < min_trials:
+            per_group[name] = counts
+            continue
+        per_group[name] = counts | rolling_decoding(
+            features[used], baseline_features[used], y[used], present, folds, repeats, shuffles, seed
+        )
+    return _rolling_rows(label, regions, centres, per_group)
+
+
+def _check_options(label: str, folds: int, repeats: int, shuffles: int, min_trials: int) -> None:
+    """Check the options shared by `decoding_table` and `rolling_table`.
+
+    Raises:
+        ValueError: If `label` is unknown, `folds` is below 2, `repeats` is below 1, `shuffles` is negative, or
+            `min_trials` is below `folds`.
+    """
+    if label not in LABELS:
+        msg = f"Unknown label {label!r}; expected one of {', '.join(LABELS)}."
+        raise ValueError(msg)
+    if folds < 2:  # noqa: PLR2004
+        msg = f"folds must be at least 2, got {folds}."
+        raise ValueError(msg)
+    if repeats < 1:
+        msg = f"repeats must be at least 1, got {repeats}."
+        raise ValueError(msg)
+    if shuffles < 0:
+        msg = f"shuffles must be at least 0, got {shuffles}."
+        raise ValueError(msg)
+    if min_trials < folds:
+        msg = f"min_trials must be at least folds ({folds}), got {min_trials}."
+        raise ValueError(msg)
+
+
+def _rolling_rows(
+    label: str, regions: list[str], centres: npt.NDArray[np.float64], per_group: dict[str, dict[str, typing.Any]]
+) -> pd.DataFrame:
+    """Table of `ROLLING_COLUMNS` from each group's `rolling_decoding` scores.
+
+    Returns:
+        pd.DataFrame: One row per decoder, region, group and window, in that order, with NaN scores for the groups
+        and regions without any. The `NULL_SCORES` are present when some group has them.
+    """
+    import pandas as pd
+
+    fitted = [values[decoder] for values in per_group.values() for decoder in DECODERS if decoder in values]
+    with_null = any("p_value" in windows[-1][0] for windows in fitted)
+    columns = [column for column in ROLLING_COLUMNS if with_null or column not in NULL_SCORES]
+    scores = [*SCORES, *NULL_SCORES]
+    blocks = []
+    for decoder in DECODERS:
+        for index, region in enumerate([*regions, POPULATION]):
+            for name, values in per_group.items():
+                windows = values[decoder][index] if decoder in values else [{} for _ in centres]
+                block = {"decoder": decoder, "label": label, "region": region, "group": name, "time": centres}
+                block |= {score: [summary.get(score, np.nan) for summary in windows] for score in scores}
+                blocks.append(
+                    pd.DataFrame(block | {key: values[key] for key in ("n_trials", "n_class_a", "n_class_b")})
+                )
+    return pd.concat(blocks, ignore_index=True)[columns]
 
 
 def _rows(label: str, regions: list[str], per_group: dict[str, dict[str, typing.Any]]) -> pd.DataFrame:

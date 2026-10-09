@@ -5583,3 +5583,198 @@ class TestDecodingTable:
         pd.testing.assert_frame_equal(first, again)
         other = pdc.decoding_table(_decoding_perievent(), repeats=2, shuffles=10, seed=1).table
         assert not first["shuffle_balanced_accuracy"].equals(other["shuffle_balanced_accuracy"])
+
+
+class TestWindowFeatures:
+    def test_means(self):
+        cube = np.random.default_rng(0).standard_normal((4, 10, 2))
+        starts = pc.window_starts(10, 4, 3)
+        features = pdc.window_features(cube, starts, 4)
+        assert starts.tolist() == [0, 3, 6]
+        assert features.shape == (4, 3, 2)
+        for i, start in enumerate(starts):
+            np.testing.assert_allclose(features[:, i], cube[:, start : start + 4].mean(axis=1))
+
+
+ROLLING_STARTS = pc.window_starts(len(METRICS_GRID), 12, 2)
+ROLLING_CENTRES = (METRICS_GRID[ROLLING_STARTS] + METRICS_GRID[ROLLING_STARTS + 11]) / 2
+
+
+def _rolling_features(perievent=None):
+    """Window features of the go/no-go session, shape `(36, n_windows, 3)`."""
+    perievent = perievent if perievent is not None else _decoding_perievent()
+    info = _gonogo_info()
+    unbounded = np.full(len(info), np.inf)
+    cube = pc.epoch_cube(
+        perievent, info["trial_index"].to_numpy(), METRICS_GRID, CONNECTIVITY_REGIONS, -unbounded, unbounded
+    )
+    return pdc.window_features(cube, ROLLING_STARTS, 12)
+
+
+@pytest.fixture(scope="module")
+def rolling_default():
+    """Rolling table of the go/no-go session with the default windows, two repeats and no shuffles."""
+    return pdc.rolling_table(_decoding_perievent(), repeats=2, shuffles=0)
+
+
+class TestRollingTable:
+    @staticmethod
+    def _rows(table, decoder, region, group):
+        rows = table[(table["decoder"] == decoder) & (table["region"] == region) & (table["group"] == group)]
+        return rows.set_index("time")
+
+    def test_layout(self, rolling_default):
+        table = rolling_default
+        regions = [*CONNECTIVITY_REGIONS, pdc.POPULATION]
+        groups = DECODING_GROUPS["stim"]
+        windows = range(len(ROLLING_STARTS))
+        assert list(table.columns) == [column for column in pdc.ROLLING_COLUMNS if column not in pdc.NULL_SCORES]
+        assert len(table) == len(pdc.DECODERS) * len(regions) * len(groups) * len(windows)
+        assert table["decoder"].tolist() == [d for d in pdc.DECODERS for _ in regions for _ in groups for _ in windows]
+        assert table["region"].tolist() == [r for _ in pdc.DECODERS for r in regions for _ in groups for _ in windows]
+        assert table["group"].tolist() == [g for _ in pdc.DECODERS for _ in regions for g in groups for _ in windows]
+        np.testing.assert_allclose(
+            table["time"], np.tile(ROLLING_CENTRES, len(pdc.DECODERS) * len(regions) * len(groups))
+        )
+        assert table["time"].iloc[0] == pytest.approx(-0.78)
+        assert table["label"].eq("stim").all()
+
+    def test_counts(self, rolling_default):
+        table = rolling_default
+        counts = table.groupby("group", sort=False)[["n_trials", "n_class_a", "n_class_b"]].agg(["min", "max"])
+        assert counts.loc["all"].tolist() == [36, 36, 18, 18, 18, 18]
+        assert counts.loc["resp-push"].tolist() == [24, 24, 12, 12, 12, 12]
+        assert counts.loc["resp-nopush"].tolist() == [12, 12, 6, 6, 6, 6]
+        assert table[table["group"] == "resp-nopush"][list(pdc.SCORES)].isna().all().all()
+        assert table[table["group"] != "resp-nopush"][list(pdc.SCORES)].notna().all().all()
+
+    @pytest.mark.parametrize("decoder", pdc.DECODERS)
+    def test_time_course(self, decoder, rolling_default):
+        table = rolling_default
+        for region in ("L_MOp", pdc.POPULATION):
+            rows = self._rows(table, decoder, region, "all")
+            # Windows wholly before the step carry nothing; windows wholly after it separate the stimuli.
+            assert rows[rows.index < -0.3]["balanced_accuracy"].mean() < 0.6
+            assert rows[rows.index < -0.3]["balanced_accuracy"].max() < 0.8
+            assert (rows[rows.index > 0.3]["balanced_accuracy"] > 0.9).all()
+            assert (rows[rows.index > 0.3]["auroc"] > 0.95).all()
+        for region in ("R_MOp", "L_SSp-ul"):
+            rows = self._rows(table, decoder, region, "all")
+            assert rows["balanced_accuracy"].mean() < 0.6
+            assert rows["auroc"].mean() < 0.65
+
+    def test_response_label(self):
+        table = pdc.rolling_table(_decoding_perievent(), label="response", min_trials=5, repeats=2, shuffles=0)
+        assert table["label"].eq("response").all()
+        assert table["group"].unique().tolist() == DECODING_GROUPS["response"]
+        for group in ("all", "stim-go"):
+            rows = self._rows(table, "lda", "L_SSp-ul", group)
+            assert (rows[rows.index > 0.3]["balanced_accuracy"] > 0.9).all()
+        # Every trial of the go group saw the go stimulus.
+        assert self._rows(table, "lda", "L_MOp", "stim-go")["balanced_accuracy"].mean() < 0.6
+
+    def test_matches_window_fits(self, rolling_default):
+        table = rolling_default
+        features = _rolling_features()
+        y, _ = pdc.trial_labels(_gonogo_info(), "stim")
+        splits = pdc.cross_validation_splits(y, 5, 2, 42)
+        for w in (0, 20, len(ROLLING_STARTS) - 1):
+            expected = pdc.score_summary(pdc.fit_scores(features[:, w, [0]], y, splits, "lda", 5))
+            row = self._rows(table, "lda", "L_MOp", "all").iloc[w]
+            for score in pdc.SCORES:
+                assert row[score] == pytest.approx(expected[score])
+            for decoder in pdc.DECODERS:
+                expected = pdc.score_summary(pdc.fit_scores(features[:, w], y, splits, decoder, 5))
+                row = self._rows(table, decoder, pdc.POPULATION, "all").iloc[w]
+                for score in pdc.SCORES:
+                    assert row[score] == pytest.approx(expected[score])
+
+    def test_null(self):
+        table = pdc.rolling_table(_decoding_perievent(), repeats=2, shuffles=20)
+        assert list(table.columns) == list(pdc.ROLLING_COLUMNS)
+        shared = [column for column in pdc.NULL_SCORES if column != "p_value"]
+        for decoder in pdc.DECODERS:
+            for region in ("L_MOp", pdc.POPULATION):
+                rows = self._rows(table, decoder, region, "all")
+                # One null per decoder, region and group, read against every window.
+                assert (rows[shared].nunique() == 1).all()
+                assert 0.35 < rows["shuffle_balanced_accuracy"].iloc[0] < 0.65
+                assert rows["shuffle_balanced_accuracy_95"].iloc[0] >= rows["shuffle_balanced_accuracy"].iloc[0]
+                assert np.allclose(rows[rows.index > 0.3]["p_value"], 1 / 21)
+                assert rows[rows.index < -0.3]["p_value"].median() > 0.1
+        fitted = table[table["group"] != "resp-nopush"]
+        assert fitted["p_value"].between(1 / 21, 1).all()
+        assert table[table["group"] == "resp-nopush"][list(pdc.NULL_SCORES)].isna().all().all()
+
+    def test_baseline(self):
+        perievent = _decoding_perievent()
+        default = pdc.rolling_table(perievent, repeats=2, shuffles=10)
+        explicit = pdc.rolling_table(perievent, baseline=(-1.0, 0.0), repeats=2, shuffles=10)
+        pd.testing.assert_frame_equal(default, explicit)
+        shorter = pdc.rolling_table(perievent, baseline=(-0.5, 0.0), repeats=2, shuffles=10)
+        pd.testing.assert_frame_equal(default[list(pdc.SCORES)], shorter[list(pdc.SCORES)])
+        assert not default["shuffle_balanced_accuracy"].equals(shorter["shuffle_balanced_accuracy"])
+        with pytest.raises(ValueError, match=r"No sample within the baseline window \[5.0, 6.0\)"):
+            pdc.rolling_table(perievent, baseline=(5.0, 6.0), repeats=2, shuffles=10)
+        with pytest.raises(ValueError, match="No sample within the baseline window"):
+            pdc.rolling_table(perievent[perievent["time"] >= 0], repeats=2, shuffles=10)
+
+    def test_window_rounding(self, rolling_default):
+        perievent = _decoding_perievent()
+        rounded = pdc.rolling_table(perievent, window=0.49, step=0.09, repeats=2, shuffles=0)
+        pd.testing.assert_frame_equal(rolling_default, rounded)
+        wider = pdc.rolling_table(perievent, window=1.0, step=0.5, repeats=2, shuffles=0)
+        starts = pc.window_starts(len(METRICS_GRID), 25, 12)
+        assert wider["time"].nunique() == len(starts)
+        assert wider["time"].iloc[0] == pytest.approx((METRICS_GRID[0] + METRICS_GRID[24]) / 2)
+
+    def test_window_errors(self):
+        with pytest.raises(ValueError, match="longer than the 101 samples"):
+            pdc.rolling_table(_decoding_perievent(), window=10.0, repeats=2, shuffles=0)
+        with pytest.raises(ValueError, match="at least one sample"):
+            pdc.rolling_table(_decoding_perievent(), step=0.001, repeats=2, shuffles=0)
+
+    def test_min_rt_drops_trials(self):
+        table = pdc.rolling_table(_decoding_perievent(), min_rt=0.5, repeats=2, shuffles=0)
+        assert table[table["group"] == "all"]["n_trials"].eq(34).all()
+        assert table[table["group"] == "all"]["n_class_a"].eq(16).all()
+
+    def test_joins_trials(self, rolling_default):
+        info = _gonogo_info()
+        columns = [column for column in info.columns if column not in {"trial_index", "event_time"}]
+        joined = pdc.rolling_table(
+            _decoding_perievent().drop(columns=columns), trials=info[columns], repeats=2, shuffles=0
+        )
+        pd.testing.assert_frame_equal(joined, rolling_default)
+
+    def test_seed(self):
+        first = pdc.rolling_table(_decoding_perievent(), repeats=2, shuffles=5)
+        again = pdc.rolling_table(_decoding_perievent(), repeats=2, shuffles=5)
+        pd.testing.assert_frame_equal(first, again)
+        other = pdc.rolling_table(_decoding_perievent(), repeats=2, shuffles=5, seed=1)
+        assert not first["accuracy_sd"].equals(other["accuracy_sd"])
+
+    def test_nan_region_left_out(self):
+        perievent = _decoding_perievent()
+        perievent.loc[perievent["region"] == "R_MOp", "F"] = np.nan
+        table = pdc.rolling_table(perievent, repeats=2, shuffles=0)
+        assert table[table["region"] == "R_MOp"][list(pdc.SCORES)].isna().all().all()
+        assert table[table["group"] == "all"]["n_trials"].eq(36).all()
+        rows = self._rows(table, "lda", pdc.POPULATION, "all")
+        assert (rows[rows.index > 0.3]["balanced_accuracy"] > 0.9).all()
+
+    def test_missing_sdt_type_raises(self):
+        with pytest.raises(ValueError, match="Cannot label the trials: no sdt_type column"):
+            pdc.rolling_table(_decoding_perievent().drop(columns=["sdt_type"]), repeats=2, shuffles=0)
+
+    @pytest.mark.parametrize(
+        ("options", "match"),
+        [
+            ({"label": "reward"}, "Unknown label 'reward'"),
+            ({"folds": 1}, "folds must be at least 2"),
+            ({"shuffles": -1}, "shuffles must be at least 0"),
+        ],
+    )
+    def test_bad_options_raise(self, options, match):
+        with pytest.raises(ValueError, match=match):
+            pdc.rolling_table(_decoding_perievent(), **options)
