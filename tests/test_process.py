@@ -16,6 +16,7 @@ from sklearn.feature_selection import mutual_info_regression
 import mesoscopy
 from mesoscopy import io
 from mesoscopy.process import connectivity as pc
+from mesoscopy.process import decoding as pdc
 from mesoscopy.process import metrics as pm
 from mesoscopy.process import perievent as pev
 from mesoscopy.process import regression as regr
@@ -4867,3 +4868,417 @@ def test_connectivity_cmd_creates_output_dir(tmp_path):
     result = CliRunner().invoke(mesoscopy.cli, args=f"process connectivity {path} -o {out_dir}")
     assert result.exit_code == 0, result.output
     assert (out_dir / "ses-01_regions_event-cueonset_connectivity.csv").exists()
+
+
+# ---------------------------------------------------------------------------
+# Decoding
+# ---------------------------------------------------------------------------
+
+DECODING_GROUPS = {"stim": ["all", "resp-push", "resp-nopush"], "response": ["all", "stim-go", "stim-nogo"]}
+
+
+def _decoding_cube(seed=0):
+    """Go/no-go traces for three regions: the first follows the stimulus, the second is noise, the third follows the
+    lever push."""
+    info = _gonogo_info()
+    rng = np.random.default_rng(seed)
+    # A step, so the epoch mean does not depend on the response time.
+    shape = (METRICS_GRID >= 0).astype(float)
+    go = np.isin(info["sdt_type"], pm.GO_TYPES)
+    push = np.isin(info["sdt_type"], pm.PUSH_TYPES)
+    noise = 0.1 * rng.standard_normal((3, len(info), len(METRICS_GRID)))
+    return np.stack([go[:, None] * shape + noise[0], noise[1], push[:, None] * shape + noise[2]], axis=-1)
+
+
+def _decoding_perievent(**kwargs):
+    """Long-format cue-aligned peri-event table of `_decoding_cube` for `CONNECTIVITY_REGIONS`."""
+    return _connectivity_perievent(_decoding_cube(**kwargs))
+
+
+def _decoding_features(perievent=None, info=None):
+    """Epoch features of the go/no-go session, shape `(36, 3)`."""
+    perievent = perievent if perievent is not None else _decoding_perievent()
+    info = info if info is not None else _gonogo_info()
+    start, end, _ = pc.epoch_bounds(info, "cue_onset", (0.0, 3.0))
+    return pdc.epoch_features(perievent, info["trial_index"].to_numpy(), METRICS_GRID, CONNECTIVITY_REGIONS, start, end)
+
+
+class TestTrialLabels:
+    def test_stim(self):
+        y, labelled = pdc.trial_labels(_gonogo_info(), "stim")
+        assert y.tolist() == [1] * 18 + [0] * 18
+        assert labelled.all()
+
+    def test_response(self):
+        y, labelled = pdc.trial_labels(_gonogo_info(), "response")
+        assert y.tolist() == [1] * 12 + [0] * 6 + [1] * 12 + [0] * 6
+        assert labelled.all()
+
+    def test_unknown_type_is_unlabelled(self):
+        info = _gonogo_info()
+        info.loc[0, "sdt_type"] = "other"
+        y, labelled = pdc.trial_labels(info, "stim")
+        assert not labelled[0]
+        assert labelled[1:].all()
+        assert y[0] == 0
+
+    def test_unknown_label_raises(self):
+        with pytest.raises(ValueError, match="Unknown label 'reward'"):
+            pdc.trial_labels(_gonogo_info(), "reward")
+
+
+class TestEpochFeatures:
+    def test_mean_over_epoch(self):
+        perievent = _decoding_perievent()
+        info = _gonogo_info()
+        start, end, _ = pc.epoch_bounds(info, "cue_onset", (0.0, 3.0))
+        cube = pc.epoch_cube(perievent, info["trial_index"].to_numpy(), METRICS_GRID, CONNECTIVITY_REGIONS, start, end)
+        features = _decoding_features(perievent, info)
+        assert features.shape == (36, 3)
+        np.testing.assert_allclose(features, np.nanmean(cube, axis=1))
+        # Go trials respond in the first region, no trial does in the second.
+        assert features[:18, 0].min() > features[18:, 0].max()
+        assert abs(features[:, 1]).max() < 0.2
+
+    def test_empty_epoch_is_nan(self):
+        perievent = _decoding_perievent()
+        info = _gonogo_info()
+        start = np.zeros(len(info))
+        end = np.where(info["trial_index"] == 0, 0.0, 1.0)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            features = pdc.epoch_features(
+                perievent, info["trial_index"].to_numpy(), METRICS_GRID, CONNECTIVITY_REGIONS, start, end
+            )
+        assert np.isnan(features[0]).all()
+        assert np.isfinite(features[1:]).all()
+
+
+class TestMakeDecoder:
+    def test_logistic(self):
+        from sklearn.linear_model import LogisticRegression
+
+        model = pdc.make_decoder("logistic")
+        assert isinstance(model[-1], LogisticRegression)
+        assert model[-1].class_weight == "balanced"
+
+    def test_lda(self):
+        from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+
+        model = pdc.make_decoder("lda")
+        assert isinstance(model[-1], LinearDiscriminantAnalysis)
+        assert model[-1].shrinkage == "auto"
+        assert model[-1].priors == [0.5, 0.5]
+
+    def test_unknown_raises(self):
+        with pytest.raises(ValueError, match="Unknown decoder 'svm'"):
+            pdc.make_decoder("svm")
+
+
+class TestCrossValidationSplits:
+    def test_stratified_partition(self):
+        y = np.array([1] * 18 + [0] * 18)
+        splits = pdc.cross_validation_splits(y, 5, 2, 42)
+        assert len(splits) == 10
+        for repeat in range(2):
+            tests = [test for _, test in splits[repeat * 5 : (repeat + 1) * 5]]
+            assert sorted(np.concatenate(tests).tolist()) == list(range(36))
+            for train, test in splits[repeat * 5 : (repeat + 1) * 5]:
+                assert set(y[test]) == {0, 1}
+                assert not set(train) & set(test)
+
+    def test_seed(self):
+        y = np.array([1] * 18 + [0] * 18)
+        same = pdc.cross_validation_splits(y, 5, 1, 0)
+        again = pdc.cross_validation_splits(y, 5, 1, 0)
+        other = pdc.cross_validation_splits(y, 5, 1, 1)
+        assert all(np.array_equal(a[1], b[1]) for a, b in zip(same, again, strict=True))
+        assert not all(np.array_equal(a[1], b[1]) for a, b in zip(same, other, strict=True))
+
+
+class TestFitScores:
+    @pytest.mark.parametrize("decoder", pdc.DECODERS)
+    def test_separable_feature(self, decoder):
+        y = np.array([1] * 18 + [0] * 18)
+        features = np.where(y == 1, 1.0, 0.0)[:, None] + 0.01 * np.random.default_rng(0).standard_normal((36, 1))
+        splits = pdc.cross_validation_splits(y, 5, 2, 42)
+        scores = pdc.fit_scores(features, y, splits, decoder, 5)
+        assert scores["accuracy"].shape == (10,)
+        assert scores["accuracy"].tolist() == [1.0] * 10
+        assert scores["balanced_accuracy"].tolist() == [1.0] * 10
+        assert scores["auroc"].tolist() == [1.0, 1.0]
+        assert (scores["tp"], scores["fn"], scores["fp"], scores["tn"]) == (18, 0, 0, 18)
+        assert scores["weights"].shape == (10, 1)
+        assert (scores["weights"] > 0).all()
+
+    def test_counts_average_over_repeats(self):
+        y = np.array([1] * 18 + [0] * 18)
+        features = np.random.default_rng(0).standard_normal((36, 1))
+        scores = pdc.fit_scores(features, y, pdc.cross_validation_splits(y, 5, 3, 42), "lda", 5)
+        assert scores["tp"] + scores["fn"] == pytest.approx(18)
+        assert scores["fp"] + scores["tn"] == pytest.approx(18)
+        assert scores["auroc"].shape == (3,)
+
+
+class TestConfusionCounts:
+    def test_counts(self):
+        y = np.array([1, 1, 1, 0, 0, 0, 0])
+        predicted = np.array([1, 1, 0, 1, 0, 0, 0])
+        assert pdc.confusion_counts(y, predicted).tolist() == [2, 1, 1, 3]
+
+
+class TestDPrime:
+    def test_known_rates(self):
+        assert pdc.d_prime(8, 2, 3, 7) == pytest.approx(sst.norm.ppf(0.8) - sst.norm.ppf(0.3))
+
+    def test_perfect_is_finite(self):
+        assert pdc.d_prime(10, 0, 0, 10) == pytest.approx(2 * sst.norm.ppf(1 - 1 / 20))
+        assert pdc.d_prime(0, 10, 10, 0) == pytest.approx(-2 * sst.norm.ppf(1 - 1 / 20))
+
+    def test_missing_class_is_nan(self):
+        assert np.isnan(pdc.d_prime(0, 0, 3, 7))
+        assert np.isnan(pdc.d_prime(8, 2, 0, 0))
+
+
+class TestFBeta:
+    def test_known_counts(self):
+        assert pdc.f_beta(8, 2, 3) == pytest.approx(40 / 51)
+        assert pdc.f_beta(8, 2, 3, beta=1.0) == pytest.approx(16 / 21)
+
+    def test_nothing_positive_is_nan(self):
+        assert np.isnan(pdc.f_beta(0, 0, 0))
+
+
+class TestScoreSummary:
+    def test_summary(self):
+        scores = {
+            "accuracy": np.array([0.8, 1.0]),
+            "balanced_accuracy": np.array([0.75, 1.0]),
+            "auroc": np.array([0.9, 1.0]),
+            "tp": 8.0,
+            "fn": 2.0,
+            "fp": 3.0,
+            "tn": 7.0,
+        }
+        summary = pdc.score_summary(scores)
+        assert list(summary) == list(pdc.SCORES)
+        assert summary["accuracy"] == pytest.approx(0.9)
+        assert summary["accuracy_sd"] == pytest.approx(np.std([0.8, 1.0], ddof=1))
+        assert summary["balanced_accuracy"] == pytest.approx(0.875)
+        assert summary["auroc"] == pytest.approx(0.95)
+        assert summary["d_prime"] == pytest.approx(pdc.d_prime(8, 2, 3, 7))
+        assert summary["f2"] == pytest.approx(40 / 51)
+        assert (summary["tp"], summary["fn"], summary["fp"], summary["tn"]) == (8, 2, 3, 7)
+
+    def test_single_fold_sd_is_nan(self):
+        scores = {name: np.array([1.0]) for name in ("accuracy", "balanced_accuracy", "auroc")}
+        summary = pdc.score_summary(scores | {"tp": 1.0, "fn": 0.0, "fp": 0.0, "tn": 1.0})
+        assert np.isnan(summary["accuracy_sd"])
+        assert np.isnan(summary["balanced_accuracy_sd"])
+
+
+class TestUsableTrials:
+    def test_nan_region_and_trial(self):
+        features = np.ones((4, 3))
+        features[:, 1] = np.nan
+        features[2, 0] = np.nan
+        complete, present = pdc.usable_trials(features)
+        assert complete.tolist() == [True, True, False, True]
+        assert present.tolist() == [True, False, True]
+
+    def test_nothing_present(self):
+        complete, present = pdc.usable_trials(np.full((4, 3), np.nan))
+        assert not complete.any()
+        assert not present.any()
+
+
+class TestDecodingTable:
+    @staticmethod
+    def _row(table, decoder, region, group):
+        return table[(table["decoder"] == decoder) & (table["region"] == region) & (table["group"] == group)].iloc[0]
+
+    def test_layout(self):
+        tables = pdc.decoding_table(_decoding_perievent(), repeats=2)
+        table = tables.table
+        regions = [*CONNECTIVITY_REGIONS, pdc.POPULATION]
+        groups = DECODING_GROUPS["stim"]
+        assert list(table.columns) == list(pdc.TABLE_COLUMNS)
+        assert table["decoder"].tolist() == [d for d in pdc.DECODERS for _ in regions for _ in groups]
+        assert table["region"].tolist() == [r for _ in pdc.DECODERS for r in regions for _ in groups]
+        assert table["group"].tolist() == groups * (len(regions) * len(pdc.DECODERS))
+        assert table["label"].eq("stim").all()
+        weights = tables.weights
+        assert list(weights.columns) == list(pdc.WEIGHT_COLUMNS)
+        assert weights["decoder"].tolist() == [d for d in pdc.DECODERS for _ in groups for _ in CONNECTIVITY_REGIONS]
+        assert weights["group"].tolist() == [g for _ in pdc.DECODERS for g in groups for _ in CONNECTIVITY_REGIONS]
+        assert weights["region"].tolist() == CONNECTIVITY_REGIONS * (len(groups) * len(pdc.DECODERS))
+
+    def test_counts(self):
+        table = pdc.decoding_table(_decoding_perievent(), repeats=2).table
+        counts = table.groupby("group", sort=False)[["n_trials", "n_class_a", "n_class_b"]].agg(["min", "max"])
+        assert counts.loc["all"].tolist() == [36, 36, 18, 18, 18, 18]
+        assert counts.loc["resp-push"].tolist() == [24, 24, 12, 12, 12, 12]
+        assert counts.loc["resp-nopush"].tolist() == [12, 12, 6, 6, 6, 6]
+
+    @pytest.mark.parametrize("decoder", pdc.DECODERS)
+    def test_stimulus_region_decodes(self, decoder):
+        table = pdc.decoding_table(_decoding_perievent(), repeats=2).table
+        row = self._row(table, decoder, "L_MOp", "all")
+        assert row["balanced_accuracy"] > 0.9
+        assert row["accuracy"] > 0.9
+        assert row["auroc"] > 0.95
+        assert row["d_prime"] > 2
+        assert row["f2"] > 0.9
+        assert row["tp"] + row["fn"] == pytest.approx(18)
+        assert row["fp"] + row["tn"] == pytest.approx(18)
+        assert row["balanced_accuracy_sd"] >= 0
+        # The stimulus still decodes among the pushed trials, where hits meet false alarms.
+        assert self._row(table, decoder, "L_MOp", "resp-push")["balanced_accuracy"] > 0.9
+        # The population decoder follows the informative region.
+        assert self._row(table, decoder, pdc.POPULATION, "all")["balanced_accuracy"] > 0.9
+
+    @pytest.mark.parametrize("decoder", pdc.DECODERS)
+    def test_uninformative_regions_near_chance(self, decoder):
+        table = pdc.decoding_table(_decoding_perievent(), repeats=2).table
+        noise = self._row(table, decoder, "R_MOp", "all")
+        assert abs(noise["balanced_accuracy"] - 0.5) < 0.2
+        assert noise["auroc"] < 0.7
+        assert abs(noise["d_prime"]) < 1
+        # The push region does not tell the stimuli apart among the pushed trials.
+        push = self._row(table, decoder, "L_SSp-ul", "resp-push")
+        assert abs(push["balanced_accuracy"] - 0.5) < 0.25
+
+    def test_response_label(self):
+        tables = pdc.decoding_table(_decoding_perievent(), label="response", min_trials=5, repeats=2)
+        table = tables.table
+        assert table["label"].eq("response").all()
+        assert table["group"].unique().tolist() == DECODING_GROUPS["response"]
+        counts = table.groupby("group", sort=False)[["n_trials", "n_class_a", "n_class_b"]].first()
+        assert counts.loc["all"].tolist() == [36, 24, 12]
+        assert counts.loc["stim-go"].tolist() == [18, 12, 6]
+        assert counts.loc["stim-nogo"].tolist() == [18, 12, 6]
+        for decoder in pdc.DECODERS:
+            assert self._row(table, decoder, "L_SSp-ul", "all")["balanced_accuracy"] > 0.9
+            assert self._row(table, decoder, "L_SSp-ul", "stim-go")["balanced_accuracy"] > 0.9
+            # Every trial of a go group saw the go stimulus.
+            assert abs(self._row(table, decoder, "L_MOp", "stim-go")["balanced_accuracy"] - 0.5) < 0.35
+        assert tables.weights["label"].eq("response").all()
+
+    def test_min_trials(self):
+        tables = pdc.decoding_table(_decoding_perievent(), repeats=2)
+        rows = tables.table[tables.table["group"] == "resp-nopush"]
+        assert rows[list(pdc.SCORES)].isna().all().all()
+        assert rows["n_trials"].tolist() == [12] * 8
+        weights = tables.weights[tables.weights["group"] == "resp-nopush"]
+        assert weights[["weight", "weight_sd"]].isna().all().all()
+
+        lowered = pdc.decoding_table(_decoding_perievent(), min_trials=5, repeats=2)
+        rows = lowered.table[lowered.table["group"] == "resp-nopush"]
+        assert rows[list(pdc.SCORES)].notna().all().all()
+        assert self._row(lowered.table, "lda", "L_MOp", "resp-nopush")["balanced_accuracy"] > 0.8
+        assert lowered.weights[lowered.weights["group"] == "resp-nopush"]["weight"].notna().all()
+
+        # Every group, including all trials, needs the trials.
+        strict = pdc.decoding_table(_decoding_perievent(), min_trials=20, repeats=2)
+        assert strict.table[list(pdc.SCORES)].isna().all().all()
+        assert strict.table["n_trials"].tolist() == tables.table["n_trials"].tolist()
+
+    def test_min_rt_drops_trials(self):
+        table = pdc.decoding_table(_decoding_perievent(), min_rt=0.5, repeats=2).table
+        # Two hits respond at 0.4 s.
+        assert table[table["group"] == "all"]["n_trials"].tolist() == [34] * 8
+        assert table[table["group"] == "all"]["n_class_a"].tolist() == [16] * 8
+        assert table[table["group"] == "resp-push"]["n_trials"].tolist() == [22] * 8
+
+    def test_weights_favour_informative_region(self):
+        weights = pdc.decoding_table(_decoding_perievent(), repeats=2).weights
+        for decoder in pdc.DECODERS:
+            rows = weights[(weights["decoder"] == decoder) & (weights["group"] == "all")].set_index("region")
+            assert rows.loc["L_MOp", "weight"] > 0
+            assert rows.loc["L_MOp", "weight"] > abs(rows.loc["R_MOp", "weight"])
+            assert rows.loc["L_MOp", "weight"] > abs(rows.loc["L_SSp-ul", "weight"])
+            assert (rows["weight_sd"] >= 0).all()
+
+    def test_matches_fit_scores(self):
+        perievent = _decoding_perievent()
+        table = pdc.decoding_table(perievent, repeats=2).table
+        features = _decoding_features(perievent)
+        y, _ = pdc.trial_labels(_gonogo_info(), "stim")
+        splits = pdc.cross_validation_splits(y, 5, 2, 42)
+        for decoder in pdc.DECODERS:
+            expected = pdc.score_summary(pdc.fit_scores(features[:, [0]], y, splits, decoder, 5))
+            row = self._row(table, decoder, "L_MOp", "all")
+            for score in pdc.SCORES:
+                assert row[score] == pytest.approx(expected[score])
+            population = pdc.score_summary(pdc.fit_scores(features, y, splits, decoder, 5))
+            row = self._row(table, decoder, pdc.POPULATION, "all")
+            assert row["balanced_accuracy"] == pytest.approx(population["balanced_accuracy"])
+
+    def test_seed(self):
+        first = pdc.decoding_table(_decoding_perievent(), repeats=2)
+        again = pdc.decoding_table(_decoding_perievent(), repeats=2)
+        pd.testing.assert_frame_equal(first.table, again.table)
+        pd.testing.assert_frame_equal(first.weights, again.weights)
+        other = pdc.decoding_table(_decoding_perievent(), repeats=2, seed=1)
+        assert not first.table["accuracy_sd"].equals(other.table["accuracy_sd"])
+
+    def test_nan_region_left_out(self):
+        perievent = _decoding_perievent()
+        perievent.loc[perievent["region"] == "R_MOp", "F"] = np.nan
+        tables = pdc.decoding_table(perievent, repeats=2)
+        rows = tables.table[tables.table["region"] == "R_MOp"]
+        assert rows[list(pdc.SCORES)].isna().all().all()
+        assert rows["n_trials"].tolist() == [36, 24, 12] * 2
+        assert self._row(tables.table, "lda", pdc.POPULATION, "all")["balanced_accuracy"] > 0.9
+        weights = tables.weights[tables.weights["group"] == "all"].set_index("region")
+        assert weights["weight"].isna().tolist() == [False, True, False] * 2
+
+    def test_all_nan_is_empty(self):
+        perievent = _decoding_perievent()
+        perievent["F"] = np.nan
+        tables = pdc.decoding_table(perievent, repeats=2)
+        assert tables.table[list(pdc.SCORES)].isna().all().all()
+        assert tables.table["n_trials"].eq(0).all()
+        assert tables.weights["weight"].isna().all()
+
+    def test_nan_trial_dropped(self):
+        perievent = _decoding_perievent()
+        perievent.loc[(perievent["trial_index"] == 0) & (perievent["region"] == "R_MOp"), "F"] = np.nan
+        table = pdc.decoding_table(perievent, repeats=2).table
+        assert table[table["group"] == "all"]["n_trials"].tolist() == [35] * 8
+        assert table[table["group"] == "all"]["n_class_a"].tolist() == [17] * 8
+
+    def test_joins_trials(self):
+        info = _gonogo_info()
+        columns = [column for column in info.columns if column not in {"trial_index", "event_time"}]
+        joined = pdc.decoding_table(_decoding_perievent().drop(columns=columns), trials=info[columns], repeats=2)
+        expected = pdc.decoding_table(_decoding_perievent(), repeats=2)
+        pd.testing.assert_frame_equal(joined.table, expected.table)
+        pd.testing.assert_frame_equal(joined.weights, expected.weights)
+
+    def test_without_epoch_columns_uses_response_window(self):
+        perievent = _decoding_perievent().drop(columns=["cue_onset", "response_time"])
+        with pytest.warns(UserWarning, match="Using the response window as the epoch"):
+            table = pdc.decoding_table(perievent, response=(0.0, 1.0), repeats=2).table
+        assert self._row(table, "lda", "L_MOp", "all")["balanced_accuracy"] > 0.9
+
+    def test_missing_sdt_type_raises(self):
+        with pytest.raises(ValueError, match="Cannot label the trials: no sdt_type column"):
+            pdc.decoding_table(_decoding_perievent().drop(columns=["sdt_type"]))
+
+    @pytest.mark.parametrize(
+        ("options", "match"),
+        [
+            ({"label": "reward"}, "Unknown label 'reward'"),
+            ({"folds": 1}, "folds must be at least 2"),
+            ({"repeats": 0}, "repeats must be at least 1"),
+            ({"min_trials": 3}, r"min_trials must be at least folds \(5\)"),
+        ],
+    )
+    def test_bad_options_raise(self, options, match):
+        with pytest.raises(ValueError, match=match):
+            pdc.decoding_table(_decoding_perievent(), **options)
+
+    def test_missing_columns_raises(self):
+        with pytest.raises(ValueError, match="lacks the F column"):
+            pdc.decoding_table(_decoding_perievent().drop(columns="F"))
