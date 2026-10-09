@@ -5228,6 +5228,14 @@ class TestRegionDecisions:
         np.testing.assert_allclose(decisions, 0.0, atol=1e-12)
 
     @pytest.mark.parametrize("decoder", pdc.DECODERS)
+    def test_near_constant_feature_predicts_nothing(self, decoder):
+        # Constant up to rounding, which StandardScaler treats as constant too.
+        _, y, _, fold_of = self._problems()
+        features = 1.0 + 1e-17 * np.random.default_rng(0).standard_normal((36, 1))
+        decisions = pdc.region_decisions(features, y[None], fold_of[:1], decoder)
+        np.testing.assert_allclose(decisions, 0.0, atol=1e-12)
+
+    @pytest.mark.parametrize("decoder", pdc.DECODERS)
     def test_separable_feature(self, decoder):
         _, y, _, fold_of = self._problems()
         features = y[:, None] + 0.01 * np.random.default_rng(0).standard_normal((36, 1))
@@ -5301,9 +5309,7 @@ class TestNullSummary:
         null = np.full(9, 0.5)
         assert pdc.null_summary(0.9, null, null)["p_value"] == pytest.approx(1 / 10)
         assert pdc.null_summary(0.1, null, null)["p_value"] == pytest.approx(1.0)
-        assert np.isnan(pdc.null_summary(float("nan"), null, null)["p_value"]) or (
-            pdc.null_summary(float("nan"), null, null)["p_value"] == pytest.approx(1 / 10)
-        )
+        assert np.isnan(pdc.null_summary(float("nan"), null, null)["p_value"])
 
     def test_single_shuffle_sd_is_nan(self):
         summary = pdc.null_summary(0.5, np.array([0.5]), np.array([0.5]))
@@ -5477,8 +5483,10 @@ class TestDecodingTable:
     def test_all_nan_is_empty(self):
         perievent = _decoding_perievent()
         perievent["F"] = np.nan
-        tables = pdc.decoding_table(perievent, repeats=2, shuffles=0)
-        assert tables.table[list(pdc.SCORES)].isna().all().all()
+        tables = pdc.decoding_table(perievent, repeats=2, shuffles=5)
+        # The columns follow the options, not the data.
+        assert list(tables.table.columns) == list(pdc.TABLE_COLUMNS)
+        assert tables.table[[*pdc.SCORES, *pdc.NULL_SCORES]].isna().all().all()
         assert tables.table["n_trials"].eq(0).all()
         assert tables.weights["weight"].isna().all()
 
@@ -5612,19 +5620,19 @@ def _rolling_features(perievent=None):
 
 
 @pytest.fixture(scope="module")
-def rolling_default():
+def decoding_rolling_default():
     """Rolling table of the go/no-go session with the default windows, two repeats and no shuffles."""
     return pdc.rolling_table(_decoding_perievent(), repeats=2, shuffles=0)
 
 
-class TestRollingTable:
+class TestDecodingRollingTable:
     @staticmethod
     def _rows(table, decoder, region, group):
         rows = table[(table["decoder"] == decoder) & (table["region"] == region) & (table["group"] == group)]
         return rows.set_index("time")
 
-    def test_layout(self, rolling_default):
-        table = rolling_default
+    def test_layout(self, decoding_rolling_default):
+        table = decoding_rolling_default
         regions = [*CONNECTIVITY_REGIONS, pdc.POPULATION]
         groups = DECODING_GROUPS["stim"]
         windows = range(len(ROLLING_STARTS))
@@ -5639,8 +5647,8 @@ class TestRollingTable:
         assert table["time"].iloc[0] == pytest.approx(-0.78)
         assert table["label"].eq("stim").all()
 
-    def test_counts(self, rolling_default):
-        table = rolling_default
+    def test_counts(self, decoding_rolling_default):
+        table = decoding_rolling_default
         counts = table.groupby("group", sort=False)[["n_trials", "n_class_a", "n_class_b"]].agg(["min", "max"])
         assert counts.loc["all"].tolist() == [36, 36, 18, 18, 18, 18]
         assert counts.loc["resp-push"].tolist() == [24, 24, 12, 12, 12, 12]
@@ -5649,8 +5657,8 @@ class TestRollingTable:
         assert table[table["group"] != "resp-nopush"][list(pdc.SCORES)].notna().all().all()
 
     @pytest.mark.parametrize("decoder", pdc.DECODERS)
-    def test_time_course(self, decoder, rolling_default):
-        table = rolling_default
+    def test_time_course(self, decoder, decoding_rolling_default):
+        table = decoding_rolling_default
         for region in ("L_MOp", pdc.POPULATION):
             rows = self._rows(table, decoder, region, "all")
             # Windows wholly before the step carry nothing; windows wholly after it separate the stimuli.
@@ -5673,8 +5681,8 @@ class TestRollingTable:
         # Every trial of the go group saw the go stimulus.
         assert self._rows(table, "lda", "L_MOp", "stim-go")["balanced_accuracy"].mean() < 0.6
 
-    def test_matches_window_fits(self, rolling_default):
-        table = rolling_default
+    def test_matches_window_fits(self, decoding_rolling_default):
+        table = decoding_rolling_default
         features = _rolling_features()
         y, _ = pdc.trial_labels(_gonogo_info(), "stim")
         splits = pdc.cross_validation_splits(y, 5, 2, 42)
@@ -5719,10 +5727,10 @@ class TestRollingTable:
         with pytest.raises(ValueError, match="No sample within the baseline window"):
             pdc.rolling_table(perievent[perievent["time"] >= 0], repeats=2, shuffles=10)
 
-    def test_window_rounding(self, rolling_default):
+    def test_window_rounding(self, decoding_rolling_default):
         perievent = _decoding_perievent()
         rounded = pdc.rolling_table(perievent, window=0.49, step=0.09, repeats=2, shuffles=0)
-        pd.testing.assert_frame_equal(rolling_default, rounded)
+        pd.testing.assert_frame_equal(decoding_rolling_default, rounded)
         wider = pdc.rolling_table(perievent, window=1.0, step=0.5, repeats=2, shuffles=0)
         starts = pc.window_starts(len(METRICS_GRID), 25, 12)
         assert wider["time"].nunique() == len(starts)
@@ -5739,13 +5747,13 @@ class TestRollingTable:
         assert table[table["group"] == "all"]["n_trials"].eq(34).all()
         assert table[table["group"] == "all"]["n_class_a"].eq(16).all()
 
-    def test_joins_trials(self, rolling_default):
+    def test_joins_trials(self, decoding_rolling_default):
         info = _gonogo_info()
         columns = [column for column in info.columns if column not in {"trial_index", "event_time"}]
         joined = pdc.rolling_table(
             _decoding_perievent().drop(columns=columns), trials=info[columns], repeats=2, shuffles=0
         )
-        pd.testing.assert_frame_equal(joined, rolling_default)
+        pd.testing.assert_frame_equal(joined, decoding_rolling_default)
 
     def test_seed(self):
         first = pdc.rolling_table(_decoding_perievent(), repeats=2, shuffles=5)
@@ -5753,6 +5761,16 @@ class TestRollingTable:
         pd.testing.assert_frame_equal(first, again)
         other = pdc.rolling_table(_decoding_perievent(), repeats=2, shuffles=5, seed=1)
         assert not first["accuracy_sd"].equals(other["accuracy_sd"])
+
+    def test_nan_sample_kept(self, decoding_rolling_default):
+        perievent = _decoding_perievent()
+        first = (perievent["trial_index"] == 0) & (perievent["region"] == "R_MOp")
+        perievent.loc[first & (perievent["time"] == METRICS_GRID[0]), "F"] = np.nan
+        table = pdc.rolling_table(perievent, repeats=2, shuffles=0)
+        assert table["n_trials"].tolist() == decoding_rolling_default["n_trials"].tolist()
+        # The other regions are untouched.
+        rows = self._rows(table, "lda", "L_MOp", "all")
+        pd.testing.assert_frame_equal(rows, self._rows(decoding_rolling_default, "lda", "L_MOp", "all"))
 
     def test_nan_region_left_out(self):
         perievent = _decoding_perievent()
