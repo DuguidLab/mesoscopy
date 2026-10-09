@@ -41,7 +41,7 @@ positive population weight means higher activity favours it. The weights of the 
 `<stem>_label-stim_decoding-weights.csv`, one row per decoder, group and region, with the mean and SD over the fits.
 
 Groups where either class has fewer than `--min-trials` trials (default 10) keep their counts and are otherwise
-empty. Without `--shuffles` the shuffle columns have no column.
+empty. With `--shuffles 0` the shuffle columns are left out.
 
 ## Labels and groups
 
@@ -91,10 +91,10 @@ peri-event window.
 mesoscopy process decode /path/to/recording_smoothed_regions_event-cueonset_perievent.csv --with-rolling
 ```
 
-Each window's feature is the region mean over its samples, with no epoch. `--rolling-window` (default 0.5 s) sets
-the window length and `--rolling-step` (default 0.1 s) the time between windows, both rounded to whole samples. At
-25 Hz the defaults give windows of 0.48 s every 0.08 s. The table has one row per decoder, region, group and
-window, and `time` is the window centre relative to the event.
+Each window's feature is the region mean over its samples, so the epoch options do not apply. `--rolling-window`
+(default 0.5 s) sets the window length and `--rolling-step` (default 0.1 s) the time between windows, both rounded
+to whole samples. At 25 Hz the defaults give windows of 0.48 s every 0.08 s. The table has one row per decoder,
+region, group and window, and `time` is the window centre relative to the event.
 
 The chance level is taken once per decoder, region and group on the `--baseline` window (default every sample
 before the event), since shuffled labels give the same chance level in every window. The shuffle columns therefore
