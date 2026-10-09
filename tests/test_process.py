@@ -5778,3 +5778,171 @@ class TestRollingTable:
     def test_bad_options_raise(self, options, match):
         with pytest.raises(ValueError, match=match):
             pdc.rolling_table(_decoding_perievent(), **options)
+
+
+def _decode_paths(output_dir, label="stim"):
+    stem = pathlib.Path(output_dir) / f"ses-01_regions_event-cueonset_label-{label}_decoding"
+    return (
+        stem.with_name(stem.name + ".csv"),
+        stem.with_name(stem.name + "-weights.csv"),
+        stem.with_name(stem.name + "-rolling.csv"),
+    )
+
+
+def test_decode_cmd(output_dir, tmp_path):
+    path = tmp_path / "ses-01_regions_event-cueonset_perievent.csv"
+    _decoding_perievent().to_csv(path, index=False)
+    result = CliRunner().invoke(mesoscopy.cli, args=f"process decode {path} -o {output_dir} --repeats 2 --shuffles 10")
+    assert result.exit_code == 0, result.output
+    table_path, weights_path, rolling_path = _decode_paths(output_dir)
+    assert f"Saved decoding scores at {table_path}" in result.output
+    assert f"Saved population weights at {weights_path}" in result.output
+    assert "Warning" not in result.output
+    expected = pdc.decoding_table(pd.read_csv(path), repeats=2, shuffles=10)
+    pd.testing.assert_frame_equal(pd.read_csv(table_path), expected.table, check_dtype=False)
+    pd.testing.assert_frame_equal(pd.read_csv(weights_path), expected.weights, check_dtype=False)
+    assert list(pd.read_csv(table_path).columns) == list(pdc.TABLE_COLUMNS)
+    assert not rolling_path.exists()
+
+
+def test_decode_cmd_options(output_dir, tmp_path):
+    path = tmp_path / "ses-01_regions_event-cueonset_perievent.csv"
+    _decoding_perievent().to_csv(path, index=False)
+    result = CliRunner().invoke(
+        mesoscopy.cli,
+        args=f"process decode {path} -o {output_dir} -l response --response 0 1 --min-trials 5 --no-mask-response"
+        " --min-rt 0.5 --response-pad 0.2 --folds 4 --repeats 2 --shuffles 0 --seed 1",
+    )
+    assert result.exit_code == 0, result.output
+    table_path, weights_path, _ = _decode_paths(output_dir, "response")
+    expected = pdc.decoding_table(
+        pd.read_csv(path),
+        label="response",
+        response=(0.0, 1.0),
+        mask_response=False,
+        min_rt=0.5,
+        response_pad=0.2,
+        min_trials=5,
+        folds=4,
+        repeats=2,
+        shuffles=0,
+        seed=1,
+    )
+    table = pd.read_csv(table_path)
+    pd.testing.assert_frame_equal(table, expected.table, check_dtype=False)
+    pd.testing.assert_frame_equal(pd.read_csv(weights_path), expected.weights, check_dtype=False)
+    assert "p_value" not in table.columns
+    assert table["label"].eq("response").all()
+    assert table["group"].unique().tolist() == DECODING_GROUPS["response"]
+
+
+def test_decode_cmd_per_trial_end(output_dir, tmp_path):
+    path = tmp_path / "ses-01_regions_event-cueonset_perievent.csv"
+    _decoding_perievent().to_csv(path, index=False)
+    result = CliRunner().invoke(
+        mesoscopy.cli, args=f"process decode {path} -o {output_dir} --per-trial-end --repeats 2 --shuffles 0"
+    )
+    assert result.exit_code == 0, result.output
+    table = pd.read_csv(_decode_paths(output_dir)[0])
+    expected = pdc.decoding_table(pd.read_csv(path), per_trial_end=True, repeats=2, shuffles=0).table
+    pd.testing.assert_frame_equal(table, expected, check_dtype=False)
+    default = pdc.decoding_table(pd.read_csv(path), repeats=2, shuffles=0).table
+    assert not table["accuracy"].equals(default["accuracy"])
+
+
+def test_decode_cmd_rolling(output_dir, tmp_path):
+    path = tmp_path / "ses-01_regions_event-cueonset_perievent.csv"
+    _decoding_perievent().to_csv(path, index=False)
+    result = CliRunner().invoke(
+        mesoscopy.cli,
+        args=f"process decode {path} -o {output_dir} --with-rolling --rolling-window 1 --rolling-step 0.5"
+        " --baseline -0.5 0 --repeats 2 --shuffles 5",
+    )
+    assert result.exit_code == 0, result.output
+    table_path, _, rolling_path = _decode_paths(output_dir)
+    assert f"Saved rolling decoding scores at {rolling_path}" in result.output
+    assert table_path.exists()
+    expected = pdc.rolling_table(pd.read_csv(path), window=1.0, step=0.5, baseline=(-0.5, 0.0), repeats=2, shuffles=5)
+    pd.testing.assert_frame_equal(pd.read_csv(rolling_path), expected, check_dtype=False)
+
+
+def test_decode_cmd_rolling_window_too_long(output_dir, tmp_path):
+    path = tmp_path / "ses-01_regions_event-cueonset_perievent.csv"
+    _decoding_perievent().to_csv(path, index=False)
+    result = CliRunner().invoke(
+        mesoscopy.cli,
+        args=f"process decode {path} -o {output_dir} --with-rolling --rolling-window 10 --repeats 2 --shuffles 0",
+    )
+    assert result.exit_code == 1
+    assert "longer than the 101 samples" in result.output
+    assert "Check --rolling-window, --rolling-step and --baseline." in result.output
+    assert _decode_paths(output_dir)[0].exists()
+
+
+def test_decode_cmd_joins_trials(output_dir, tmp_path):
+    perievent = _decoding_perievent()
+    columns = [column for column in perievent.columns if column not in pm.PERIEVENT_COLUMNS]
+    path = tmp_path / "ses-01_regions_event-cueonset_perievent.csv"
+    perievent.drop(columns=columns).to_csv(path, index=False)
+    trials_path = tmp_path / "ses-01_trials.csv"
+    perievent.drop_duplicates("trial_index")[columns].to_csv(trials_path, index=False)
+    result = CliRunner().invoke(
+        mesoscopy.cli, args=f"process decode {path} -o {output_dir} -t {trials_path} --repeats 2 --shuffles 0"
+    )
+    assert result.exit_code == 0, result.output
+    assert "Loading trials" in result.output
+    table = pd.read_csv(_decode_paths(output_dir)[0])
+    expected = pdc.decoding_table(perievent, repeats=2, shuffles=0).table
+    pd.testing.assert_frame_equal(table, expected, check_dtype=False)
+
+
+def test_decode_cmd_without_sdt_type(output_dir, tmp_path):
+    path = tmp_path / "ses-01_regions_event-cueonset_perievent.csv"
+    _decoding_perievent().drop(columns="sdt_type").to_csv(path, index=False)
+    result = CliRunner().invoke(mesoscopy.cli, args=f"process decode {path} -o {output_dir} --repeats 2 --shuffles 0")
+    assert result.exit_code == 1
+    assert "Cannot label the trials: no sdt_type column; pass the trials CSV." in result.output
+    assert "with the trials columns" in result.output
+
+
+def test_decode_cmd_warns_without_epoch_columns(output_dir, tmp_path):
+    path = tmp_path / "ses-01_regions_event-cueonset_perievent.csv"
+    _decoding_perievent().drop(columns=["cue_onset", "response_time"]).to_csv(path, index=False)
+    result = CliRunner().invoke(
+        mesoscopy.cli, args=f"process decode {path} -o {output_dir} --with-rolling --repeats 2 --shuffles 0"
+    )
+    assert result.exit_code == 0, result.output
+    assert result.output.count("Warning: Using the response window as the epoch") == 1
+
+
+def test_decode_cmd_missing_columns(output_dir, tmp_path):
+    path = tmp_path / "bad_perievent.csv"
+    _decoding_perievent().drop(columns="F").to_csv(path, index=False)
+    result = CliRunner().invoke(mesoscopy.cli, args=f"process decode {path} -o {output_dir}")
+    assert result.exit_code == 1
+    assert "lacks the F column(s)" in result.output
+
+
+def test_decode_cmd_empty_input(output_dir, tmp_path):
+    path = tmp_path / "empty_perievent.csv"
+    pd.DataFrame(columns=list(pm.PERIEVENT_COLUMNS)).to_csv(path, index=False)
+    result = CliRunner().invoke(mesoscopy.cli, args=f"process decode {path} -o {output_dir}")
+    assert result.exit_code == 1
+    assert "has no rows" in result.output
+
+
+def test_decode_cmd_min_trials_below_folds(output_dir, tmp_path):
+    path = tmp_path / "ses-01_regions_event-cueonset_perievent.csv"
+    _decoding_perievent().to_csv(path, index=False)
+    result = CliRunner().invoke(mesoscopy.cli, args=f"process decode {path} -o {output_dir} --min-trials 3")
+    assert result.exit_code == 1
+    assert "min_trials must be at least folds (5), got 3." in result.output
+
+
+def test_decode_cmd_creates_output_dir(tmp_path):
+    path = tmp_path / "ses-01_regions_event-cueonset_perievent.csv"
+    _decoding_perievent().to_csv(path, index=False)
+    out_dir = tmp_path / "new" / "dir"
+    result = CliRunner().invoke(mesoscopy.cli, args=f"process decode {path} -o {out_dir} --repeats 2 --shuffles 0")
+    assert result.exit_code == 0, result.output
+    assert (out_dir / "ses-01_regions_event-cueonset_label-stim_decoding.csv").exists()
