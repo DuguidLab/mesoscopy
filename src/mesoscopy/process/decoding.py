@@ -22,7 +22,9 @@
 """Trial-level decoding of  stimulus or  response from region peri-event traces.
 
 Each region, and all regions together, is used to classify the trials of a go/no-go session with a logistic
-regression and a linear discriminant decoder under repeated stratified cross-validation.
+regression and a linear discriminant decoder under repeated stratified cross-validation, against a label-shuffle
+null. The one-feature decoders are fitted in numpy over every region, fold and shuffle at once; the population
+decoder goes through scikit-learn.
 """
 
 from __future__ import annotations
@@ -64,8 +66,21 @@ SCORES = (
     "tn",
 )
 
+# Label-shuffle null of one decoder, in output column order; left out without shuffles.
+NULL_SCORES = (
+    "shuffle_accuracy",
+    "shuffle_accuracy_sd",
+    "shuffle_balanced_accuracy",
+    "shuffle_balanced_accuracy_sd",
+    "shuffle_balanced_accuracy_95",
+    "p_value",
+)
+
 # Columns of the decoding table, in order.
-TABLE_COLUMNS = ("decoder", "label", "region", "group", *SCORES, "n_trials", "n_class_a", "n_class_b")
+TABLE_COLUMNS = ("decoder", "label", "region", "group", *SCORES, *NULL_SCORES, "n_trials", "n_class_a", "n_class_b")
+
+# Elements of the per-fit standardised feature tensor processed at once by the vectorised decoders.
+_CHUNK_ELEMENTS = 4_000_000
 
 # Columns of the weights table, in order.
 WEIGHT_COLUMNS = ("decoder", "label", "group", "region", "weight", "weight_sd")
@@ -352,6 +367,283 @@ def usable_trials(features: npt.NDArray[np.float64]) -> tuple[npt.NDArray[np.boo
     return complete, present
 
 
+def fold_ids(
+    splits: list[tuple[npt.NDArray[np.int64], npt.NDArray[np.int64]]], folds: int, n_trials: int
+) -> npt.NDArray[np.int64]:
+    """Test fold of each trial per repeat.
+
+    Args:
+        splits (list[tuple[npt.NDArray[np.int64], npt.NDArray[np.int64]]]): Train and test indices from
+            `cross_validation_splits`.
+        folds (int): Folds per repeat.
+        n_trials (int): Trials.
+
+    Returns:
+        npt.NDArray[np.int64]: Fold per trial, shape `(n_repeats, n_trials)`.
+    """
+    ids = np.empty((len(splits) // folds, n_trials), dtype=np.int64)
+    for i, (_, test) in enumerate(splits):
+        ids[i // folds, test] = i % folds
+    return ids
+
+
+def _standardised(x: npt.NDArray[np.float64], train: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+    """Features standardised by each fit's training mean and SD, as `StandardScaler` does.
+
+    Returns:
+        npt.NDArray[np.float64]: Shape `(n_problems, n_folds, n_trials, n_features)`.
+    """
+    n = train.sum(axis=-1)[:, :, None]
+    mean = np.einsum("pfn,nr->pfr", train, x) / n
+    centred = x[None, None] - mean[:, :, None, :]
+    sd = np.sqrt(np.einsum("pfn,pfnr->pfr", train, centred**2) / n)
+    sd[sd == 0] = 1.0
+    return centred / sd[:, :, None, :]
+
+
+def _test_fold(values: npt.NDArray[np.float64], fold_of: npt.NDArray[np.int64]) -> npt.NDArray[np.float64]:
+    """Each trial's value from the fit it was held out of.
+
+    Returns:
+        npt.NDArray[np.float64]: Shape `(n_problems, n_trials, n_features)` from `(n_problems, n_folds, n_trials,
+        n_features)`.
+    """
+    index = fold_of[:, None, :, None]
+    return np.take_along_axis(values, np.broadcast_to(index, (*index.shape[:3], values.shape[-1])), axis=1)[:, 0]
+
+
+def lda_decisions(
+    xs: npt.NDArray[np.float64], positive: npt.NDArray[np.float64], train: npt.NDArray[np.float64]
+) -> npt.NDArray[np.float64]:
+    """Decision values of one-feature linear discriminants with equal priors, one per problem, fold and feature.
+
+    Matches scikit-learn's `lsqr` solver, with the pooled variance being the mean of the two class variances,
+    and shrinkage leaves a single variance unchanged.
+
+    Args:
+        xs (npt.NDArray[np.float64]): Standardised features from `_standardised`, shape `(n_problems, n_folds,
+            n_trials, n_features)`.
+        positive (npt.NDArray[np.float64]): 1 for positive trials, shape `(n_problems, n_trials)`.
+        train (npt.NDArray[np.float64]): 1 for training trials, shape `(n_problems, n_folds, n_trials)`.
+
+    Returns:
+        npt.NDArray[np.float64]: Decision values of every trial under every fit, same shape as `xs`; positive
+        favours the positive class.
+    """
+    weights = (train * positive[:, None, :], train * (1 - positive)[:, None, :])
+    means, variances = [], []
+    for weight in weights:
+        n = weight.sum(axis=-1)[:, :, None]
+        mean = np.einsum("pfn,pfnr->pfr", weight, xs) / n
+        means.append(mean)
+        variances.append(np.einsum("pfn,pfnr->pfr", weight, (xs - mean[:, :, None, :]) ** 2) / n)
+    pooled = 0.5 * (variances[0] + variances[1])
+    coef = np.divide(means[0] - means[1], pooled, out=np.zeros_like(pooled), where=pooled > 0)
+    intercept = -0.5 * (means[0] + means[1]) * coef
+    return xs * coef[:, :, None, :] + intercept[:, :, None, :]
+
+
+def logistic_decisions(
+    xs: npt.NDArray[np.float64],
+    positive: npt.NDArray[np.float64],
+    train: npt.NDArray[np.float64],
+    c: float = 1.0,
+    tolerance: float = 1e-8,
+    max_iter: int = 100,
+) -> npt.NDArray[np.float64]:
+    """Decision values of one-feature balanced L2 logistic regressions, one per problem, fold and feature.
+
+    Newton's method with backtracking on `0.5 * w**2 / c + sum(s_i * log(1 + exp(-y_i * (w * x_i + b))))`, the
+    objective scikit-learn's `lbfgs` solver minimises, with `s_i` the balanced class weights.
+
+    Args:
+        xs (npt.NDArray[np.float64]): Standardised features from `_standardised`, shape `(n_problems, n_folds,
+            n_trials, n_features)`.
+        positive (npt.NDArray[np.float64]): 1 for positive trials, shape `(n_problems, n_trials)`.
+        train (npt.NDArray[np.float64]): 1 for training trials, shape `(n_problems, n_folds, n_trials)`.
+        c (float, optional): Inverse L2 strength. Defaults to 1.
+        tolerance (float, optional): Largest parameter step at convergence. Defaults to 1e-8.
+        max_iter (int, optional): Newton iterations. Defaults to 100.
+
+    Returns:
+        npt.NDArray[np.float64]: Decision values of every trial under every fit, same shape as `xs`.
+    """
+    from scipy.special import expit
+
+    n_train = train.sum(axis=-1, keepdims=True)
+    n_positive = (train * positive[:, None, :]).sum(axis=-1, keepdims=True)
+    class_weight = np.where(
+        positive[:, None, :] > 0, n_train / (2 * n_positive), n_train / (2 * (n_train - n_positive))
+    )
+    weight = (train * class_weight)[..., None]
+    sign = (2 * positive - 1)[:, None, :, None]
+    target = positive[:, None, :, None]
+    shape = (*xs.shape[:2], xs.shape[3])
+    w = np.zeros(shape)
+    b = np.zeros(shape)
+
+    def objective(w: npt.NDArray[np.float64], b: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        z = xs * w[:, :, None, :] + b[:, :, None, :]
+        return 0.5 * w**2 / c + (weight * np.logaddexp(0, -sign * z)).sum(axis=2)
+
+    value = objective(w, b)
+    for _ in range(max_iter):
+        z = xs * w[:, :, None, :] + b[:, :, None, :]
+        p = expit(z)
+        residual = weight * (p - target)
+        curvature = weight * p * (1 - p)
+        g_w = w / c + (residual * xs).sum(axis=2)
+        g_b = residual.sum(axis=2)
+        h_ww = 1 / c + (curvature * xs**2).sum(axis=2)
+        h_wb = (curvature * xs).sum(axis=2)
+        h_bb = curvature.sum(axis=2)
+        det = np.maximum(h_ww * h_bb - h_wb**2, np.finfo(float).tiny)
+        step_w = (h_bb * g_w - h_wb * g_b) / det
+        step_b = (h_ww * g_b - h_wb * g_w) / det
+        scale = np.ones(shape)
+        for _ in range(20):
+            candidate = objective(w - scale * step_w, b - scale * step_b)
+            # Allow for rounding in the objective, or the search stalls at the optimum.
+            worse = candidate > value * (1 + 1e-12) + 1e-12
+            if not worse.any():
+                break
+            scale[worse] *= 0.5
+        w -= scale * step_w
+        b -= scale * step_b
+        value = objective(w, b) if worse.any() else candidate
+        if max(np.abs(scale * step_w).max(), np.abs(scale * step_b).max()) < tolerance:
+            break
+    return xs * w[:, :, None, :] + b[:, :, None, :]
+
+
+def region_decisions(
+    features: npt.NDArray[np.float64], y: npt.NDArray, fold_of: npt.NDArray[np.int64], decoder: str
+) -> npt.NDArray[np.float64]:
+    """Held-out decision values of one-feature decoders, for every problem and feature at once.
+
+    A problem is one labelling of the trials with one k-fold assignment; the fits of a fold train on the other
+    folds and score the held-out trials.
+
+    Args:
+        features (npt.NDArray[np.float64]): Features of shape `(n_trials, n_features)`, one decoder per column.
+        y (npt.NDArray): Class per trial per problem, shape `(n_problems, n_trials)`.
+        fold_of (npt.NDArray[np.int64]): Test fold per trial per problem, shape `(n_problems, n_trials)`.
+        decoder (str): One of `DECODERS`.
+
+    Returns:
+        npt.NDArray[np.float64]: Decision values of shape `(n_problems, n_trials, n_features)`.
+
+    Raises:
+        ValueError: If `decoder` is not one of `DECODERS`.
+    """
+    if decoder not in DECODERS:
+        msg = f"Unknown decoder {decoder!r}; expected one of {', '.join(DECODERS)}."
+        raise ValueError(msg)
+    folds = int(fold_of.max()) + 1
+    n_trials, n_features = features.shape
+    chunk = max(1, _CHUNK_ELEMENTS // (folds * n_trials * n_features))
+    decisions = np.empty((len(y), n_trials, n_features))
+    for first in range(0, len(y), chunk):
+        last = min(first + chunk, len(y))
+        fold = fold_of[first:last]
+        positive = np.asarray(y[first:last], dtype=np.float64)
+        train = (fold[:, None, :] != np.arange(folds)[None, :, None]).astype(np.float64)
+        xs = _standardised(features, train)
+        fitted = lda_decisions(xs, positive, train) if decoder == "lda" else logistic_decisions(xs, positive, train)
+        decisions[first:last] = _test_fold(fitted, fold)
+    return decisions
+
+
+def problem_scores(
+    decisions: npt.NDArray[np.float64], y: npt.NDArray, fold_of: npt.NDArray[np.int64]
+) -> dict[str, npt.NDArray[np.float64]]:
+    """Scores of held-out decision values per problem, fold and feature.
+
+    Args:
+        decisions (npt.NDArray[np.float64]): Held-out decision values from `region_decisions`, shape
+            `(n_problems, n_trials, n_features)`.
+        y (npt.NDArray): Class per trial per problem, shape `(n_problems, n_trials)`.
+        fold_of (npt.NDArray[np.int64]): Test fold per trial per problem, shape `(n_problems, n_trials)`.
+
+    Returns:
+        dict[str, npt.NDArray[np.float64]]: `accuracy` and `balanced_accuracy` of shape `(n_problems, n_folds,
+        n_features)`, and `auroc`, `tp`, `fn`, `fp` and `tn` of shape `(n_problems, n_features)`, the counts over
+        each problem's trials.
+    """
+    from scipy.stats import rankdata
+
+    folds = int(fold_of.max()) + 1
+    positive = np.asarray(y, dtype=np.float64)
+    negative = 1 - positive
+    predicted = (decisions > 0).astype(np.float64)
+    correct = 1 - np.abs(predicted - positive[:, :, None])
+    in_fold = (fold_of[:, :, None] == np.arange(folds)).astype(np.float64)
+    size = in_fold.sum(axis=1)
+    n_positive = np.einsum("pn,pnf->pf", positive, in_fold)
+    accuracy = np.einsum("pnr,pnf->pfr", correct, in_fold) / size[:, :, None]
+    tpr = np.einsum("pnr,pn,pnf->pfr", correct, positive, in_fold) / n_positive[:, :, None]
+    tnr = np.einsum("pnr,pn,pnf->pfr", correct, negative, in_fold) / (size - n_positive)[:, :, None]
+    tp = np.einsum("pnr,pn->pr", predicted, positive)
+    fp = np.einsum("pnr,pn->pr", predicted, negative)
+    n1 = positive.sum(axis=1)[:, None]
+    n0 = negative.sum(axis=1)[:, None]
+    rank_sum = np.einsum("pnr,pn->pr", rankdata(decisions, axis=1), positive)
+    return {
+        "accuracy": accuracy,
+        "balanced_accuracy": 0.5 * (tpr + tnr),
+        "auroc": (rank_sum - n1 * (n1 + 1) / 2) / (n1 * n0),
+        "tp": tp,
+        "fn": n1 - tp,
+        "fp": fp,
+        "tn": n0 - fp,
+    }
+
+
+def null_summary(
+    observed: float, null_accuracy: npt.NDArray[np.float64], null_balanced: npt.NDArray[np.float64]
+) -> dict[str, float]:
+    """The `NULL_SCORES` of one decoder from its label-shuffle scores.
+
+    Args:
+        observed (float): Balanced accuracy of the true labels.
+        null_accuracy (npt.NDArray[np.float64]): Accuracy per shuffle, shape `(n_shuffles,)`.
+        null_balanced (npt.NDArray[np.float64]): Balanced accuracy per shuffle, shape `(n_shuffles,)`.
+
+    Returns:
+        dict[str, float]: The mean and SD of both, the 95th percentile of the balanced accuracy, and the one-sided
+        `p_value`, the fraction of shuffles scoring at least `observed` with one added to both counts.
+    """
+    sd = (lambda values: float(np.std(values, ddof=1))) if len(null_balanced) > 1 else (lambda _: float("nan"))
+    return {
+        "shuffle_accuracy": float(np.mean(null_accuracy)),
+        "shuffle_accuracy_sd": sd(null_accuracy),
+        "shuffle_balanced_accuracy": float(np.mean(null_balanced)),
+        "shuffle_balanced_accuracy_sd": sd(null_balanced),
+        "shuffle_balanced_accuracy_95": float(np.percentile(null_balanced, 95)),
+        "p_value": float((1 + np.sum(null_balanced >= observed)) / (len(null_balanced) + 1)),
+    }
+
+
+def shuffled_labels(
+    y: npt.NDArray[np.int64], folds: int, shuffles: int, rng: np.random.Generator
+) -> tuple[npt.NDArray[np.int64], list[list[tuple[npt.NDArray[np.int64], npt.NDArray[np.int64]]]]]:
+    """Label shuffles with a stratified k-fold each.
+
+    Args:
+        y (npt.NDArray[np.int64]): Class per trial, shape `(n_trials,)`.
+        folds (int): Folds per shuffle.
+        shuffles (int): Shuffles.
+        rng (np.random.Generator): Random generator for the permutations and the splits.
+
+    Returns:
+        tuple[npt.NDArray[np.int64], list[list[tuple[npt.NDArray[np.int64], npt.NDArray[np.int64]]]]]: Shuffled
+        classes, shape `(n_shuffles, n_trials)`, and the `cross_validation_splits` of each shuffle.
+    """
+    labels = np.stack([rng.permutation(y) for _ in range(shuffles)]) if shuffles else np.empty((0, len(y)), np.int64)
+    splits = [cross_validation_splits(row, folds, 1, int(rng.integers(2**31 - 1))) for row in labels]
+    return labels, splits
+
+
 def group_decoding(
     features: npt.NDArray[np.float64],
     y: npt.NDArray[np.int64],
@@ -359,11 +651,14 @@ def group_decoding(
     present: npt.NDArray[np.bool_],
     folds: int,
     repeats: int,
+    shuffles: int,
     seed: int | None,
 ) -> dict[str, dict[str, typing.Any]]:
     """Scores of every decoder on each region and on all regions, for one trial group.
 
-    All fits share the same splits, so the regions are compared on the same test trials.
+    All fits share the same splits, and all shuffles the same permutations, so the regions are compared on the same
+    test trials. The one-feature decoders go through `region_decisions`, the population decoder through
+    `fit_scores`.
 
     Args:
         features (npt.NDArray[np.float64]): Features of the group's trials, shape `(n_trials, n_regions)`.
@@ -372,22 +667,61 @@ def group_decoding(
         present (npt.NDArray[np.bool_]): Regions with a value, shape `(n_regions,)`; the others are left out.
         folds (int): Folds per repeat.
         repeats (int): Repeats of the k-fold.
-        seed (int | None): Seed for the shuffles.
+        shuffles (int): Label shuffles for the `NULL_SCORES`; 0 leaves them out.
+        seed (int | None): Seed for the splits and the shuffles.
 
     Returns:
-        dict[str, dict[str, typing.Any]]: Per decoder, the `score_summary` of each region keyed by region, of all
-        regions keyed by `POPULATION`, and `weights`, the population weights' mean and SD over the fits per region,
-        each shape `(n_regions,)`.
+        dict[str, dict[str, typing.Any]]: Per decoder, the `score_summary` (and `null_summary`, with shuffles) of
+        each region keyed by region and of all regions keyed by `POPULATION`, and `weights`, the population
+        weights' mean and SD over the fits per region, each shape `(n_regions,)`.
     """
+    rng = np.random.default_rng(seed)
     splits = cross_validation_splits(y, folds, repeats, seed)
+    observed_folds = fold_ids(splits, folds, len(y))
+    observed_labels = np.broadcast_to(y, (repeats, len(y)))
+    null_labels, null_splits = shuffled_labels(y, folds, shuffles, rng)
+    null_folds = np.array([fold_ids(s, folds, len(y))[0] for s in null_splits], dtype=np.int64)
+
     columns = np.flatnonzero(present)
+    x = features[:, columns]
     result: dict[str, dict[str, typing.Any]] = {}
     for decoder in DECODERS:
         scores: dict[str, typing.Any] = {}
-        for column in columns:
-            scores[regions[column]] = score_summary(fit_scores(features[:, [column]], y, splits, decoder, folds))
-        population = fit_scores(features[:, columns], y, splits, decoder, folds)
-        scores[POPULATION] = score_summary(population)
+        observed = problem_scores(
+            region_decisions(x, observed_labels, observed_folds, decoder), observed_labels, observed_folds
+        )
+        null = None
+        if shuffles:
+            null = problem_scores(region_decisions(x, null_labels, null_folds, decoder), null_labels, null_folds)
+        for i, column in enumerate(columns):
+            summary = score_summary(
+                {
+                    "accuracy": observed["accuracy"][:, :, i].ravel(),
+                    "balanced_accuracy": observed["balanced_accuracy"][:, :, i].ravel(),
+                    "auroc": observed["auroc"][:, i],
+                    **{name: observed[name][:, i].mean() for name in ("tp", "fn", "fp", "tn")},
+                }
+            )
+            if null is not None:
+                summary |= null_summary(
+                    summary["balanced_accuracy"],
+                    null["accuracy"][:, :, i].mean(axis=1),
+                    null["balanced_accuracy"][:, :, i].mean(axis=1),
+                )
+            scores[regions[column]] = summary
+
+        population = fit_scores(x, y, splits, decoder, folds)
+        summary = score_summary(population)
+        if shuffles:
+            null_scores = [
+                fit_scores(x, row, s, decoder, folds) for row, s in zip(null_labels, null_splits, strict=True)
+            ]
+            summary |= null_summary(
+                summary["balanced_accuracy"],
+                np.array([n["accuracy"].mean() for n in null_scores]),
+                np.array([n["balanced_accuracy"].mean() for n in null_scores]),
+            )
+        scores[POPULATION] = summary
         mean = np.full(len(regions), np.nan)
         sd = np.full(len(regions), np.nan)
         mean[columns] = population["weights"].mean(axis=0)
@@ -397,6 +731,32 @@ def group_decoding(
     return result
 
 
+def median_end(
+    trial_info: pd.DataFrame, end: npt.NDArray[np.float64], keep: npt.NDArray[np.bool_]
+) -> npt.NDArray[np.float64]:
+    """Every trial's epoch end set to the median end of the kept trials that responded.
+
+    A common end gives every trial the same epoch, so a class whose trials all end at the median response time, as
+    misses and correct rejections do under `connectivity.epoch_bounds`, cannot be told apart by epoch length.
+
+    Args:
+        trial_info (pd.DataFrame): One row per trial, with `response_time` in seconds from the cue when known.
+        end (npt.NDArray[np.float64]): Per-trial epoch end relative to the event, shape `(n_trials,)`.
+        keep (npt.NDArray[np.bool_]): Which trials are kept, shape `(n_trials,)`.
+
+    Returns:
+        npt.NDArray[np.float64]: The common end for every trial, shape `(n_trials,)`; `end` unchanged without a
+        `response_time` column or a kept responding trial.
+    """
+    import pandas as pd
+
+    if "response_time" not in trial_info.columns:
+        return end
+    response_time = pd.to_numeric(trial_info["response_time"], errors="coerce").to_numpy(dtype=np.float64)
+    responded = (response_time >= 0) & keep
+    return np.full_like(end, np.median(end[responded])) if responded.any() else end
+
+
 def decoding_table(
     perievent: pd.DataFrame,
     label: str = "stim",
@@ -404,18 +764,23 @@ def decoding_table(
     trials: pd.DataFrame | None = None,
     event: str | None = None,
     mask_response: bool = True,
+    per_trial_end: bool = False,
     min_rt: float = 0.2,
     response_pad: float = 0.0,
     min_trials: int = 10,
     folds: int = 5,
     repeats: int = 10,
+    shuffles: int = 200,
     seed: int | None = 42,
 ) -> DecodingTables:
     """Decode the stimulus or the response of each trial from region activity, per trial group.
 
-    The feature of each trial is each region's mean over its epoch from `connectivity.epoch_bounds`. Each region,
-    and all regions together, is scored with every `DECODERS` decoder under a repeated stratified k-fold, over all
-    trials and within the groups that hold the other variable constant.
+    The feature of each trial is each region's mean over the epoch, which runs from the response window start to
+    the median response time of the trials that responded, via `connectivity.epoch_bounds` and `median_end`, so
+    every trial has the same epoch. Each region, and all regions together, is scored with every `DECODERS` decoder
+    under a repeated stratified k-fold, over all trials and within the groups that hold the other variable
+    constant. The chance level comes from fitting the same decoders to shuffled labels, each shuffle under one
+    k-fold.
 
     Args:
         perievent (pd.DataFrame): Peri-event table with `trial_index`, `event_time`, `time`, `region` and `F`
@@ -429,15 +794,19 @@ def decoding_table(
             peri-event tables without trials columns. Defaults to None.
         event (str | None, optional): Event the windows are aligned to, one of `perievent.EVENTS`. Defaults to
             the event matching `event_time`, via `metrics.infer_event`.
-        mask_response (bool, optional): End cue-aligned epochs at each trial's response. Defaults to True.
+        mask_response (bool, optional): End cue-aligned epochs at the response rather than the response window
+            end. Defaults to True.
+        per_trial_end (bool, optional): End each trial's epoch at its own response instead of the median, as
+            `connectivity.epoch_bounds` does. Defaults to False.
         min_rt (float, optional): Trials with a response time below this, in seconds, are dropped. Defaults to
             0.2.
         response_pad (float, optional): Seconds added to the end of each trial's epoch. Defaults to 0.
         min_trials (int, optional): Trials each class needs in a group; groups with fewer get empty scores.
             Defaults to 10.
         folds (int, optional): Folds per repeat. Defaults to 5.
-        repeats (int, optional): Repeats of the k-fold, each with a fresh shuffle. Defaults to 10.
-        seed (int | None, optional): Seed for the shuffles. Defaults to 42.
+        repeats (int, optional): Repeats of the k-fold, each with a fresh split. Defaults to 10.
+        shuffles (int, optional): Label shuffles for the `NULL_SCORES`; 0 leaves the columns out. Defaults to 200.
+        seed (int | None, optional): Seed for the splits and the shuffles. Defaults to 42.
 
     Returns:
         DecodingTables: `table` with one row per decoder, region (plus `all` for the population decoder) and
@@ -445,8 +814,8 @@ def decoding_table(
         weight means higher activity favours the positive class.
 
     Raises:
-        ValueError: If `label` is unknown, `folds` is below 2, `repeats` is below 1, `min_trials` is below
-            `folds`, or the trials cannot be grouped by `sdt_type`.
+        ValueError: If `label` is unknown, `folds` is below 2, `repeats` is below 1, `shuffles` is negative,
+            `min_trials` is below `folds`, or the trials cannot be grouped by `sdt_type`.
 
     Example:
         >>> perievent = pd.read_csv("ses-01_regions_event-cueonset_perievent.csv")
@@ -461,6 +830,9 @@ def decoding_table(
         raise ValueError(msg)
     if repeats < 1:
         msg = f"repeats must be at least 1, got {repeats}."
+        raise ValueError(msg)
+    if shuffles < 0:
+        msg = f"shuffles must be at least 0, got {shuffles}."
         raise ValueError(msg)
     if min_trials < folds:
         msg = f"min_trials must be at least folds ({folds}), got {min_trials}."
@@ -478,6 +850,8 @@ def decoding_table(
     response = response if response is not None else (0.0, float(time[-1]))
     event = event if event is not None else pm.infer_event(info)
     start, end, keep = pc.epoch_bounds(info, event, response, mask_response, min_rt, response_pad)
+    if mask_response and not per_trial_end:
+        end = median_end(info, end, keep)
 
     regions = list(perievent["region"].unique())
     features = epoch_features(perievent, info["trial_index"].to_numpy(), time, regions, start, end)
@@ -494,7 +868,9 @@ def decoding_table(
         if min(counts["n_class_a"], counts["n_class_b"]) < min_trials:
             per_group[name] = counts
             continue
-        per_group[name] = counts | group_decoding(features[used], y[used], regions, present, folds, repeats, seed)
+        per_group[name] = counts | group_decoding(
+            features[used], y[used], regions, present, folds, repeats, shuffles, seed
+        )
 
     return DecodingTables(_rows(label, regions, per_group), _weight_rows(label, regions, per_group))
 
@@ -504,19 +880,22 @@ def _rows(label: str, regions: list[str], per_group: dict[str, dict[str, typing.
 
     Returns:
         pd.DataFrame: One row per decoder, region and group, in that order, with NaN scores for the groups and
-        regions without any.
+        regions without any. The `NULL_SCORES` are present when some group has them.
     """
     import pandas as pd
 
+    fitted = [values[decoder] for values in per_group.values() for decoder in DECODERS if decoder in values]
+    with_null = any("p_value" in scores.get(POPULATION, {}) for scores in fitted)
+    columns = [column for column in TABLE_COLUMNS if with_null or column not in NULL_SCORES]
     rows = []
     for decoder in DECODERS:
         for region in [*regions, POPULATION]:
             for name, values in per_group.items():
                 scores = values.get(decoder, {}).get(region, {})
                 row: dict[str, typing.Any] = {"decoder": decoder, "label": label, "region": region, "group": name}
-                row |= {score: scores.get(score, np.nan) for score in SCORES}
+                row |= {score: scores.get(score, np.nan) for score in [*SCORES, *NULL_SCORES]}
                 rows.append(row | {key: values[key] for key in ("n_trials", "n_class_a", "n_class_b")})
-    return pd.DataFrame(rows, columns=list(TABLE_COLUMNS))
+    return pd.DataFrame(rows, columns=columns)
 
 
 def _weight_rows(label: str, regions: list[str], per_group: dict[str, dict[str, typing.Any]]) -> pd.DataFrame:
