@@ -19,7 +19,7 @@
 #  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
 
-"""Trial-level decoding of  stimulus or  response from region peri-event traces.
+"""Trial-level decoding of stimulus or response from region peri-event traces.
 
 Each region, and all regions together, is used to classify the trials of a go/no-go session with a logistic
 regression and a linear discriminant decoder under repeated stratified cross-validation, against a label-shuffle
