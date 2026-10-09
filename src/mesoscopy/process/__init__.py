@@ -35,6 +35,7 @@ import h5py
 import numpy as np
 
 import mesoscopy.process.connectivity as pc
+import mesoscopy.process.decoding as pdc
 import mesoscopy.process.metrics as pm
 import mesoscopy.process.perievent as pev
 from mesoscopy import io
@@ -1302,3 +1303,235 @@ def connectivity_cmd(
     output = stem + "_connectivity-rolling.csv"
     rolling_table.to_csv(output, index=False)
     click.echo(f"Saved rolling connectivity metrics at {output}")
+
+
+@process_cmd.command("decode")
+@click.argument(
+    "path",
+    type=click.Path(exists=True, dir_okay=False),
+)
+@click.option(
+    "-o",
+    "--out_dir",
+    type=click.Path(dir_okay=True),
+    default="./",
+    help="Output directory for the decoding tables.",
+)
+@click.option(
+    "-l",
+    "--label",
+    type=click.Choice(list(pdc.LABELS), case_sensitive=False),
+    default="stim",
+    show_default=True,
+    help="What to decode. stim is the go against the no-go stimulus, response the lever push against no push.",
+)
+@click.option(
+    "--response",
+    type=(float, float),
+    default=None,
+    help="Response window START END, seconds relative to the event, end inclusive. Defaults to all post-event samples.",
+)
+@click.option(
+    "-t",
+    "--trials",
+    "trials_path",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Trials CSV to join by trial_index, for peri-event files without trials columns.",
+)
+@click.option(
+    "--min-trials",
+    type=click.IntRange(min=1),
+    default=10,
+    show_default=True,
+    help="Trials each class needs in a trial group. Groups with fewer get empty scores.",
+)
+@click.option(
+    "--mask-response/--no-mask-response",
+    default=True,
+    show_default=True,
+    help="End the epoch at the response rather than at the response window end.",
+)
+@click.option(
+    "--per-trial-end",
+    is_flag=True,
+    default=False,
+    help="End each trial's epoch at its own response instead of the median response time.",
+)
+@click.option(
+    "--min-rt",
+    type=click.FloatRange(min=0),
+    default=0.2,
+    show_default=True,
+    help="Drop trials with a response time below this, in seconds.",
+)
+@click.option(
+    "--response-pad",
+    type=click.FloatRange(min=0),
+    default=0.0,
+    show_default=True,
+    help="Extend the epoch past the response by this, in seconds, within the response window.",
+)
+@click.option(
+    "--folds",
+    type=click.IntRange(min=2),
+    default=5,
+    show_default=True,
+    help="Folds of the stratified cross-validation.",
+)
+@click.option(
+    "--repeats",
+    type=click.IntRange(min=1),
+    default=10,
+    show_default=True,
+    help="Repeats of the cross-validation, each with a fresh split.",
+)
+@click.option(
+    "--shuffles",
+    type=click.IntRange(min=0),
+    default=200,
+    show_default=True,
+    help="Label shuffles for the chance level and p-values. 0 leaves the columns out.",
+)
+@click.option(
+    "--with-rolling/--no-rolling",
+    "rolling",
+    default=False,
+    show_default=True,
+    help="Also decode in windows sliding over the whole peri-event window, written to"
+    " <stem>_label-<label>_decoding-rolling.csv.",
+)
+@click.option(
+    "--rolling-window",
+    type=click.FloatRange(min=0, min_open=True),
+    default=0.5,
+    show_default=True,
+    help="Length of the rolling windows, in seconds, rounded to whole samples.",
+)
+@click.option(
+    "--rolling-step",
+    type=click.FloatRange(min=0, min_open=True),
+    default=0.1,
+    show_default=True,
+    help="Time between the starts of consecutive rolling windows, in seconds, rounded to whole samples.",
+)
+@click.option(
+    "--baseline",
+    type=(float, float),
+    default=None,
+    help="Window START END, seconds relative to the event, end exclusive, whose mean gives the chance level of the"
+    " rolling table. Defaults to every sample before the event.",
+)
+@click.option(
+    "--seed",
+    type=int,
+    default=42,
+    show_default=True,
+    help="Random seed for the splits and the shuffles.",
+)
+def decode_cmd(
+    path: str,
+    out_dir: str,
+    label: str,
+    response: tuple[float, float] | None,
+    trials_path: str | None,
+    min_trials: int,
+    mask_response: bool,
+    per_trial_end: bool,
+    min_rt: float,
+    response_pad: float,
+    folds: int,
+    repeats: int,
+    shuffles: int,
+    rolling: bool,
+    rolling_window: float,
+    rolling_step: float,
+    baseline: tuple[float, float] | None,
+    seed: int,
+) -> None:
+    """Decode the stimulus or the lever push of each trial from region activity.
+
+    PATH is the long-format *_perievent.csv written by `process peri-event` for a go/no-go session. A logistic
+    regression and a linear discriminant decoder are fitted to each region's mean activity between the cue and the
+    median response time, and to all regions together, under repeated stratified cross-validation, over all trials
+    and within the groups that hold the other variable constant. Writes <stem>_label-<label>_decoding.csv with the
+    scores and their chance level per decoder, region and trial group, and <stem>_label-<label>_decoding-weights.csv
+    with the population weights. With --with-rolling the scores are also taken in windows sliding over the
+    peri-event window and written to <stem>_label-<label>_decoding-rolling.csv.
+    """  # noqa: DOC501
+    import pandas as pd
+
+    label = label.lower()
+    if not Path(out_dir).exists():
+        click.echo(f"Creating output directory {out_dir}...")
+        Path(out_dir).mkdir(parents=True)
+
+    click.echo(f"Loading peri-event traces from {path}...")
+    perievent = pd.read_csv(path)
+    if perievent.empty:
+        msg = f"{path} has no rows; `process peri-event` kept no trials."
+        raise click.ClickException(msg)
+    trials = None
+    if trials_path is not None:
+        click.echo(f"Loading trials from {trials_path}...")
+        trials = pd.read_csv(trials_path)
+
+    with timer.Timer(message="Decoding"), warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", UserWarning)
+        try:
+            tables = pdc.decoding_table(
+                perievent,
+                label=label,
+                response=response,
+                trials=trials,
+                mask_response=mask_response,
+                per_trial_end=per_trial_end,
+                min_rt=min_rt,
+                response_pad=response_pad,
+                min_trials=min_trials,
+                folds=folds,
+                repeats=repeats,
+                shuffles=shuffles,
+                seed=seed,
+            )
+        except ValueError as error:
+            msg = f"{path}: {error} Expected the columns written by `process peri-event` with the trials columns."
+            raise click.ClickException(msg) from error
+    _echo_warnings(caught)
+
+    stem = out_dir + os.sep + Path(path).stem.removesuffix("_perievent") + f"_label-{label}"
+    output = stem + "_decoding.csv"
+    tables.table.to_csv(output, index=False)
+    click.echo(f"Saved decoding scores at {output}")
+    output = stem + "_decoding-weights.csv"
+    tables.weights.to_csv(output, index=False)
+    click.echo(f"Saved population weights at {output}")
+    if not rolling:
+        return
+
+    echoed = {str(warning.message) for warning in caught}
+    with timer.Timer(message="Decoding in rolling windows"), warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", UserWarning)
+        try:
+            rolling_table = pdc.rolling_table(
+                perievent,
+                label=label,
+                trials=trials,
+                window=rolling_window,
+                step=rolling_step,
+                baseline=baseline,
+                min_rt=min_rt,
+                min_trials=min_trials,
+                folds=folds,
+                repeats=repeats,
+                shuffles=shuffles,
+                seed=seed,
+            )
+        except ValueError as error:
+            msg = f"{path}: {error} Check --rolling-window, --rolling-step and --baseline."
+            raise click.ClickException(msg) from error
+    _echo_warnings([warning for warning in caught if str(warning.message) not in echoed])
+
+    output = stem + "_decoding-rolling.csv"
+    rolling_table.to_csv(output, index=False)
+    click.echo(f"Saved rolling decoding scores at {output}")

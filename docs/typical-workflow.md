@@ -130,4 +130,17 @@ mesoscopy process connectivity /path/to/example-recording_regions_event-cueonset
 This writes `example-recording_regions_event-cueonset_connectivity.csv` with one row per pair of regions and trial
 group. See [Connectivity](how-to/connectivity.md) for the metrics.
 
+## Decode the stimulus from region activity
+
+Given the same peri-event CSV, test whether each region, or all regions together, can tell which stimulus the animal
+saw on a trial.
+
+```bash
+mesoscopy process decode /path/to/example-recording_regions_event-cueonset_perievent.csv
+```
+
+This writes `example-recording_regions_event-cueonset_label-stim_decoding.csv` with one row per decoder, region and
+trial group, and the population weights next to it. `--label response` decodes the lever push instead. See
+[Decoding](how-to/decoding.md) for the scores.
+
 ## Next steps
