@@ -8,6 +8,10 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 - Stylistic changes to CLI help strings.
 
+### Performance
+
+- `process decode` fits the population decoders in numpy across windows, folds and shuffles at once instead of one scikit-learn fit at a time ([#204](https://github.com/DuguidLab/mesoscopy/issues/204)).
+
 ## [0.17.0] - 2026-10-12
 
 ### Added
