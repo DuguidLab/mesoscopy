@@ -70,6 +70,13 @@ mesoscopy report /path/to/example-recording_registered.h5
 mesoscopy process regions /path/to/example-recording.nwb
 ```
 
+This writes `example-recording_regions.csv` with the mean ∆F/F of each Allen atlas region in every frame.
+
+Pass `-m/--mask` to extract custom regions instead. A mask is an NPY, NPZ or TIFF file drawn on the registered
+frames. A boolean mask gives one region, named after the file or, in an NPZ file, after its key. An integer mask
+gives one region per label, named `<name>_<label>`. Masks are not mirrored across hemispheres.
+Repeat `-m` to add masks from several files, and add `--include-aba` to keep the atlas regions as well.
+
 ## Extract peri-event window activity
 
 Given a recording aligned with `mesoscopy align` and the `*_trials.csv` from `visiomode-analysis session`, extract
