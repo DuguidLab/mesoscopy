@@ -4289,15 +4289,15 @@ class TestRollingTable:
         groups = list(pm.trial_groups(_gonogo_info()))
         # 0.5 s and 0.1 s round to 12 and 2 samples at 25 Hz.
         starts = pc.window_starts(len(METRICS_GRID), 12, 2)
-        centres = (METRICS_GRID[starts] + METRICS_GRID[starts + 11]) / 2
         assert list(table.columns) == list(pc.ROLLING_COLUMNS)
         assert len(table) == len(CONNECTIVITY_PAIRS) * len(groups) * len(starts)
         assert list(zip(table["region_a"], table["region_b"], strict=True)) == [
             p for p in CONNECTIVITY_PAIRS for _ in range(len(groups) * len(starts))
         ]
         assert table["group"].tolist() == [g for g in groups for _ in starts] * len(CONNECTIVITY_PAIRS)
-        np.testing.assert_allclose(table["time"], np.tile(centres, len(CONNECTIVITY_PAIRS) * len(groups)))
-        assert table["time"].iloc[0] == pytest.approx(-0.78)
+        ends = METRICS_GRID[starts + 11]
+        np.testing.assert_array_equal(table["time"], np.tile(ends, len(CONNECTIVITY_PAIRS) * len(groups)))
+        assert table["time"].iloc[0] == pytest.approx(-0.56)
 
     def test_matches_rolling_metrics(self):
         table = pc.rolling_table(_connectivity_perievent())
@@ -4317,12 +4317,23 @@ class TestRollingTable:
         # Every trial gives every sample, before the cue and after its response.
         assert rows["n_samples"].eq(36 * 12).all()
         assert rows[list(pc.ROLLING_METRICS)].notna().all().all()
-        before = rows[rows["time"] < -0.3]
-        rising = rows[(rows["time"] >= 0.2) & (rows["time"] <= 0.3)]
+        before = rows[rows["time"] < -0.1]
+        rising = rows[(rows["time"] >= 0.4) & (rows["time"] <= 0.55)]
         assert (before["r"].abs() < 0.2).all()
         assert (rising["r"] > 0.8).all()
         assert (rising["r_residual"].abs() < 0.2).all()
         assert (rising["mi"] > rising["mi_residual"] + 0.3).all()
+
+    def test_rows_use_no_later_samples(self):
+        cube = _connectivity_cube()
+        changed = cube.copy()
+        after = METRICS_GRID > 0
+        changed[:, after] = _connectivity_cube(seed=1)[:, after]
+        table = pc.rolling_table(_connectivity_perievent(cube))
+        other = pc.rolling_table(_connectivity_perievent(changed))
+        before = table["time"] <= 0
+        pd.testing.assert_frame_equal(table[before], other[before])
+        assert (table[~before]["r"] != other[~before]["r"]).all()
 
     def test_min_trials(self):
         default = pc.rolling_table(_connectivity_perievent())
@@ -5605,7 +5616,7 @@ class TestWindowFeatures:
 
 
 ROLLING_STARTS = pc.window_starts(len(METRICS_GRID), 12, 2)
-ROLLING_CENTRES = (METRICS_GRID[ROLLING_STARTS] + METRICS_GRID[ROLLING_STARTS + 11]) / 2
+ROLLING_ENDS = METRICS_GRID[ROLLING_STARTS + 11]
 
 
 def _rolling_features(perievent=None):
@@ -5641,10 +5652,10 @@ class TestDecodingRollingTable:
         assert table["decoder"].tolist() == [d for d in pdc.DECODERS for _ in regions for _ in groups for _ in windows]
         assert table["region"].tolist() == [r for _ in pdc.DECODERS for r in regions for _ in groups for _ in windows]
         assert table["group"].tolist() == [g for _ in pdc.DECODERS for _ in regions for g in groups for _ in windows]
-        np.testing.assert_allclose(
-            table["time"], np.tile(ROLLING_CENTRES, len(pdc.DECODERS) * len(regions) * len(groups))
+        np.testing.assert_array_equal(
+            table["time"], np.tile(ROLLING_ENDS, len(pdc.DECODERS) * len(regions) * len(groups))
         )
-        assert table["time"].iloc[0] == pytest.approx(-0.78)
+        assert table["time"].iloc[0] == pytest.approx(-0.56)
         assert table["label"].eq("stim").all()
 
     def test_counts(self, decoding_rolling_default):
@@ -5662,10 +5673,10 @@ class TestDecodingRollingTable:
         for region in ("L_MOp", pdc.POPULATION):
             rows = self._rows(table, decoder, region, "all")
             # Windows wholly before the step carry nothing; windows wholly after it separate the stimuli.
-            assert rows[rows.index < -0.3]["balanced_accuracy"].mean() < 0.6
-            assert rows[rows.index < -0.3]["balanced_accuracy"].max() < 0.8
-            assert (rows[rows.index > 0.3]["balanced_accuracy"] > 0.9).all()
-            assert (rows[rows.index > 0.3]["auroc"] > 0.95).all()
+            assert rows[rows.index < -0.1]["balanced_accuracy"].mean() < 0.6
+            assert rows[rows.index < -0.1]["balanced_accuracy"].max() < 0.8
+            assert (rows[rows.index > 0.5]["balanced_accuracy"] > 0.9).all()
+            assert (rows[rows.index > 0.5]["auroc"] > 0.95).all()
         for region in ("R_MOp", "L_SSp-ul"):
             rows = self._rows(table, decoder, region, "all")
             assert rows["balanced_accuracy"].mean() < 0.6
@@ -5677,7 +5688,7 @@ class TestDecodingRollingTable:
         assert table["group"].unique().tolist() == DECODING_GROUPS["response"]
         for group in ("all", "stim-go"):
             rows = self._rows(table, "lda", "L_SSp-ul", group)
-            assert (rows[rows.index > 0.3]["balanced_accuracy"] > 0.9).all()
+            assert (rows[rows.index > 0.5]["balanced_accuracy"] > 0.9).all()
         # Every trial of the go group saw the go stimulus.
         assert self._rows(table, "lda", "L_MOp", "stim-go")["balanced_accuracy"].mean() < 0.6
 
@@ -5708,8 +5719,8 @@ class TestDecodingRollingTable:
                 assert (rows[shared].nunique() == 1).all()
                 assert 0.35 < rows["shuffle_balanced_accuracy"].iloc[0] < 0.65
                 assert rows["shuffle_balanced_accuracy_95"].iloc[0] >= rows["shuffle_balanced_accuracy"].iloc[0]
-                assert np.allclose(rows[rows.index > 0.3]["p_value"], 1 / 21)
-                assert rows[rows.index < -0.3]["p_value"].median() > 0.1
+                assert np.allclose(rows[rows.index > 0.5]["p_value"], 1 / 21)
+                assert rows[rows.index < -0.1]["p_value"].median() > 0.1
         fitted = table[table["group"] != "resp-nopush"]
         assert fitted["p_value"].between(1 / 21, 1).all()
         assert table[table["group"] == "resp-nopush"][list(pdc.NULL_SCORES)].isna().all().all()
@@ -5734,7 +5745,16 @@ class TestDecodingRollingTable:
         wider = pdc.rolling_table(perievent, window=1.0, step=0.5, repeats=2, shuffles=0)
         starts = pc.window_starts(len(METRICS_GRID), 25, 12)
         assert wider["time"].nunique() == len(starts)
-        assert wider["time"].iloc[0] == pytest.approx((METRICS_GRID[0] + METRICS_GRID[24]) / 2)
+        assert wider["time"].iloc[0] == pytest.approx(METRICS_GRID[24])
+
+    def test_rows_use_no_later_samples(self, decoding_rolling_default):
+        cube = _decoding_cube()
+        after = METRICS_GRID > 0
+        cube[:, after] = _decoding_cube(seed=1)[:, after]
+        table = pdc.rolling_table(_connectivity_perievent(cube), repeats=2, shuffles=0)
+        before = table["time"] <= 0
+        pd.testing.assert_frame_equal(table[before], decoding_rolling_default[before])
+        assert not table[~before]["accuracy"].equals(decoding_rolling_default[~before]["accuracy"])
 
     def test_window_errors(self):
         with pytest.raises(ValueError, match="longer than the 101 samples"):
@@ -5779,7 +5799,7 @@ class TestDecodingRollingTable:
         assert table[table["region"] == "R_MOp"][list(pdc.SCORES)].isna().all().all()
         assert table[table["group"] == "all"]["n_trials"].eq(36).all()
         rows = self._rows(table, "lda", pdc.POPULATION, "all")
-        assert (rows[rows.index > 0.3]["balanced_accuracy"] > 0.9).all()
+        assert (rows[rows.index > 0.5]["balanced_accuracy"] > 0.9).all()
 
     def test_missing_sdt_type_raises(self):
         with pytest.raises(ValueError, match="Cannot label the trials: no sdt_type column"):
