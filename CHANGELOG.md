@@ -8,6 +8,10 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 - `process decode` decodes the stimulus or the lever push of each trial of a `_perievent.csv` from region activity with logistic regression and linear discriminant decoders, per region and over all regions, and writes the cross-validated scores with a label-shuffle chance level per trial group to `<stem>_label-<label>_decoding.csv`, the population weights to `<stem>_label-<label>_decoding-weights.csv` and, with `--with-rolling`, the scores in sliding windows to `<stem>_label-<label>_decoding-rolling.csv`. Library entry points `decoding.decoding_table` and `decoding.rolling_table` ([#201](https://github.com/DuguidLab/mesoscopy/issues/201)).
 
+### Fixed
+
+- The rolling tables of `process connectivity` and `process decode` give each window the time of its last sample instead of its centre, so rolling window values do not skew pre event ([#205](https://github.com/DuguidLab/mesoscopy/issues/205)).
+
 ## [0.16.0] - 2026-10-08
 
 ### Added
