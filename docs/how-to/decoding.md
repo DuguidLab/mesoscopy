@@ -100,7 +100,7 @@ takes in activity after it.
 The chance level is taken once per decoder, region and group on the `--baseline` window (default every sample
 before the event), since shuffled labels give the same chance level in every window. The shuffle columns therefore
 repeat along a time course and `p_value` is read against them in every window. The rolling table is the slowest
-part of the command, since the population decoder is fitted in every window.
+part of the command, since every decoder is fitted in every window.
 
 ## Reading the table
 
@@ -128,5 +128,7 @@ tables.table.query("decoder == 'lda' and group == 'all'").nlargest(5, "balanced_
 
 `decoding.decoding_table` returns a `DecodingTables` with the scores in `table` and the population weights in
 `weights`. `decoding.rolling_table` returns the rolling table. `decoding.region_decisions` fits the one-feature
-decoders of every region, fold and shuffle at once from a `(n_trials, n_features)` array and the fold of each trial,
-and `decoding.fit_scores` fits one scikit-learn decoder per fold.
+decoders of every region, fold and shuffle at once from a `(n_trials, n_features)` array and the fold of each trial.
+`decoding.population_decisions` does the same for the population decoders from a `(n_trials, n_sets, n_features)`
+array, with one decoder per set of features such as the regions of one window. `decoding.fit_scores` fits one
+scikit-learn decoder and acts as a reference to compare against.

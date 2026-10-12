@@ -23,9 +23,9 @@
 
 Each region, and all regions together, is used to classify the trials of a go/no-go session with a logistic
 regression and a linear discriminant decoder under repeated stratified cross-validation, against a label-shuffle
-null, over the cue-to-response epoch or in windows sliding over the peri-event window. The one-feature decoders are
-fitted in numpy over every region, window, fold and shuffle at once; the population decoder goes through
-scikit-learn.
+null, over the cue-to-response epoch or in windows sliding over the peri-event window. The decoders are fitted in
+numpy over every region, window, fold and shuffle at once, and `fit_scores` keeps the scikit-learn fits they are
+tested against.
 """
 
 from __future__ import annotations
@@ -223,7 +223,7 @@ def fit_scores(
     decoder: str,
     folds: int,
 ) -> dict[str, typing.Any]:
-    """Cross-validated scores and weights of one decoder.
+    """Cross-validated scores and weights of one scikit-learn decoder, the reference for `population_decisions`.
 
     Each repeat scores every trial once, so the confusion counts are summed over the folds of a repeat and
     averaged over repeats, and the AUROC is taken over each repeat's pooled decision values.
@@ -413,11 +413,21 @@ def _standardised(x: npt.NDArray[np.float64], train: npt.NDArray[np.float64]) ->
     mean = np.einsum("pfn,nr->pfr", train, x) / n
     centred = x[None, None] - mean[:, :, None, :]
     var = np.einsum("pfn,pfnr->pfr", train, centred**2) / n
-    # StandardScaler's rule for a feature that is constant up to rounding.
+    return centred / _scale(var, mean, n)[:, :, None, :]
+
+
+def _scale(
+    var: npt.NDArray[np.float64], mean: npt.NDArray[np.float64], n: npt.NDArray[np.float64]
+) -> npt.NDArray[np.float64]:
+    """Standard deviation as `StandardScaler` takes it, 1 for a feature that is constant up to rounding.
+
+    Returns:
+        npt.NDArray[np.float64]: Same shape as `var`.
+    """
     eps = np.finfo(np.float64).eps
     sd = np.sqrt(var)
     sd[var <= n * eps * var + (n * mean * eps) ** 2] = 1.0
-    return centred / sd[:, :, None, :]
+    return sd
 
 
 def _test_fold(values: npt.NDArray[np.float64], fold_of: npt.NDArray[np.int64]) -> npt.NDArray[np.float64]:
@@ -462,22 +472,91 @@ def lda_decisions(
     return xs * coef[:, :, None, :] + intercept[:, :, None, :]
 
 
-def logistic_decisions(
+def population_lda_decisions(
+    xs: npt.NDArray[np.float64], positive: npt.NDArray[np.float64], train: npt.NDArray[np.float64]
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    """Decision values and weights of linear discriminants with equal priors, one per problem, fold and feature set.
+
+    Matches scikit-learn's `lsqr` solver with `shrinkage="auto"`. Each class's covariance is the Ledoit-Wolf
+    estimate of its standardised training trials, scaled back, and the pooled covariance is the mean of the two.
+
+    Args:
+        xs (npt.NDArray[np.float64]): Standardised features from `_standardised`, shape `(n_problems, n_folds,
+            n_trials, n_sets, n_features)`.
+        positive (npt.NDArray[np.float64]): 1 for positive trials, shape `(n_problems, n_trials)`.
+        train (npt.NDArray[np.float64]): 1 for training trials, shape `(n_problems, n_folds, n_trials)`.
+
+    Returns:
+        tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]: Decision values of every trial under every fit,
+        shape `(n_problems, n_folds, n_trials, n_sets)`, positive favouring the positive class, and the weights,
+        shape `(n_problems, n_folds, n_sets, n_features)`.
+    """
+    means, covariances = [], []
+    for weight in (train * positive[:, None, :], train * (1 - positive)[:, None, :]):
+        n = weight.sum(axis=-1)[:, :, None, None]
+        mean = np.einsum("pfn,pfnsk->pfsk", weight, xs) / n
+        centred = (xs - mean[:, :, None]) * weight[..., None, None]
+        scale = _scale((centred**2).sum(axis=2) / n, mean, n)
+        shrunk = _ledoit_wolf(centred / scale[:, :, None], n)
+        covariances.append(scale[..., :, None] * shrunk * scale[..., None, :])
+        means.append(mean)
+    coef = _solve(0.5 * (covariances[0] + covariances[1]), means[0] - means[1])
+    decisions = np.einsum("pfnsk,pfsk->pfns", xs - 0.5 * (means[0] + means[1])[:, :, None], coef)
+    return decisions, coef
+
+
+def _ledoit_wolf(z: npt.NDArray[np.float64], n: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+    """Ledoit-Wolf covariance of each class's standardised trials, as `sklearn.covariance.ledoit_wolf` takes it.
+
+    `z` holds the trials, zero outside the class, with shape `(n_problems, n_folds, n_trials, n_sets,
+    n_features)`, and `n` the class sizes.
+
+    Returns:
+        npt.NDArray[np.float64]: Shape `(n_problems, n_folds, n_sets, n_features, n_features)`.
+    """
+    n_features = z.shape[-1]
+    samples = np.moveaxis(z, 2, -1)
+    gram = samples @ np.swapaxes(samples, -1, -2)
+    n = n[..., 0]
+    covariance = gram / n[..., None, None]
+    variance = np.diagonal(covariance, axis1=-2, axis2=-1).sum(axis=-1)
+    mu = variance / n_features
+    gram_squares = (gram**2).sum(axis=(-2, -1)) / n**2
+    beta = (((z**2).sum(axis=-1) ** 2).sum(axis=2) / n - gram_squares) / (n_features * n)
+    delta = (gram_squares - 2 * mu * variance + n_features * mu**2) / n_features
+    beta = np.minimum(beta, delta)
+    shrinkage = np.divide(beta, delta, out=np.zeros_like(beta), where=beta != 0)
+    return (1 - shrinkage)[..., None, None] * covariance + (shrinkage * mu)[..., None, None] * np.eye(n_features)
+
+
+def _solve(a: npt.NDArray[np.float64], b: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+    """Solutions of `a @ x = b` for stacked symmetric matrices, through the pseudo-inverse if any is singular.
+
+    Returns:
+        npt.NDArray[np.float64]: Same shape as `b`.
+    """
+    try:
+        return np.linalg.solve(a, b[..., None])[..., 0]
+    except np.linalg.LinAlgError:
+        return (np.linalg.pinv(a, rcond=np.finfo(np.float64).eps, hermitian=True) @ b[..., None])[..., 0]
+
+
+def population_logistic_decisions(
     xs: npt.NDArray[np.float64],
     positive: npt.NDArray[np.float64],
     train: npt.NDArray[np.float64],
     c: float = 1.0,
     tolerance: float = 1e-8,
     max_iter: int = 100,
-) -> npt.NDArray[np.float64]:
-    """Decision values of one-feature balanced L2 logistic regressions, one per problem, fold and feature.
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    """Decision values and weights of balanced L2 logistic regressions, one per problem, fold and feature set.
 
-    Newton's method with backtracking on `0.5 * w**2 / c + sum(s_i * log(1 + exp(-y_i * (w * x_i + b))))`, the
+    Newton's method with backtracking on `0.5 * |w|**2 / c + sum(s_i * log(1 + exp(-y_i * (w @ x_i + b))))`, the
     objective scikit-learn's `lbfgs` solver minimises, with `s_i` the balanced class weights.
 
     Args:
         xs (npt.NDArray[np.float64]): Standardised features from `_standardised`, shape `(n_problems, n_folds,
-            n_trials, n_features)`.
+            n_trials, n_sets, n_features)`.
         positive (npt.NDArray[np.float64]): 1 for positive trials, shape `(n_problems, n_trials)`.
         train (npt.NDArray[np.float64]): 1 for training trials, shape `(n_problems, n_folds, n_trials)`.
         c (float, optional): Inverse L2 strength. Defaults to 1.
@@ -485,54 +564,64 @@ def logistic_decisions(
         max_iter (int, optional): Newton iterations. Defaults to 100.
 
     Returns:
-        npt.NDArray[np.float64]: Decision values of every trial under every fit, same shape as `xs`.
+        tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]: Decision values of every trial under every fit,
+        shape `(n_problems, n_folds, n_trials, n_sets)`, and the weights, shape `(n_problems, n_folds, n_sets,
+        n_features)`.
     """
     from scipy.special import expit
 
+    x = np.ascontiguousarray(np.moveaxis(xs, 2, -2))
     n_train = train.sum(axis=-1, keepdims=True)
     n_positive = (train * positive[:, None, :]).sum(axis=-1, keepdims=True)
     class_weight = np.where(
         positive[:, None, :] > 0, n_train / (2 * n_positive), n_train / (2 * (n_train - n_positive))
     )
-    weight = (train * class_weight)[..., None]
-    sign = (2 * positive - 1)[:, None, :, None]
-    target = positive[:, None, :, None]
-    shape = (*xs.shape[:2], xs.shape[3])
-    w = np.zeros(shape)
+    weight = (train * class_weight)[:, :, None, :]
+    sign = (2 * positive - 1)[:, None, None, :]
+    target = positive[:, None, None, :]
+    n_features = x.shape[-1]
+    shape = x.shape[:3]
+    w = np.zeros((*shape, n_features))
     b = np.zeros(shape)
+    hessian = np.zeros((*shape, n_features + 1, n_features + 1))
+    penalty = np.eye(n_features) / c
+
+    def decision(w: npt.NDArray[np.float64], b: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        return (x @ w[..., None])[..., 0] + b[..., None]
 
     def objective(w: npt.NDArray[np.float64], b: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-        z = xs * w[:, :, None, :] + b[:, :, None, :]
-        return 0.5 * w**2 / c + (weight * np.logaddexp(0, -sign * z)).sum(axis=2)
+        return 0.5 * (w**2).sum(axis=-1) / c + (weight * np.logaddexp(0, -sign * decision(w, b))).sum(axis=-1)
 
     value = objective(w, b)
     for _ in range(max_iter):
-        z = xs * w[:, :, None, :] + b[:, :, None, :]
-        p = expit(z)
+        p = expit(decision(w, b))
         residual = weight * (p - target)
         curvature = weight * p * (1 - p)
-        g_w = w / c + (residual * xs).sum(axis=2)
-        g_b = residual.sum(axis=2)
-        h_ww = 1 / c + (curvature * xs**2).sum(axis=2)
-        h_wb = (curvature * xs).sum(axis=2)
-        h_bb = curvature.sum(axis=2)
-        det = np.maximum(h_ww * h_bb - h_wb**2, np.finfo(float).tiny)
-        step_w = (h_bb * g_w - h_wb * g_b) / det
-        step_b = (h_ww * g_b - h_wb * g_w) / det
+        weighted = curvature[..., None] * x
+        border = weighted.sum(axis=-2)
+        hessian[..., :-1, :-1] = np.swapaxes(x, -1, -2) @ weighted + penalty
+        hessian[..., :-1, -1] = border
+        hessian[..., -1, :-1] = border
+        hessian[..., -1, -1] = curvature.sum(axis=-1)
+        gradient = np.concatenate(
+            [w / c + (residual[..., None, :] @ x)[..., 0, :], residual.sum(axis=-1)[..., None]], axis=-1
+        )
+        step = _solve(hessian, gradient)
+        step_w, step_b = step[..., :-1], step[..., -1]
         scale = np.ones(shape)
         for _ in range(20):
-            candidate = objective(w - scale * step_w, b - scale * step_b)
+            candidate = objective(w - scale[..., None] * step_w, b - scale * step_b)
             # Allow for rounding in the objective, or the search stalls at the optimum.
             worse = candidate > value * (1 + 1e-12) + 1e-12
             if not worse.any():
                 break
             scale[worse] *= 0.5
-        w -= scale * step_w
+        w -= scale[..., None] * step_w
         b -= scale * step_b
         value = objective(w, b) if worse.any() else candidate
-        if max(np.abs(scale * step_w).max(), np.abs(scale * step_b).max()) < tolerance:
+        if np.abs(scale[..., None] * step).max() < tolerance:
             break
-    return xs * w[:, :, None, :] + b[:, :, None, :]
+    return np.moveaxis(decision(w, b), -1, 2), w
 
 
 def region_decisions(
@@ -541,7 +630,8 @@ def region_decisions(
     """Held-out decision values of one-feature decoders, for every problem and feature at once.
 
     A problem is one labelling of the trials with one k-fold assignment; the fits of a fold train on the other
-    folds and score the held-out trials.
+    folds and score the held-out trials. The logistic regressions go through `population_decisions` with one
+    feature per set.
 
     Args:
         features (npt.NDArray[np.float64]): Features of shape `(n_trials, n_features)`, one decoder per column.
@@ -558,6 +648,8 @@ def region_decisions(
     if decoder not in DECODERS:
         msg = f"Unknown decoder {decoder!r}; expected one of {', '.join(DECODERS)}."
         raise ValueError(msg)
+    if decoder == "logistic":
+        return population_decisions(features[:, :, None], y, fold_of, decoder)[0]
     folds = int(fold_of.max()) + 1
     n_trials, n_features = features.shape
     chunk = max(1, _CHUNK_ELEMENTS // (folds * n_trials * n_features))
@@ -568,9 +660,57 @@ def region_decisions(
         positive = np.asarray(y[first:last], dtype=np.float64)
         train = (fold[:, None, :] != np.arange(folds)[None, :, None]).astype(np.float64)
         xs = _standardised(features, train)
-        fitted = lda_decisions(xs, positive, train) if decoder == "lda" else logistic_decisions(xs, positive, train)
-        decisions[first:last] = _test_fold(fitted, fold)
+        decisions[first:last] = _test_fold(lda_decisions(xs, positive, train), fold)
     return decisions
+
+
+def population_decisions(
+    features: npt.NDArray[np.float64], y: npt.NDArray, fold_of: npt.NDArray[np.int64], decoder: str
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    """Held-out decision values and weights of multi-feature decoders, for every problem and feature set at once.
+
+    Problems and folds are as for `region_decisions`. Each feature set, such as the regions of one window, gets
+    its own decoder.
+
+    Args:
+        features (npt.NDArray[np.float64]): Features of shape `(n_trials, n_sets, n_features)`.
+        y (npt.NDArray): Class per trial per problem, shape `(n_problems, n_trials)`.
+        fold_of (npt.NDArray[np.int64]): Test fold per trial per problem, shape `(n_problems, n_trials)`.
+        decoder (str): One of `DECODERS`.
+
+    Returns:
+        tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]: Decision values of shape `(n_problems, n_trials,
+        n_sets)`, and the weights of the standardised features in each fit, shape `(n_problems, n_folds, n_sets,
+        n_features)`.
+
+    Raises:
+        ValueError: If `decoder` is not one of `DECODERS`.
+    """
+    if decoder not in DECODERS:
+        msg = f"Unknown decoder {decoder!r}; expected one of {', '.join(DECODERS)}."
+        raise ValueError(msg)
+    fit = population_lda_decisions if decoder == "lda" else population_logistic_decisions
+    folds = int(fold_of.max()) + 1
+    n_trials, n_sets, n_features = features.shape
+    # Elements per set of the standardised features or of the covariances, whichever is larger.
+    per_set = folds * n_features * max(n_trials, n_features)
+    set_chunk = max(1, min(n_sets, _CHUNK_ELEMENTS // per_set))
+    chunk = max(1, _CHUNK_ELEMENTS // (per_set * set_chunk))
+    decisions = np.empty((len(y), n_trials, n_sets))
+    weights = np.empty((len(y), folds, n_sets, n_features))
+    for first in range(0, len(y), chunk):
+        last = min(first + chunk, len(y))
+        fold = fold_of[first:last]
+        positive = np.asarray(y[first:last], dtype=np.float64)
+        train = (fold[:, None, :] != np.arange(folds)[None, :, None]).astype(np.float64)
+        for start in range(0, n_sets, set_chunk):
+            sets = slice(start, min(start + set_chunk, n_sets))
+            x = features[:, sets]
+            xs = _standardised(x.reshape(n_trials, -1), train).reshape(*train.shape, *x.shape[1:])
+            fitted, coef = fit(xs, positive, train)
+            decisions[first:last, :, sets] = _test_fold(fitted, fold)
+            weights[first:last, :, sets] = coef
+    return decisions, weights
 
 
 def problem_scores(
@@ -695,7 +835,7 @@ def group_decoding(
 
     All fits share the same splits, and all shuffles the same permutations, so the regions are compared on the same
     test trials. The one-feature decoders go through `region_decisions`, the population decoder through
-    `fit_scores`.
+    `population_decisions`.
 
     Args:
         features (npt.NDArray[np.float64]): Features of the group's trials, shape `(n_trials, n_regions)`.
@@ -724,13 +864,13 @@ def group_decoding(
     result: dict[str, dict[str, typing.Any]] = {}
     for decoder in DECODERS:
         scores: dict[str, typing.Any] = {}
-        observed = problem_scores(
-            region_decisions(x, observed_labels, observed_folds, decoder), observed_labels, observed_folds
-        )
+        decisions, weights = _all_decisions(x, observed_labels, observed_folds, decoder)
+        observed = problem_scores(decisions, observed_labels, observed_folds)
         null = None
         if shuffles:
-            null = problem_scores(region_decisions(x, null_labels, null_folds, decoder), null_labels, null_folds)
-        for i, column in enumerate(columns):
+            null_decisions, _ = _all_decisions(x, null_labels, null_folds, decoder)
+            null = problem_scores(null_decisions, null_labels, null_folds)
+        for i, name in enumerate([*(regions[column] for column in columns), POPULATION]):
             summary = _column_summary(observed, i)
             if null is not None:
                 summary |= null_summary(
@@ -738,27 +878,29 @@ def group_decoding(
                     null["accuracy"][:, :, i].mean(axis=1),
                     null["balanced_accuracy"][:, :, i].mean(axis=1),
                 )
-            scores[regions[column]] = summary
-
-        population = fit_scores(x, y, splits, decoder, folds)
-        summary = score_summary(population)
-        if shuffles:
-            null_scores = [
-                fit_scores(x, row, s, decoder, folds) for row, s in zip(null_labels, null_splits, strict=True)
-            ]
-            summary |= null_summary(
-                summary["balanced_accuracy"],
-                np.array([n["accuracy"].mean() for n in null_scores]),
-                np.array([n["balanced_accuracy"].mean() for n in null_scores]),
-            )
-        scores[POPULATION] = summary
+            scores[name] = summary
+        weights = weights.reshape(len(splits), len(columns))
         mean = np.full(len(regions), np.nan)
         sd = np.full(len(regions), np.nan)
-        mean[columns] = population["weights"].mean(axis=0)
-        sd[columns] = population["weights"].std(axis=0, ddof=1) if len(splits) > 1 else np.nan
+        mean[columns] = weights.mean(axis=0)
+        sd[columns] = weights.std(axis=0, ddof=1) if len(splits) > 1 else np.nan
         scores["weights"] = (mean, sd)
         result[decoder] = scores
     return result
+
+
+def _all_decisions(
+    x: npt.NDArray[np.float64], y: npt.NDArray, fold_of: npt.NDArray[np.int64], decoder: str
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    """Held-out decision values of each region's decoder and, last, of the population decoder.
+
+    Returns:
+        tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]: Decision values of shape `(n_problems, n_trials,
+        n_regions + 1)` from `region_decisions` and `population_decisions`, and the population weights of each
+        fit, shape `(n_problems, n_folds, n_regions)`.
+    """
+    population, weights = population_decisions(x[:, None], y, fold_of, decoder)
+    return np.concatenate([region_decisions(x, y, fold_of, decoder), population], axis=-1), weights[:, :, 0]
 
 
 def labelled_trials(
@@ -942,11 +1084,8 @@ def _null_scores(
     """
     labels, splits = shuffled_labels(y, folds, shuffles, rng)
     fold_of = np.array([fold_ids(s, folds, len(y))[0] for s in splits], dtype=np.int64)
-    scores = problem_scores(region_decisions(baseline, labels, fold_of, decoder), labels, fold_of)
-    population = [fit_scores(baseline, row, s, decoder, folds) for row, s in zip(labels, splits, strict=True)]
-    accuracy = np.column_stack([scores["accuracy"].mean(axis=1), [p["accuracy"].mean() for p in population]])
-    balanced = scores["balanced_accuracy"].mean(axis=1)
-    return accuracy, np.column_stack([balanced, [p["balanced_accuracy"].mean() for p in population]])
+    scores = problem_scores(_all_decisions(baseline, labels, fold_of, decoder)[0], labels, fold_of)
+    return scores["accuracy"].mean(axis=1), scores["balanced_accuracy"].mean(axis=1)
 
 
 def rolling_decoding(
@@ -961,9 +1100,9 @@ def rolling_decoding(
 ) -> dict[str, list[list[dict[str, float]]]]:
     """Scores of every decoder on each region and on all regions in every window, for one trial group.
 
-    The one-feature decoders of every window and region are fitted at once through `region_decisions` and the
-    population decoder is fitted per window through `fit_scores`. The null is taken once on `baseline` and applied
-    to every window.
+    The one-feature decoders of every window and region are fitted at once through `region_decisions`, and the
+    population decoders of every window through `population_decisions`. The null is taken once on `baseline` and
+    applied to every window.
 
     Args:
         features (npt.NDArray[np.float64]): Window features of the group's trials, shape `(n_trials, n_windows,
@@ -990,7 +1129,14 @@ def rolling_decoding(
     x = features[:, :, columns].reshape(n_trials, n_windows * len(columns))
     result: dict[str, list[list[dict[str, float]]]] = {}
     for decoder in DECODERS:
-        observed = problem_scores(region_decisions(x, labels, fold_of, decoder), labels, fold_of)
+        decisions = np.concatenate(
+            [
+                region_decisions(x, labels, fold_of, decoder),
+                population_decisions(features[:, :, columns], labels, fold_of, decoder)[0],
+            ],
+            axis=-1,
+        )
+        observed = problem_scores(decisions, labels, fold_of)
         null = _null_scores(baseline[:, columns], y, folds, shuffles, rng, decoder) if shuffles else None
         per_region: list[list[dict[str, float]]] = [[{} for _ in range(n_windows)] for _ in range(n_regions + 1)]
         for i, column in enumerate(columns):
@@ -1000,7 +1146,7 @@ def rolling_decoding(
                     summary |= null_summary(summary["balanced_accuracy"], null[0][:, i], null[1][:, i])
                 per_region[column][w] = summary
         for w in range(n_windows):
-            summary = score_summary(fit_scores(features[:, w, columns], y, splits, decoder, folds))
+            summary = _column_summary(observed, n_windows * len(columns) + w)
             if null is not None:
                 summary |= null_summary(summary["balanced_accuracy"], null[0][:, -1], null[1][:, -1])
             per_region[n_regions][w] = summary
