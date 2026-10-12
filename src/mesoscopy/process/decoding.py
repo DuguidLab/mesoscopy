@@ -23,9 +23,9 @@
 
 Each region, and all regions together, is used to classify the trials of a go/no-go session with a logistic
 regression and a linear discriminant decoder under repeated stratified cross-validation, against a label-shuffle
-null, over the cue-to-response epoch or in windows sliding over the peri-event window. The one-feature decoders are
-fitted in numpy over every region, window, fold and shuffle at once; the population decoder goes through
-scikit-learn.
+null, over the cue-to-response epoch or in windows sliding over the peri-event window. The decoders are fitted in
+numpy over every region, window, fold and shuffle at once, and `fit_scores` keeps the scikit-learn fits they are
+tested against.
 """
 
 from __future__ import annotations
@@ -223,7 +223,7 @@ def fit_scores(
     decoder: str,
     folds: int,
 ) -> dict[str, typing.Any]:
-    """Cross-validated scores and weights of one decoder.
+    """Cross-validated scores and weights of one scikit-learn decoder, the reference for `population_decisions`.
 
     Each repeat scores every trial once, so the confusion counts are summed over the folds of a repeat and
     averaged over repeats, and the AUROC is taken over each repeat's pooled decision values.
@@ -835,7 +835,7 @@ def group_decoding(
 
     All fits share the same splits, and all shuffles the same permutations, so the regions are compared on the same
     test trials. The one-feature decoders go through `region_decisions`, the population decoder through
-    `fit_scores`.
+    `population_decisions`.
 
     Args:
         features (npt.NDArray[np.float64]): Features of the group's trials, shape `(n_trials, n_regions)`.
@@ -864,13 +864,13 @@ def group_decoding(
     result: dict[str, dict[str, typing.Any]] = {}
     for decoder in DECODERS:
         scores: dict[str, typing.Any] = {}
-        observed = problem_scores(
-            region_decisions(x, observed_labels, observed_folds, decoder), observed_labels, observed_folds
-        )
+        decisions, weights = _all_decisions(x, observed_labels, observed_folds, decoder)
+        observed = problem_scores(decisions, observed_labels, observed_folds)
         null = None
         if shuffles:
-            null = problem_scores(region_decisions(x, null_labels, null_folds, decoder), null_labels, null_folds)
-        for i, column in enumerate(columns):
+            null_decisions, _ = _all_decisions(x, null_labels, null_folds, decoder)
+            null = problem_scores(null_decisions, null_labels, null_folds)
+        for i, name in enumerate([*(regions[column] for column in columns), POPULATION]):
             summary = _column_summary(observed, i)
             if null is not None:
                 summary |= null_summary(
@@ -878,27 +878,29 @@ def group_decoding(
                     null["accuracy"][:, :, i].mean(axis=1),
                     null["balanced_accuracy"][:, :, i].mean(axis=1),
                 )
-            scores[regions[column]] = summary
-
-        population = fit_scores(x, y, splits, decoder, folds)
-        summary = score_summary(population)
-        if shuffles:
-            null_scores = [
-                fit_scores(x, row, s, decoder, folds) for row, s in zip(null_labels, null_splits, strict=True)
-            ]
-            summary |= null_summary(
-                summary["balanced_accuracy"],
-                np.array([n["accuracy"].mean() for n in null_scores]),
-                np.array([n["balanced_accuracy"].mean() for n in null_scores]),
-            )
-        scores[POPULATION] = summary
+            scores[name] = summary
+        weights = weights.reshape(len(splits), len(columns))
         mean = np.full(len(regions), np.nan)
         sd = np.full(len(regions), np.nan)
-        mean[columns] = population["weights"].mean(axis=0)
-        sd[columns] = population["weights"].std(axis=0, ddof=1) if len(splits) > 1 else np.nan
+        mean[columns] = weights.mean(axis=0)
+        sd[columns] = weights.std(axis=0, ddof=1) if len(splits) > 1 else np.nan
         scores["weights"] = (mean, sd)
         result[decoder] = scores
     return result
+
+
+def _all_decisions(
+    x: npt.NDArray[np.float64], y: npt.NDArray, fold_of: npt.NDArray[np.int64], decoder: str
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    """Held-out decision values of each region's decoder and, last, of the population decoder.
+
+    Returns:
+        tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]: Decision values of shape `(n_problems, n_trials,
+        n_regions + 1)` from `region_decisions` and `population_decisions`, and the population weights of each
+        fit, shape `(n_problems, n_folds, n_regions)`.
+    """
+    population, weights = population_decisions(x[:, None], y, fold_of, decoder)
+    return np.concatenate([region_decisions(x, y, fold_of, decoder), population], axis=-1), weights[:, :, 0]
 
 
 def labelled_trials(
@@ -1082,11 +1084,8 @@ def _null_scores(
     """
     labels, splits = shuffled_labels(y, folds, shuffles, rng)
     fold_of = np.array([fold_ids(s, folds, len(y))[0] for s in splits], dtype=np.int64)
-    scores = problem_scores(region_decisions(baseline, labels, fold_of, decoder), labels, fold_of)
-    population = [fit_scores(baseline, row, s, decoder, folds) for row, s in zip(labels, splits, strict=True)]
-    accuracy = np.column_stack([scores["accuracy"].mean(axis=1), [p["accuracy"].mean() for p in population]])
-    balanced = scores["balanced_accuracy"].mean(axis=1)
-    return accuracy, np.column_stack([balanced, [p["balanced_accuracy"].mean() for p in population]])
+    scores = problem_scores(_all_decisions(baseline, labels, fold_of, decoder)[0], labels, fold_of)
+    return scores["accuracy"].mean(axis=1), scores["balanced_accuracy"].mean(axis=1)
 
 
 def rolling_decoding(
@@ -1101,9 +1100,9 @@ def rolling_decoding(
 ) -> dict[str, list[list[dict[str, float]]]]:
     """Scores of every decoder on each region and on all regions in every window, for one trial group.
 
-    The one-feature decoders of every window and region are fitted at once through `region_decisions` and the
-    population decoder is fitted per window through `fit_scores`. The null is taken once on `baseline` and applied
-    to every window.
+    The one-feature decoders of every window and region are fitted at once through `region_decisions`, and the
+    population decoders of every window through `population_decisions`. The null is taken once on `baseline` and
+    applied to every window.
 
     Args:
         features (npt.NDArray[np.float64]): Window features of the group's trials, shape `(n_trials, n_windows,
@@ -1130,7 +1129,14 @@ def rolling_decoding(
     x = features[:, :, columns].reshape(n_trials, n_windows * len(columns))
     result: dict[str, list[list[dict[str, float]]]] = {}
     for decoder in DECODERS:
-        observed = problem_scores(region_decisions(x, labels, fold_of, decoder), labels, fold_of)
+        decisions = np.concatenate(
+            [
+                region_decisions(x, labels, fold_of, decoder),
+                population_decisions(features[:, :, columns], labels, fold_of, decoder)[0],
+            ],
+            axis=-1,
+        )
+        observed = problem_scores(decisions, labels, fold_of)
         null = _null_scores(baseline[:, columns], y, folds, shuffles, rng, decoder) if shuffles else None
         per_region: list[list[dict[str, float]]] = [[{} for _ in range(n_windows)] for _ in range(n_regions + 1)]
         for i, column in enumerate(columns):
@@ -1140,7 +1146,7 @@ def rolling_decoding(
                     summary |= null_summary(summary["balanced_accuracy"], null[0][:, i], null[1][:, i])
                 per_region[column][w] = summary
         for w in range(n_windows):
-            summary = score_summary(fit_scores(features[:, w, columns], y, splits, decoder, folds))
+            summary = _column_summary(observed, n_windows * len(columns) + w)
             if null is not None:
                 summary |= null_summary(summary["balanced_accuracy"], null[0][:, -1], null[1][:, -1])
             per_region[n_regions][w] = summary

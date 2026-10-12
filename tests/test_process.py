@@ -5737,6 +5737,37 @@ class TestDecodingTable:
         other = pdc.decoding_table(_decoding_perievent(), repeats=2, shuffles=10, seed=1).table
         assert not first["shuffle_balanced_accuracy"].equals(other["shuffle_balanced_accuracy"])
 
+    def test_null_matches_fit_scores(self):
+        # The population null, refitted with scikit-learn on the same shuffles.
+        perievent = _decoding_perievent()
+        table = pdc.decoding_table(perievent, repeats=2, shuffles=10).table
+        features = _decoding_features(perievent)
+        y, _ = pdc.trial_labels(_gonogo_info(), "stim")
+        labels, splits = pdc.shuffled_labels(y, 5, 10, np.random.default_rng(42))
+        for decoder in pdc.DECODERS:
+            null = [pdc.fit_scores(features, row, s, decoder, 5) for row, s in zip(labels, splits, strict=True)]
+            row = self._row(table, decoder, pdc.POPULATION, "all")
+            expected = pdc.null_summary(
+                row["balanced_accuracy"],
+                np.array([n["accuracy"].mean() for n in null]),
+                np.array([n["balanced_accuracy"].mean() for n in null]),
+            )
+            for score in pdc.NULL_SCORES:
+                assert row[score] == pytest.approx(expected[score])
+
+    def test_weights_match_fit_scores(self):
+        perievent = _decoding_perievent()
+        weights = pdc.decoding_table(perievent, repeats=2, shuffles=0).weights
+        features = _decoding_features(perievent)
+        y, _ = pdc.trial_labels(_gonogo_info(), "stim")
+        splits = pdc.cross_validation_splits(y, 5, 2, 42)
+        # scikit-learn's lbfgs stops short of the logistic optimum at its default tolerance.
+        for decoder, atol in (("lda", 1e-10), ("logistic", 1e-3)):
+            fitted = pdc.fit_scores(features, y, splits, decoder, 5)["weights"]
+            rows = weights[(weights["decoder"] == decoder) & (weights["group"] == "all")]
+            np.testing.assert_allclose(rows["weight"], fitted.mean(axis=0), atol=atol)
+            np.testing.assert_allclose(rows["weight_sd"], fitted.std(axis=0, ddof=1), atol=atol)
+
 
 class TestWindowFeatures:
     def test_means(self):
@@ -5858,6 +5889,30 @@ class TestDecodingRollingTable:
         fitted = table[table["group"] != "resp-nopush"]
         assert fitted["p_value"].between(1 / 21, 1).all()
         assert table[table["group"] == "resp-nopush"][list(pdc.NULL_SCORES)].isna().all().all()
+
+    def test_null_matches_fit_scores(self):
+        # The population null, refitted with scikit-learn on the same shuffles of the pre-event means.
+        perievent = _decoding_perievent()
+        table = pdc.rolling_table(perievent, repeats=2, shuffles=10)
+        info = _gonogo_info()
+        unbounded = np.full(len(info), np.inf)
+        cube = pc.epoch_cube(
+            perievent, info["trial_index"].to_numpy(), METRICS_GRID, CONNECTIVITY_REGIONS, -unbounded, unbounded
+        )
+        baseline = np.nanmean(cube[:, METRICS_GRID < 0], axis=1)
+        y, _ = pdc.trial_labels(info, "stim")
+        rng = np.random.default_rng(42)
+        for decoder in pdc.DECODERS:
+            labels, splits = pdc.shuffled_labels(y, 5, 10, rng)
+            null = [pdc.fit_scores(baseline, row, s, decoder, 5) for row, s in zip(labels, splits, strict=True)]
+            row = self._rows(table, decoder, pdc.POPULATION, "all").iloc[0]
+            expected = pdc.null_summary(
+                row["balanced_accuracy"],
+                np.array([n["accuracy"].mean() for n in null]),
+                np.array([n["balanced_accuracy"].mean() for n in null]),
+            )
+            for score in pdc.NULL_SCORES:
+                assert row[score] == pytest.approx(expected[score])
 
     def test_baseline(self):
         perievent = _decoding_perievent()
