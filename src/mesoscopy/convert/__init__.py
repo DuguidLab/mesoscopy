@@ -25,12 +25,15 @@ import typing
 
 import click
 
+from mesoscopy import docs_epilog
+
 
 @click.group("convert")
-def convert_cmd(): ...
+def convert_cmd() -> None:
+    """Convert raw recordings to NWB or HDF5."""
 
 
-@convert_cmd.command("h5")
+@convert_cmd.command("h5", epilog=docs_epilog("typical-workflow/"))
 @click.argument(
     "input_path",
     type=click.Path(exists=True),
@@ -40,7 +43,7 @@ def convert_cmd(): ...
     "--out-dir",
     type=click.Path(),
     default="./",
-    help="Output directory for converted file, defaults to current working directory. Will be created if it doesn't exist.",
+    help="Output directory, created if missing.",
 )
 @click.option(
     "-l",
@@ -48,37 +51,42 @@ def convert_cmd(): ...
     is_flag=True,
     show_default=True,
     default=False,
-    help="Create a link to the HDF5 dataset instead of copying it over. If this is enabled, you MUST keep the raw HDF5 file - if you delete it, the data will also be gone.",
+    help="Link the raw frames instead of copying them. The NWB file then needs the raw HDF5 file to stay in place.",
 )
 @click.option(
-    "-f", "--frames-group", type=str, default="frames", help="HDF group path under which frame data is stored."
+    "-f", "--frames-group", type=str, default="frames", show_default=True, help="HDF5 dataset holding the frames."
 )
 @click.option(
     "-t",
     "--timestamps-group",
     type=str,
     default="timestamps",
-    help="HDF group path under which timestamp data is stored.",
+    show_default=True,
+    help="HDF5 dataset holding the timestamps.",
 )
 @click.option(
     "-m",
     "--meta",
     "meta_path",
     type=click.Path(exists=True),
-    help="Path to animal metadata file. Must be YAML or JSON format.",
+    help="Subject and session metadata file in YAML or JSON format.",
 )
-@click.option("--subject-id", type=str, help="Metadata field - subject identifier.")
-@click.option("--sex", type=click.Choice(["M", "F"], case_sensitive=False), help="Metadata field - subject sex.")
-@click.option("--genotype", type=str, help="Metadata field - subject genotype.")
-@click.option("--species", type=str, help="Metadata field - subject species.")
-@click.option("--strain", type=str, help="Metadata field - subject strain.")
-@click.option("--dob", type=str, help="Metadata field - subject date of birth in YYYY-MM-DD format (i.e. 1900-01-31).")
-@click.option("--description", "session_description", type=str, help="Metadata field - session description.")
-@click.option("--experimenter", type=str, help="Metadata field - experimenter name.")
-@click.option("--lab", type=str, help="Metadata field - lab experiment was done in.")
-@click.option("--institution", type=str, help="Metadata field - institution experiment was done in.")
+@click.option("--subject-id", type=str, help="Subject identifier.")
+@click.option("--sex", type=click.Choice(["M", "F"], case_sensitive=False), help="Subject sex.")
+@click.option("--genotype", type=str, help="Subject genotype.")
+@click.option("--species", type=str, help="Subject species.")
+@click.option("--strain", type=str, help="Subject strain.")
+@click.option("--dob", type=str, help="Subject date of birth as YYYY-MM-DD.")
+@click.option("--description", "session_description", type=str, help="Session description.")
+@click.option("--experimenter", type=str, help="Experimenter name.")
+@click.option("--lab", type=str, help="Lab the session was recorded in.")
+@click.option("--institution", type=str, help="Institution the session was recorded in.")
 def convert_h5_cmd(**kwargs: typing.Any) -> None:
-    """Convert a raw mesoscale calcium recording session from HDF5 to an NWB file compatible with mesoscopy."""
+    """Convert a raw HDF5 recording to NWB.
+
+    INPUT_PATH is a raw dual-channel HDF5 recording. Fill in the subject and session metadata with --meta or the
+    metadata options. Writes an NWB file named after INPUT_PATH.
+    """
     import mesoscopy.convert.hdf5 as conv_h5
 
     conv_h5.to_nwb(**kwargs)
@@ -94,33 +102,33 @@ def convert_h5_cmd(**kwargs: typing.Any) -> None:
     "--out-dir",
     type=click.Path(),
     default="./",
-    help="Output directory for converted file, defaults to current working directory. Will be created if it doesn't exist.",
+    help="Output directory, created if missing.",
 )
 @click.option(
     "-t",
     "--ts-path",
     type=click.Path(exists=True),
-    help="Path to timestamps file. Must be plain text or delimited.",
+    help="Frame timestamps file, plain text or delimited.",
 )
 @click.option(
     "-d",
     "--ts-delimiter",
     type=click.Choice([",", "\t", " "], case_sensitive=False),
     default=",",
-    help="Timestamp file delimiter, if file is delimited.",
+    help="Delimiter of the timestamps file.",
 )
 @click.option(
     "-c",
     "--ts-column",
     type=int,
-    help="Column in timestamp file to be used as timestamps. Must be provided if file is delimited and has more than one column.",
+    help="Column of the timestamps file to read, needed when it has more than one.",
 )
 @click.option(
     "--ts-has-header",
     type=bool,
     is_flag=True,
     default=False,
-    help="Flag signifying whether or not the timestamps file has a header row.",
+    help="The timestamps file has a header row.",
 )
 @click.option(
     "-l",
@@ -128,27 +136,31 @@ def convert_h5_cmd(**kwargs: typing.Any) -> None:
     is_flag=True,
     show_default=True,
     default=False,
-    help="Generate an HDF5 linker file only without converting to NWB.",
+    help="Write the HDF5 file only, without converting it to NWB.",
 )
 @click.option(
     "-m",
     "--meta",
     "meta_path",
     type=click.Path(exists=True),
-    help="Path to animal metadata file. Must be YAML or JSON format.",
+    help="Subject and session metadata file in YAML or JSON format.",
 )
-@click.option("--subject-id", type=str, help="Metadata field - subject identifier.")
-@click.option("--sex", type=click.Choice(["M", "F"], case_sensitive=False), help="Metadata field - subject sex.")
-@click.option("--genotype", type=str, help="Metadata field - subject genotype.")
-@click.option("--species", type=str, help="Metadata field - subject species.")
-@click.option("--strain", type=str, help="Metadata field - subject strain.")
-@click.option("--dob", type=str, help="Metadata field - subject date of birth in YYYY-MM-DD format (i.e. 1900-01-31).")
-@click.option("--description", "session_description", type=str, help="Metadata field - session description.")
-@click.option("--experimenter", type=str, help="Metadata field - experimenter name.")
-@click.option("--lab", type=str, help="Metadata field - lab experiment was done in.")
-@click.option("--institution", type=str, help="Metadata field - institution experiment was done in.")
+@click.option("--subject-id", type=str, help="Subject identifier.")
+@click.option("--sex", type=click.Choice(["M", "F"], case_sensitive=False), help="Subject sex.")
+@click.option("--genotype", type=str, help="Subject genotype.")
+@click.option("--species", type=str, help="Subject species.")
+@click.option("--strain", type=str, help="Subject strain.")
+@click.option("--dob", type=str, help="Subject date of birth as YYYY-MM-DD.")
+@click.option("--description", "session_description", type=str, help="Session description.")
+@click.option("--experimenter", type=str, help="Experimenter name.")
+@click.option("--lab", type=str, help="Lab the session was recorded in.")
+@click.option("--institution", type=str, help="Institution the session was recorded in.")
 def convert_video_cmd(**kwargs: typing.Any) -> None:
-    """Convert a raw mesoscale calcium recording session from video to an NWB file compatible with mesoscopy."""
+    """Convert a raw video recording to NWB.
+
+    INPUT_PATH is an AVI or MP4 recording and --ts-path its frame timestamps file. Fill in the subject and session
+    metadata with --meta or the metadata options. Writes an HDF5 file and an NWB file named after INPUT_PATH.
+    """
     import mesoscopy.convert.video as conv_vid
 
     if not kwargs.get("ts_path"):

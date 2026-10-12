@@ -23,6 +23,7 @@
 
 import subprocess
 import sys
+from pathlib import Path
 
 import click
 import h5py
@@ -89,6 +90,46 @@ def test_no_eager_subcommands():
 
 def test_unknown_subcommand_is_none():
     assert mesoscopy.cli.get_command(click.Context(mesoscopy.cli), "nope") is None
+
+
+def _walk(path: str, cmd: click.Command) -> list[tuple[str, click.Command]]:
+    found = [(path, cmd)]
+    if isinstance(cmd, click.Group):
+        ctx = click.Context(cmd)
+        for name in cmd.list_commands(ctx):
+            sub = cmd.get_command(ctx, name)
+            assert sub is not None
+            found += _walk(f"{path} {name}", sub)
+    return found
+
+
+@pytest.mark.parametrize("name", list(mesoscopy.LAZY_SUBCOMMANDS))
+def test_subcommand_summary_matches_help(name):
+    cmd = mesoscopy.cli.get_command(click.Context(mesoscopy.cli), name)
+
+    assert cmd.help.splitlines()[0] == mesoscopy.LAZY_SUBCOMMANDS[name][1]
+
+
+def test_summaries_fit_group_listings():
+    # Click cuts a summary off with "..." when it overruns the 80-column command listing.
+    for path, cmd in _walk("mesoscopy", mesoscopy.cli):
+        if not isinstance(cmd, click.Group):
+            continue
+        ctx = click.Context(cmd)
+        names = cmd.list_commands(ctx)
+        limit = 78 - 6 - max(len(name) for name in names)
+        for name in names:
+            assert not cmd.get_command(ctx, name).get_short_help_str(limit).endswith("..."), f"{path} {name}"
+
+
+def test_docs_epilogs_point_at_docs_pages():
+    docs = Path(__file__).parents[1] / "docs"
+    epilogs = {path: cmd.epilog for path, cmd in _walk("mesoscopy", mesoscopy.cli) if cmd.epilog}
+
+    assert "mesoscopy" in epilogs
+    for path, epilog in epilogs.items():
+        page = epilog.split(mesoscopy.DOCS_URL)[1].strip("/")
+        assert (docs / f"{page or 'index'}.md").exists(), path
 
 
 def test_start_time_prints_first_timestamp(tmp_path):

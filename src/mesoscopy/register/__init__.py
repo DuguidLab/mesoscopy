@@ -30,6 +30,7 @@ import h5py
 import numpy as np
 
 import mesoscopy.resources as res
+from mesoscopy import docs_epilog
 from mesoscopy import io
 from mesoscopy import timer as timer
 
@@ -39,10 +40,10 @@ if typing.TYPE_CHECKING:
 
 @click.group("register")
 def register_cmd() -> None:
-    """Register recordings to a template."""
+    """Register recordings to an anatomical template."""
 
 
-@register_cmd.command("label")
+@register_cmd.command("label", epilog=docs_epilog("typical-workflow/"))
 @click.argument(
     "path",
     type=click.Path(exists=True),
@@ -52,33 +53,25 @@ def register_cmd() -> None:
     "--out_dir",
     type=click.Path(dir_okay=True),
     default="./",
-    help="Output directory for landmarks file.",
+    help="Output directory for the landmarks file.",
 )
 @click.option(
     "-t",
     "--template-points",
     type=click.Path(dir_okay=False),
-    help="Path to template landmark points in CSV or Fiji XML points format",
+    help="Template landmarks in CSV or Fiji XML points format, instead of the Allen CCF landmarks.",
 )
 @click.option(
     "--session-id",
     type=str,
-    help="Session ID for the recording.",
+    help="Session ID naming the landmarks file. Defaults to the name of PATH.",
 )
 def label_cmd(path, out_dir, template_points, session_id) -> dict:
-    """Mark landmarks on a recording for registration to a template using the landmarks GUI.
+    """Mark anatomical landmarks on a recording.
 
-    Args:
-        path (str): Path to preprocessed HDF5 file or NWB file.
-        out_dir (str): Output directory for registration landmarks file.
-        template_points (str): Path to template landmark points in CSV or Fiji XML points format.
-        session_id (str): Session ID for the recording.
-
-    Returns:
-        dict: Dictionary with the landmarks and their x-y coordinates.
-              Dictionary keys are landmark names, while x-y coordinates are stored as an (x, y)
-              tuple, i.e. (column, row).
-    """
+    PATH is a preprocessed HDF5 or NWB recording. Drag each landmark onto its anatomical location in the napari
+    window that opens, then press Save and Close. Writes <session>_landmarks.csv for `register landmarks`.
+    """  # noqa: DOC201
     from dask import array as da
 
     import mesoscopy.preprocess.compute as preproc_compute
@@ -130,7 +123,7 @@ def label_cmd(path, out_dir, template_points, session_id) -> dict:
     return recording_landmarks
 
 
-@register_cmd.command("landmarks")
+@register_cmd.command("landmarks", epilog=docs_epilog("typical-workflow/"))
 @click.argument(
     "path",
     type=click.Path(exists=True),
@@ -140,19 +133,19 @@ def label_cmd(path, out_dir, template_points, session_id) -> dict:
     "--out_dir",
     type=click.Path(dir_okay=True),
     default="./",
-    help="Output directory for registered recording.",
+    help="Output directory for the registered recording.",
 )
 @click.option(
     "-r",
     "--recording-points",
     type=click.Path(dir_okay=False),
-    help="Path to recording landmark points in Fiji XML points format",
+    help="Recording landmarks in CSV or Fiji XML points format.",
 )
 @click.option(
     "-t",
     "--template-points",
     type=click.Path(dir_okay=False),
-    help="Path to template landmark points in Fiji XML points format",
+    help="Template landmarks in CSV or Fiji XML points format, instead of the Allen CCF landmarks.",
 )
 @click.option(
     "-s",
@@ -160,22 +153,21 @@ def label_cmd(path, out_dir, template_points, session_id) -> dict:
     type=float,
     default=None,
     help=(
-        "Scale of the Allen CCF template the frames are registered to, relative to its native 140x142 pixels. Defaults"
-        " to the scale at which template pixels match the recording's pixel size, so the recording keeps its own"
-        " resolution. Ignored with -t."
+        "Scale of the Allen CCF template relative to its native 140x142 pixels. Defaults to the scale that keeps the"
+        " recording's resolution. Ignored with -t."
     ),
 )
 @click.option(
     "--output-width",
     type=int,
     default=None,
-    help="Deprecated, use --scale. Width of the registered frames.",
+    help="Width of the registered frames. Deprecated in favour of --scale.",
 )
 @click.option(
     "--output-height",
     type=int,
     default=None,
-    help="Deprecated, use --scale. Height of the registered frames.",
+    help="Height of the registered frames. Deprecated in favour of --scale.",
 )
 def landmarks_cmd(
     path: str,
@@ -186,24 +178,12 @@ def landmarks_cmd(
     output_width: int | None = None,
     output_height: int | None = None,
 ) -> str:
-    """Register a recording to a template based on defined landmarks.
+    """Register a recording to the Allen CCF template.
 
-    Args:
-        path (str): Path to preprocessed recording HDF5 or NWB file.
-        out_dir (str): Output directory for registered recording.
-        recording_points (str, optional): Path to recording landmark points in CSV or Fiji XML points format.
-        template_points (str, optional): Path to template landmark points in CSV or Fiji XML points format.
-        scale (float, optional): Scale of the Allen CCF template, relative to its native size. Defaults to the
-            scale matching the recording's pixel size.
-        output_width (int, optional): Deprecated, use ``scale``. Width of the registered frames.
-        output_height (int, optional): Deprecated, use ``scale``. Height of the registered frames.
-
-    Returns:
-        str: Path to the registered recording file.
-
-    Raises:
-        ValueError: If the path to recording landmarks cannot be inferred, or the options conflict.
-    """
+    PATH is a preprocessed HDF5 or NWB recording with landmarks marked by `register label`. The landmarks file is
+    found next to PATH or in --out_dir, or given with -r. Writes <session>_registered.h5, and links it into PATH when
+    PATH is an NWB file.
+    """  # noqa: DOC201, DOC501
     import mesoscopy.register.transform as trf
 
     click.echo(f"Registering recording {path} to template.")

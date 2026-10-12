@@ -4,6 +4,10 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 ## Unreleased
 
+### Changed
+
+- Stylistic changes to CLI help strings.
+
 ## [0.17.0] - 2026-10-12
 
 ### Added

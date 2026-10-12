@@ -30,18 +30,33 @@ import click
 
 __version__ = version("mesoscopy")
 
+DOCS_URL = "https://docs.mesoscopy.org"
+
+
+def docs_epilog(page: str = "") -> str:
+    """Help epilog pointing at the docs.
+
+    Args:
+        page: Page path under the docs site, such as "how-to/metrics/". Empty for the home page.
+
+    Returns:
+        The epilog, marked so that click does not rewrap the URL.
+    """
+    return f"\b\nDocumentation at {DOCS_URL}/{page}" if page else f"\b\nDocumentation at {DOCS_URL}"
+
+
 # Lazy subcommands are imported only when they are looked up, to avoid importing heavy dependencies unnecessarily.
 LAZY_SUBCOMMANDS = {
-    "align": ("mesoscopy.align:align_cmd", "Write behaviour-aligned frame timestamps to a recording."),
+    "align": ("mesoscopy.align:align_cmd", "Align frame timestamps to a behaviour session."),
     "convert": ("mesoscopy.convert:convert_cmd", "Convert raw recordings to NWB or HDF5."),
-    "export": ("mesoscopy.export:export_cmd", "Export mesoscopy-generated files to other formats."),
-    "inspect": ("mesoscopy.inspect:inspect_cmd", "Inspect a recording session and associated preprocessing output."),
+    "export": ("mesoscopy.export:export_cmd", "Export mesoscopy files to other formats."),
+    "inspect": ("mesoscopy.inspect:inspect_cmd", "Inspect an NWB recording and its processing progress."),
     "postprocess": ("mesoscopy.postprocess:postprocess_cmd", "Postprocess extracted activity."),
-    "preprocess": ("mesoscopy.preprocess:preprocess_cmd", "Extract haemodynamics-corrected deltaF from a recording."),
-    "process": ("mesoscopy.process:process_cmd", "Extract activity from preprocessed or registered recordings."),
+    "preprocess": ("mesoscopy.preprocess:preprocess_cmd", "Extract haemodynamics-corrected ∆F/F from a recording."),
+    "process": ("mesoscopy.process:process_cmd", "Analyse preprocessed or registered recordings."),
     "register": ("mesoscopy.register:register_cmd", "Register recordings to an anatomical template."),
-    "report": ("mesoscopy.report:report_cmd", "Generate an HTML report for a mesoscopy processing step."),
-    "sample": ("mesoscopy:sample", "Sample an image frame from an HDF5 file and export it as a PNG."),
+    "report": ("mesoscopy.report:report_cmd", "Generate an HTML report for a pipeline stage."),
+    "sample": ("mesoscopy:sample", "Save one frame of an HDF5 recording as a PNG."),
     "start-time": ("mesoscopy:start_time", "Print a recording's start time."),
 }
 
@@ -115,7 +130,7 @@ class LazyGroup(click.Group):
         return cmd
 
 
-@click.group(cls=LazyGroup, lazy_subcommands=LAZY_SUBCOMMANDS)
+@click.group(cls=LazyGroup, lazy_subcommands=LAZY_SUBCOMMANDS, epilog=docs_epilog())
 @click.version_option(__version__)
 def cli():
     """Widefield calcium imaging analysis pipeline."""
@@ -124,13 +139,17 @@ def cli():
 @click.command()
 @click.argument("path", type=click.Path(exists=True))
 @click.argument("out_dir", type=click.Path(dir_okay=True))
-@click.option("--index", default=0, show_default=True, help="Index of frame to sample.")
-@click.option("--crop", default=0)
-@click.option("--vmin", type=float, default=0)
-@click.option("--vmax", type=float, default=255)
-@click.option("--key", type=str, default=None, help="Activity column")
+@click.option("--index", default=0, show_default=True, help="Index of the frame to save.")
+@click.option("--crop", default=0, show_default=True, help="Pixels to crop from each edge.")
+@click.option("--vmin", type=float, default=0, show_default=True, help="Lower end of the colour scale.")
+@click.option("--vmax", type=float, default=255, show_default=True, help="Upper end of the colour scale.")
+@click.option("--key", type=str, default=None, help="Dataset holding the frames, such as F or frames.")
 def sample(path, out_dir, index, crop=0, vmin=0, vmax=255, key="frames"):
-    """Sample an image frame from an HDF5 file and export it as a PNG."""
+    """Save one frame of an HDF5 recording as a PNG.
+
+    PATH is an HDF5 recording and OUT_DIR the directory for the image. Pick the frame with --index and its dataset
+    with --key. Writes <name>_sample-<index>.png.
+    """
     import h5py
     from matplotlib import pyplot as plt
 
@@ -154,7 +173,8 @@ def sample(path, out_dir, index, crop=0, vmin=0, vmax=255, key="frames"):
 def start_time(path: str) -> None:
     """Print a recording's start time.
 
-    This is the first /timestamps entry of an HDF5 file, or the session_start_time of an NWB file, as stored.
+    PATH is an HDF5 recording or an NWB file. Prints the first frame timestamp of an HDF5 file, or the session start
+    time of an NWB file.
     """  # noqa: DOC501
     from mesoscopy import io
 

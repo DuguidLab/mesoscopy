@@ -23,10 +23,11 @@
 
 import click
 
+from mesoscopy import docs_epilog
 from mesoscopy import io
 
 
-@click.command("inspect")
+@click.command("inspect", epilog=docs_epilog("typical-workflow/"))
 @click.argument(
     "input_path",
     type=click.Path(exists=True),
@@ -36,24 +37,32 @@ from mesoscopy import io
     "info_level",
     flag_value="meta_only",
     default=True,
+    help="Print the metadata only. This is the default.",
 )
 @click.option(
     "--acquisition",
     "info_level",
     flag_value="acquisition",
+    help="Also open the raw acquisition in a viewer.",
 )
 @click.option(
     "--deltaf",
     "info_level",
     flag_value="deltaf",
+    help="Also open the ∆F/F series in a viewer.",
 )
 @click.option(
     "--registered",
     "info_level",
     flag_value="registered",
+    help="Also open the registered ∆F/F series in a viewer.",
 )
 def inspect_cmd(input_path: str, info_level: str) -> None:
-    """Inspect a calcium recording session and associated preprocessing output. Files must be in NWB format."""
+    """Inspect an NWB recording and its processing progress.
+
+    INPUT_PATH is an NWB file. Pass --acquisition, --deltaf or --registered to open that data in a napari viewer.
+    Prints the session metadata and which pipeline stages have run.
+    """
     inspect(input_path=input_path, info_level=info_level)
 
 

@@ -26,6 +26,7 @@ from jinja2 import Environment
 from jinja2 import PackageLoader
 from jinja2 import select_autoescape
 
+from mesoscopy import docs_epilog
 from mesoscopy import io
 
 PREPROCESSING_REPORT_TEMPLATE = "preprocessing.html"
@@ -35,7 +36,7 @@ PERIEVENT_REPORT_TEMPLATE = "perievent.html"
 env = Environment(loader=PackageLoader("mesoscopy.report", "templates"), autoescape=select_autoescape())
 
 
-@click.command(name="report")
+@click.command(name="report", epilog=docs_epilog("how-to/reports/"))
 @click.argument("path")
 @click.option(
     "-o",
@@ -49,23 +50,14 @@ env = Environment(loader=PackageLoader("mesoscopy.report", "templates"), autoesc
     "--trials",
     type=click.Path(exists=True, dir_okay=False),
     default=None,
-    help="Trials CSV giving sdt_type per trial, for peri-event files written without it.",
+    help="Trials CSV giving sdt_type per trial, for peri-event files without it.",
 )
 def report_cmd(path: str, out_dir: str, trials: str | None) -> str:
-    """Generate an HTML report for a mesoscopy processing step.
+    """Generate an HTML report for a pipeline stage.
 
-    PATH is a *_preprocessed.h5, *_registered.h5 or *_perievent.csv file. Peri-event reports pick up the
-    *_metrics.csv and *_metrics-session.csv written by `process metrics` and the *_connectivity.csv written by
-    `process connectivity` next to the input when present.
-
-    Args:
-        path (str): Path to the input file.
-        out_dir (str): Directory where the report will be saved. Defaults to the current directory
-        trials (str, optional): Trials CSV for peri-event files without an sdt_type column.
-
-    Returns:
-        str: Path to the generated report.
-    """  # noqa: DOC501
+    PATH is a *_preprocessed.h5, *_registered.h5 or *_perievent.csv file. A peri-event report also shows the
+    metrics and connectivity tables if found next to PATH. Writes <name>_report.html.
+    """  # noqa: DOC201, DOC501
     if path.endswith("_preprocessed.h5"):
         return generate_preprocessing_report(path, out_dir=out_dir)
     elif path.endswith("_registered.h5"):

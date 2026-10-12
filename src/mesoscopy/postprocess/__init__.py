@@ -26,4 +26,8 @@ import click
 
 @click.command()
 def postprocess_cmd():
+    """Postprocess extracted activity.
+
+    This command is a placeholder and does nothing (yet).
+    """
     click.echo("Postprocessing")
