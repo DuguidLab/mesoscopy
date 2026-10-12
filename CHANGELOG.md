@@ -6,7 +6,7 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 ### Changed
 
-- Stylistic changes to CLI help strings.
+- Stylistic changes to CLI help strings ([#217](https://github.com/DuguidLab/mesoscopy/pull/217)).
 
 ## [0.17.0] - 2026-10-12
 
