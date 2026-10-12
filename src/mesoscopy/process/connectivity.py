@@ -963,7 +963,7 @@ def rolling_table(
 
     Returns:
         pd.DataFrame: One row per unordered region pair, trial group and window, with the `ROLLING_COLUMNS`:
-        `region_a`, `region_b`, `group`, `time` (the window centre, relative to the event), `r`, `r_residual`,
+        `region_a`, `region_b`, `group`, `time` (the window's last sample, relative to the event), `r`, `r_residual`,
         `mi` and `mi_residual` (as in `connectivity_table`, over the window), `n_trials` (trials used) and
         `n_samples` (pooled samples of the window).
 
@@ -988,7 +988,7 @@ def rolling_table(
     interval = float(np.median(np.diff(time))) if len(time) > 1 else 1.0
     window_samples, step_samples = round(window / interval), round(step / interval)
     starts = window_starts(len(time), window_samples, step_samples)
-    centres = (time[starts] + time[starts + window_samples - 1]) / 2
+    ends = time[starts + window_samples - 1]
 
     n_regions = len(regions)
     per_group: dict[str, dict[str, typing.Any]] = {}
@@ -1002,7 +1002,7 @@ def rolling_table(
         metrics = rolling_metrics(cube[used], window_samples, step_samples, mi_neighbours)
         per_group[name] = {"n_trials": n_trials, **metrics}
 
-    return _rolling_rows(regions, centres, per_group)
+    return _rolling_rows(regions, ends, per_group)
 
 
 def _rows(regions: list[str], per_group: dict[str, dict[str, typing.Any]]) -> pd.DataFrame:
@@ -1030,13 +1030,13 @@ def _rows(regions: list[str], per_group: dict[str, dict[str, typing.Any]]) -> pd
 
 
 def _rolling_rows(
-    regions: list[str], centres: npt.NDArray[np.float64], per_group: dict[str, dict[str, typing.Any]]
+    regions: list[str], ends: npt.NDArray[np.float64], per_group: dict[str, dict[str, typing.Any]]
 ) -> pd.DataFrame:
     """Table of `ROLLING_COLUMNS` from each group's `rolling_metrics` arrays.
 
     Args:
         regions (list[str]): Region names in order.
-        centres (npt.NDArray[np.float64]): Window centres, shape `(n_windows,)`.
+        ends (npt.NDArray[np.float64]): Time of each window's last sample, shape `(n_windows,)`.
         per_group (dict[str, dict[str, typing.Any]]): Per group, its `rolling_metrics` arrays and `n_trials`.
 
     Returns:
@@ -1047,7 +1047,7 @@ def _rolling_rows(
     a, b = np.triu_indices(len(regions), k=1)
     names = np.asarray(regions, dtype=object)
     groups = list(per_group)
-    shape = (len(a), len(groups), len(centres))
+    shape = (len(a), len(groups), len(ends))
 
     def spread(values: npt.NDArray, axes: tuple[int, ...]) -> npt.NDArray:
         return np.broadcast_to(np.expand_dims(values, axes), shape).ravel()
@@ -1056,7 +1056,7 @@ def _rolling_rows(
         "region_a": spread(names[a], (1, 2)),
         "region_b": spread(names[b], (1, 2)),
         "group": spread(np.asarray(groups, dtype=object), (0, 2)),
-        "time": spread(centres, (0, 1)),
+        "time": spread(ends, (0, 1)),
     }
     for metric in ROLLING_METRICS:
         stacked = np.stack([per_group[name][metric] for name in groups])

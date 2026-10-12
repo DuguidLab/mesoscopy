@@ -94,7 +94,8 @@ mesoscopy process decode /path/to/recording_smoothed_regions_event-cueonset_peri
 Each window's feature is the region mean over its samples, so the epoch options do not apply. `--rolling-window`
 (default 0.5 s) sets the window length and `--rolling-step` (default 0.1 s) the time between windows, both rounded
 to whole samples. At 25 Hz the defaults give windows of 0.48 s every 0.08 s. The table has one row per decoder,
-region, group and window, and `time` is the window centre relative to the event.
+region, group and window. `time` is the last sample of the window relative to the event, so no row before the event
+takes in activity after it.
 
 The chance level is taken once per decoder, region and group on the `--baseline` window (default every sample
 before the event), since shuffled labels give the same chance level in every window. The shuffle columns therefore

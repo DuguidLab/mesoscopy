@@ -1046,7 +1046,7 @@ def rolling_table(
 
     Returns:
         pd.DataFrame: One row per decoder, region (plus `all` for the population decoder), group and window, with
-        the `ROLLING_COLUMNS`; `time` is the window centre relative to the event.
+        the `ROLLING_COLUMNS`; `time` is the window's last sample relative to the event.
 
     Raises:
         ValueError: As for `decoding_table`, or if the baseline window has no sample, or `window` is shorter than a
@@ -1067,7 +1067,7 @@ def rolling_table(
     interval = float(np.median(np.diff(time))) if len(time) > 1 else 1.0
     window_samples, step_samples = round(window / interval), round(step / interval)
     starts = pc.window_starts(len(time), window_samples, step_samples)
-    centres = (time[starts] + time[starts + window_samples - 1]) / 2
+    ends = time[starts + window_samples - 1]
     baseline = baseline if baseline is not None else (float(time[0]), 0.0)
     in_baseline = (time >= baseline[0]) & (time < baseline[1])
     if not in_baseline.any():
@@ -1095,7 +1095,7 @@ def rolling_table(
         per_group[name] = counts | rolling_decoding(
             features[used], baseline_features[used], y[used], present, folds, repeats, shuffles, seed
         )
-    return _rolling_rows(label, regions, centres, per_group, shuffles > 0)
+    return _rolling_rows(label, regions, ends, per_group, shuffles > 0)
 
 
 def _check_options(label: str, folds: int, repeats: int, shuffles: int, min_trials: int) -> None:
@@ -1125,7 +1125,7 @@ def _check_options(label: str, folds: int, repeats: int, shuffles: int, min_tria
 def _rolling_rows(
     label: str,
     regions: list[str],
-    centres: npt.NDArray[np.float64],
+    ends: npt.NDArray[np.float64],
     per_group: dict[str, dict[str, typing.Any]],
     with_null: bool,
 ) -> pd.DataFrame:
@@ -1143,8 +1143,8 @@ def _rolling_rows(
     for decoder in DECODERS:
         for index, region in enumerate([*regions, POPULATION]):
             for name, values in per_group.items():
-                windows = values[decoder][index] if decoder in values else [{} for _ in centres]
-                block = {"decoder": decoder, "label": label, "region": region, "group": name, "time": centres}
+                windows = values[decoder][index] if decoder in values else [{} for _ in ends]
+                block = {"decoder": decoder, "label": label, "region": region, "group": name, "time": ends}
                 block |= {score: [summary.get(score, np.nan) for summary in windows] for score in scores}
                 blocks.append(
                     pd.DataFrame(block | {key: values[key] for key in ("n_trials", "n_class_a", "n_class_b")})
