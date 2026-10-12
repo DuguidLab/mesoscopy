@@ -413,11 +413,21 @@ def _standardised(x: npt.NDArray[np.float64], train: npt.NDArray[np.float64]) ->
     mean = np.einsum("pfn,nr->pfr", train, x) / n
     centred = x[None, None] - mean[:, :, None, :]
     var = np.einsum("pfn,pfnr->pfr", train, centred**2) / n
-    # StandardScaler's rule for a feature that is constant up to rounding.
+    return centred / _scale(var, mean, n)[:, :, None, :]
+
+
+def _scale(
+    var: npt.NDArray[np.float64], mean: npt.NDArray[np.float64], n: npt.NDArray[np.float64]
+) -> npt.NDArray[np.float64]:
+    """Standard deviation as `StandardScaler` takes it, 1 for a feature that is constant up to rounding.
+
+    Returns:
+        npt.NDArray[np.float64]: Same shape as `var`.
+    """
     eps = np.finfo(np.float64).eps
     sd = np.sqrt(var)
     sd[var <= n * eps * var + (n * mean * eps) ** 2] = 1.0
-    return centred / sd[:, :, None, :]
+    return sd
 
 
 def _test_fold(values: npt.NDArray[np.float64], fold_of: npt.NDArray[np.int64]) -> npt.NDArray[np.float64]:
@@ -535,6 +545,75 @@ def logistic_decisions(
     return xs * w[:, :, None, :] + b[:, :, None, :]
 
 
+def population_lda_decisions(
+    xs: npt.NDArray[np.float64], positive: npt.NDArray[np.float64], train: npt.NDArray[np.float64]
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    """Decision values and weights of linear discriminants with equal priors, one per problem, fold and feature set.
+
+    Matches scikit-learn's `lsqr` solver with `shrinkage="auto"`. Each class's covariance is the Ledoit-Wolf
+    estimate of its standardised training trials, scaled back, and the pooled covariance is the mean of the two.
+
+    Args:
+        xs (npt.NDArray[np.float64]): Standardised features from `_standardised`, shape `(n_problems, n_folds,
+            n_trials, n_sets, n_features)`.
+        positive (npt.NDArray[np.float64]): 1 for positive trials, shape `(n_problems, n_trials)`.
+        train (npt.NDArray[np.float64]): 1 for training trials, shape `(n_problems, n_folds, n_trials)`.
+
+    Returns:
+        tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]: Decision values of every trial under every fit,
+        shape `(n_problems, n_folds, n_trials, n_sets)`, positive favouring the positive class, and the weights,
+        shape `(n_problems, n_folds, n_sets, n_features)`.
+    """
+    means, covariances = [], []
+    for weight in (train * positive[:, None, :], train * (1 - positive)[:, None, :]):
+        n = weight.sum(axis=-1)[:, :, None, None]
+        mean = np.einsum("pfn,pfnsk->pfsk", weight, xs) / n
+        centred = (xs - mean[:, :, None]) * weight[..., None, None]
+        scale = _scale((centred**2).sum(axis=2) / n, mean, n)
+        shrunk = _ledoit_wolf(centred / scale[:, :, None], n)
+        covariances.append(scale[..., :, None] * shrunk * scale[..., None, :])
+        means.append(mean)
+    coef = _solve(0.5 * (covariances[0] + covariances[1]), means[0] - means[1])
+    decisions = np.einsum("pfnsk,pfsk->pfns", xs - 0.5 * (means[0] + means[1])[:, :, None], coef)
+    return decisions, coef
+
+
+def _ledoit_wolf(z: npt.NDArray[np.float64], n: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+    """Ledoit-Wolf covariance of each class's standardised trials, as `sklearn.covariance.ledoit_wolf` takes it.
+
+    `z` holds the trials, zero outside the class, with shape `(n_problems, n_folds, n_trials, n_sets,
+    n_features)`, and `n` the class sizes.
+
+    Returns:
+        npt.NDArray[np.float64]: Shape `(n_problems, n_folds, n_sets, n_features, n_features)`.
+    """
+    n_features = z.shape[-1]
+    samples = np.moveaxis(z, 2, -1)
+    gram = samples @ np.swapaxes(samples, -1, -2)
+    n = n[..., 0]
+    covariance = gram / n[..., None, None]
+    variance = np.diagonal(covariance, axis1=-2, axis2=-1).sum(axis=-1)
+    mu = variance / n_features
+    gram_squares = (gram**2).sum(axis=(-2, -1)) / n**2
+    beta = (((z**2).sum(axis=-1) ** 2).sum(axis=2) / n - gram_squares) / (n_features * n)
+    delta = (gram_squares - 2 * mu * variance + n_features * mu**2) / n_features
+    beta = np.minimum(beta, delta)
+    shrinkage = np.divide(beta, delta, out=np.zeros_like(beta), where=beta != 0)
+    return (1 - shrinkage)[..., None, None] * covariance + (shrinkage * mu)[..., None, None] * np.eye(n_features)
+
+
+def _solve(a: npt.NDArray[np.float64], b: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+    """Solutions of `a @ x = b` for stacked symmetric matrices, through the pseudo-inverse if any is singular.
+
+    Returns:
+        npt.NDArray[np.float64]: Same shape as `b`.
+    """
+    try:
+        return np.linalg.solve(a, b[..., None])[..., 0]
+    except np.linalg.LinAlgError:
+        return (np.linalg.pinv(a, rcond=np.finfo(np.float64).eps, hermitian=True) @ b[..., None])[..., 0]
+
+
 def region_decisions(
     features: npt.NDArray[np.float64], y: npt.NDArray, fold_of: npt.NDArray[np.int64], decoder: str
 ) -> npt.NDArray[np.float64]:
@@ -571,6 +650,58 @@ def region_decisions(
         fitted = lda_decisions(xs, positive, train) if decoder == "lda" else logistic_decisions(xs, positive, train)
         decisions[first:last] = _test_fold(fitted, fold)
     return decisions
+
+
+def population_decisions(
+    features: npt.NDArray[np.float64], y: npt.NDArray, fold_of: npt.NDArray[np.int64], decoder: str
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    """Held-out decision values and weights of multi-feature decoders, for every problem and feature set at once.
+
+    Problems and folds are as for `region_decisions`. Each feature set, such as the regions of one window, gets
+    its own decoder.
+
+    Args:
+        features (npt.NDArray[np.float64]): Features of shape `(n_trials, n_sets, n_features)`.
+        y (npt.NDArray): Class per trial per problem, shape `(n_problems, n_trials)`.
+        fold_of (npt.NDArray[np.int64]): Test fold per trial per problem, shape `(n_problems, n_trials)`.
+        decoder (str): One of `DECODERS`.
+
+    Returns:
+        tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]: Decision values of shape `(n_problems, n_trials,
+        n_sets)`, and the weights of the standardised features in each fit, shape `(n_problems, n_folds, n_sets,
+        n_features)`.
+
+    Raises:
+        ValueError: If `decoder` is not one of `DECODERS`.
+        NotImplementedError: For the logistic regression, which is not vectorised yet.
+    """
+    if decoder not in DECODERS:
+        msg = f"Unknown decoder {decoder!r}; expected one of {', '.join(DECODERS)}."
+        raise ValueError(msg)
+    if decoder == "logistic":
+        msg = "The population logistic regression is not vectorised yet."
+        raise NotImplementedError(msg)
+    folds = int(fold_of.max()) + 1
+    n_trials, n_sets, n_features = features.shape
+    # Elements per set of the standardised features or of the covariances, whichever is larger.
+    per_set = folds * n_features * max(n_trials, n_features)
+    set_chunk = max(1, min(n_sets, _CHUNK_ELEMENTS // per_set))
+    chunk = max(1, _CHUNK_ELEMENTS // (per_set * set_chunk))
+    decisions = np.empty((len(y), n_trials, n_sets))
+    weights = np.empty((len(y), folds, n_sets, n_features))
+    for first in range(0, len(y), chunk):
+        last = min(first + chunk, len(y))
+        fold = fold_of[first:last]
+        positive = np.asarray(y[first:last], dtype=np.float64)
+        train = (fold[:, None, :] != np.arange(folds)[None, :, None]).astype(np.float64)
+        for start in range(0, n_sets, set_chunk):
+            sets = slice(start, min(start + set_chunk, n_sets))
+            x = features[:, sets]
+            xs = _standardised(x.reshape(n_trials, -1), train).reshape(*train.shape, *x.shape[1:])
+            fitted, coef = population_lda_decisions(xs, positive, train)
+            decisions[first:last, :, sets] = _test_fold(fitted, fold)
+            weights[first:last, :, sets] = coef
+    return decisions, weights
 
 
 def problem_scores(
