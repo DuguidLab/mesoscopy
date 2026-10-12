@@ -66,11 +66,11 @@ while `--min-rt` and `--min-trials` do. `--rolling-window` (default 0.5 s) sets 
 `--rolling-step` (default 0.1 s) the time between windows, both rounded to whole samples. At 25 Hz the defaults give
 windows of 0.48 s every 0.08 s.
 
-The table has one row per pair, trial group and window. `time` is the centre of the window relative to the event,
-and `n_samples` is the number of samples pooled in it. The other columns read as in the epoch table. A rise in
-`mi_residual` after the cue means the two regions covary more from trial to trial, beyond their shared response.
-The rolling table is the slowest part of the command, since every window estimates the mutual information of every
-pair twice.
+The table has one row per pair, trial group and window. `time` is the last sample of the window relative to the
+event, so no row before the event takes in activity after it. `n_samples` is the number of samples pooled in the
+window. The other columns read as in the epoch table. A rise in `mi_residual` after the cue means the two regions
+covary more from trial to trial, beyond their shared response. The rolling table is the slowest part of the command,
+since every window estimates the mutual information of every pair twice.
 
 ## Whole recording
 
