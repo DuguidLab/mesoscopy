@@ -472,79 +472,6 @@ def lda_decisions(
     return xs * coef[:, :, None, :] + intercept[:, :, None, :]
 
 
-def logistic_decisions(
-    xs: npt.NDArray[np.float64],
-    positive: npt.NDArray[np.float64],
-    train: npt.NDArray[np.float64],
-    c: float = 1.0,
-    tolerance: float = 1e-8,
-    max_iter: int = 100,
-) -> npt.NDArray[np.float64]:
-    """Decision values of one-feature balanced L2 logistic regressions, one per problem, fold and feature.
-
-    Newton's method with backtracking on `0.5 * w**2 / c + sum(s_i * log(1 + exp(-y_i * (w * x_i + b))))`, the
-    objective scikit-learn's `lbfgs` solver minimises, with `s_i` the balanced class weights.
-
-    Args:
-        xs (npt.NDArray[np.float64]): Standardised features from `_standardised`, shape `(n_problems, n_folds,
-            n_trials, n_features)`.
-        positive (npt.NDArray[np.float64]): 1 for positive trials, shape `(n_problems, n_trials)`.
-        train (npt.NDArray[np.float64]): 1 for training trials, shape `(n_problems, n_folds, n_trials)`.
-        c (float, optional): Inverse L2 strength. Defaults to 1.
-        tolerance (float, optional): Largest parameter step at convergence. Defaults to 1e-8.
-        max_iter (int, optional): Newton iterations. Defaults to 100.
-
-    Returns:
-        npt.NDArray[np.float64]: Decision values of every trial under every fit, same shape as `xs`.
-    """
-    from scipy.special import expit
-
-    n_train = train.sum(axis=-1, keepdims=True)
-    n_positive = (train * positive[:, None, :]).sum(axis=-1, keepdims=True)
-    class_weight = np.where(
-        positive[:, None, :] > 0, n_train / (2 * n_positive), n_train / (2 * (n_train - n_positive))
-    )
-    weight = (train * class_weight)[..., None]
-    sign = (2 * positive - 1)[:, None, :, None]
-    target = positive[:, None, :, None]
-    shape = (*xs.shape[:2], xs.shape[3])
-    w = np.zeros(shape)
-    b = np.zeros(shape)
-
-    def objective(w: npt.NDArray[np.float64], b: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-        z = xs * w[:, :, None, :] + b[:, :, None, :]
-        return 0.5 * w**2 / c + (weight * np.logaddexp(0, -sign * z)).sum(axis=2)
-
-    value = objective(w, b)
-    for _ in range(max_iter):
-        z = xs * w[:, :, None, :] + b[:, :, None, :]
-        p = expit(z)
-        residual = weight * (p - target)
-        curvature = weight * p * (1 - p)
-        g_w = w / c + (residual * xs).sum(axis=2)
-        g_b = residual.sum(axis=2)
-        h_ww = 1 / c + (curvature * xs**2).sum(axis=2)
-        h_wb = (curvature * xs).sum(axis=2)
-        h_bb = curvature.sum(axis=2)
-        det = np.maximum(h_ww * h_bb - h_wb**2, np.finfo(float).tiny)
-        step_w = (h_bb * g_w - h_wb * g_b) / det
-        step_b = (h_ww * g_b - h_wb * g_w) / det
-        scale = np.ones(shape)
-        for _ in range(20):
-            candidate = objective(w - scale * step_w, b - scale * step_b)
-            # Allow for rounding in the objective, or the search stalls at the optimum.
-            worse = candidate > value * (1 + 1e-12) + 1e-12
-            if not worse.any():
-                break
-            scale[worse] *= 0.5
-        w -= scale * step_w
-        b -= scale * step_b
-        value = objective(w, b) if worse.any() else candidate
-        if max(np.abs(scale * step_w).max(), np.abs(scale * step_b).max()) < tolerance:
-            break
-    return xs * w[:, :, None, :] + b[:, :, None, :]
-
-
 def population_lda_decisions(
     xs: npt.NDArray[np.float64], positive: npt.NDArray[np.float64], train: npt.NDArray[np.float64]
 ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
@@ -614,13 +541,97 @@ def _solve(a: npt.NDArray[np.float64], b: npt.NDArray[np.float64]) -> npt.NDArra
         return (np.linalg.pinv(a, rcond=np.finfo(np.float64).eps, hermitian=True) @ b[..., None])[..., 0]
 
 
+def population_logistic_decisions(
+    xs: npt.NDArray[np.float64],
+    positive: npt.NDArray[np.float64],
+    train: npt.NDArray[np.float64],
+    c: float = 1.0,
+    tolerance: float = 1e-8,
+    max_iter: int = 100,
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    """Decision values and weights of balanced L2 logistic regressions, one per problem, fold and feature set.
+
+    Newton's method with backtracking on `0.5 * |w|**2 / c + sum(s_i * log(1 + exp(-y_i * (w @ x_i + b))))`, the
+    objective scikit-learn's `lbfgs` solver minimises, with `s_i` the balanced class weights.
+
+    Args:
+        xs (npt.NDArray[np.float64]): Standardised features from `_standardised`, shape `(n_problems, n_folds,
+            n_trials, n_sets, n_features)`.
+        positive (npt.NDArray[np.float64]): 1 for positive trials, shape `(n_problems, n_trials)`.
+        train (npt.NDArray[np.float64]): 1 for training trials, shape `(n_problems, n_folds, n_trials)`.
+        c (float, optional): Inverse L2 strength. Defaults to 1.
+        tolerance (float, optional): Largest parameter step at convergence. Defaults to 1e-8.
+        max_iter (int, optional): Newton iterations. Defaults to 100.
+
+    Returns:
+        tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]: Decision values of every trial under every fit,
+        shape `(n_problems, n_folds, n_trials, n_sets)`, and the weights, shape `(n_problems, n_folds, n_sets,
+        n_features)`.
+    """
+    from scipy.special import expit
+
+    x = np.ascontiguousarray(np.moveaxis(xs, 2, -2))
+    n_train = train.sum(axis=-1, keepdims=True)
+    n_positive = (train * positive[:, None, :]).sum(axis=-1, keepdims=True)
+    class_weight = np.where(
+        positive[:, None, :] > 0, n_train / (2 * n_positive), n_train / (2 * (n_train - n_positive))
+    )
+    weight = (train * class_weight)[:, :, None, :]
+    sign = (2 * positive - 1)[:, None, None, :]
+    target = positive[:, None, None, :]
+    n_features = x.shape[-1]
+    shape = x.shape[:3]
+    w = np.zeros((*shape, n_features))
+    b = np.zeros(shape)
+    hessian = np.zeros((*shape, n_features + 1, n_features + 1))
+    penalty = np.eye(n_features) / c
+
+    def decision(w: npt.NDArray[np.float64], b: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        return (x @ w[..., None])[..., 0] + b[..., None]
+
+    def objective(w: npt.NDArray[np.float64], b: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        return 0.5 * (w**2).sum(axis=-1) / c + (weight * np.logaddexp(0, -sign * decision(w, b))).sum(axis=-1)
+
+    value = objective(w, b)
+    for _ in range(max_iter):
+        p = expit(decision(w, b))
+        residual = weight * (p - target)
+        curvature = weight * p * (1 - p)
+        weighted = curvature[..., None] * x
+        border = weighted.sum(axis=-2)
+        hessian[..., :-1, :-1] = np.swapaxes(x, -1, -2) @ weighted + penalty
+        hessian[..., :-1, -1] = border
+        hessian[..., -1, :-1] = border
+        hessian[..., -1, -1] = curvature.sum(axis=-1)
+        gradient = np.concatenate(
+            [w / c + (residual[..., None, :] @ x)[..., 0, :], residual.sum(axis=-1)[..., None]], axis=-1
+        )
+        step = _solve(hessian, gradient)
+        step_w, step_b = step[..., :-1], step[..., -1]
+        scale = np.ones(shape)
+        for _ in range(20):
+            candidate = objective(w - scale[..., None] * step_w, b - scale * step_b)
+            # Allow for rounding in the objective, or the search stalls at the optimum.
+            worse = candidate > value * (1 + 1e-12) + 1e-12
+            if not worse.any():
+                break
+            scale[worse] *= 0.5
+        w -= scale[..., None] * step_w
+        b -= scale * step_b
+        value = objective(w, b) if worse.any() else candidate
+        if np.abs(scale[..., None] * step).max() < tolerance:
+            break
+    return np.moveaxis(decision(w, b), -1, 2), w
+
+
 def region_decisions(
     features: npt.NDArray[np.float64], y: npt.NDArray, fold_of: npt.NDArray[np.int64], decoder: str
 ) -> npt.NDArray[np.float64]:
     """Held-out decision values of one-feature decoders, for every problem and feature at once.
 
     A problem is one labelling of the trials with one k-fold assignment; the fits of a fold train on the other
-    folds and score the held-out trials.
+    folds and score the held-out trials. The logistic regressions go through `population_decisions` with one
+    feature per set.
 
     Args:
         features (npt.NDArray[np.float64]): Features of shape `(n_trials, n_features)`, one decoder per column.
@@ -637,6 +648,8 @@ def region_decisions(
     if decoder not in DECODERS:
         msg = f"Unknown decoder {decoder!r}; expected one of {', '.join(DECODERS)}."
         raise ValueError(msg)
+    if decoder == "logistic":
+        return population_decisions(features[:, :, None], y, fold_of, decoder)[0]
     folds = int(fold_of.max()) + 1
     n_trials, n_features = features.shape
     chunk = max(1, _CHUNK_ELEMENTS // (folds * n_trials * n_features))
@@ -647,8 +660,7 @@ def region_decisions(
         positive = np.asarray(y[first:last], dtype=np.float64)
         train = (fold[:, None, :] != np.arange(folds)[None, :, None]).astype(np.float64)
         xs = _standardised(features, train)
-        fitted = lda_decisions(xs, positive, train) if decoder == "lda" else logistic_decisions(xs, positive, train)
-        decisions[first:last] = _test_fold(fitted, fold)
+        decisions[first:last] = _test_fold(lda_decisions(xs, positive, train), fold)
     return decisions
 
 
@@ -673,14 +685,11 @@ def population_decisions(
 
     Raises:
         ValueError: If `decoder` is not one of `DECODERS`.
-        NotImplementedError: For the logistic regression, which is not vectorised yet.
     """
     if decoder not in DECODERS:
         msg = f"Unknown decoder {decoder!r}; expected one of {', '.join(DECODERS)}."
         raise ValueError(msg)
-    if decoder == "logistic":
-        msg = "The population logistic regression is not vectorised yet."
-        raise NotImplementedError(msg)
+    fit = population_lda_decisions if decoder == "lda" else population_logistic_decisions
     folds = int(fold_of.max()) + 1
     n_trials, n_sets, n_features = features.shape
     # Elements per set of the standardised features or of the covariances, whichever is larger.
@@ -698,7 +707,7 @@ def population_decisions(
             sets = slice(start, min(start + set_chunk, n_sets))
             x = features[:, sets]
             xs = _standardised(x.reshape(n_trials, -1), train).reshape(*train.shape, *x.shape[1:])
-            fitted, coef = population_lda_decisions(xs, positive, train)
+            fitted, coef = fit(xs, positive, train)
             decisions[first:last, :, sets] = _test_fold(fitted, fold)
             weights[first:last, :, sets] = coef
     return decisions, weights

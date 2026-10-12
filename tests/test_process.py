@@ -5269,32 +5269,72 @@ class TestPopulationDecisions:
         return np.column_stack([_decoding_features(), noise]), y, splits, pdc.fold_ids(splits, 5, len(y))
 
     @staticmethod
-    def _assert_matches_sklearn(features, y, splits, decisions, weights):
-        for i, (train, test) in enumerate(splits):
-            model = pdc.make_decoder("lda").fit(features[train], y[train])
-            np.testing.assert_allclose(decisions[i // 5, test, 0], model.decision_function(features[test]), atol=1e-10)
-            np.testing.assert_allclose(weights[i // 5, i % 5, 0], model[-1].coef_[0], atol=1e-10)
+    def _assert_matches_sklearn(decoder, features, y, splits, decisions, weights):
+        from sklearn.linear_model import LogisticRegression
+        from sklearn.pipeline import make_pipeline
+        from sklearn.preprocessing import StandardScaler
 
-    def test_lda_matches_sklearn(self):
+        for i, (train, test) in enumerate(splits):
+            if decoder == "lda":
+                model, atol = pdc.make_decoder("lda"), 1e-10
+            else:
+                # lbfgs stops about 1e-6 short of the optimum even at this tolerance; see test_logistic_reaches_optimum.
+                logistic = LogisticRegression(C=1.0, class_weight="balanced", tol=1e-12, max_iter=100000)
+                model, atol = make_pipeline(StandardScaler(), logistic), 1e-5
+            model.fit(features[train], y[train])
+            np.testing.assert_allclose(decisions[i // 5, test, 0], model.decision_function(features[test]), atol=atol)
+            np.testing.assert_allclose(weights[i // 5, i % 5, 0], model[-1].coef_[0], atol=atol)
+
+    @pytest.mark.parametrize("decoder", pdc.DECODERS)
+    def test_matches_sklearn(self, decoder):
         features, y, splits, fold_of = self._problems()
-        decisions, weights = pdc.population_decisions(features[:, None], np.broadcast_to(y, (2, 36)), fold_of, "lda")
+        decisions, weights = pdc.population_decisions(features[:, None], np.broadcast_to(y, (2, 36)), fold_of, decoder)
         assert decisions.shape == (2, 36, 1)
         assert weights.shape == (2, 5, 1, 6)
-        self._assert_matches_sklearn(features, y, splits, decisions, weights)
+        self._assert_matches_sklearn(decoder, features, y, splits, decisions, weights)
 
-    def test_lda_more_features_than_trials(self):
-        # Shrinkage keeps the covariance invertible with fewer trials per class than features.
+    @pytest.mark.parametrize("decoder", pdc.DECODERS)
+    def test_more_features_than_trials(self, decoder):
+        # Shrinkage or the L2 penalty keeps each fit well posed with fewer trials per class than features.
         _, y, splits, fold_of = self._problems()
         features = 0.5 * y[:, None] + np.random.default_rng(1).standard_normal((36, 40))
-        decisions, weights = pdc.population_decisions(features[:, None], y[None], fold_of[:1], "lda")
-        self._assert_matches_sklearn(features, y, splits[:5], decisions, weights)
+        decisions, weights = pdc.population_decisions(features[:, None], y[None], fold_of[:1], decoder)
+        self._assert_matches_sklearn(decoder, features, y, splits[:5], decisions, weights)
 
-    def test_lda_constant_feature(self):
+    @pytest.mark.parametrize("decoder", pdc.DECODERS)
+    def test_constant_feature(self, decoder):
         features, y, splits, fold_of = self._problems()
         features[:, 1] = 2.0
-        decisions, weights = pdc.population_decisions(features[:, None], y[None], fold_of[:1], "lda")
-        self._assert_matches_sklearn(features, y, splits[:5], decisions, weights)
+        decisions, weights = pdc.population_decisions(features[:, None], y[None], fold_of[:1], decoder)
+        self._assert_matches_sklearn(decoder, features, y, splits[:5], decisions, weights)
         assert (weights[..., 1] == 0).all()
+
+    @staticmethod
+    def _assert_logistic_optimum(fold_of, y, atol=1e-9):
+        # The gradient of the objective vanishes in every fit.
+        features = 0.5 * y[:, None] + np.random.default_rng(1).standard_normal((36, 40))
+        positive = y[None].astype(np.float64)
+        train = (fold_of[:1, None, :] != np.arange(5)[None, :, None]).astype(np.float64)
+        xs = pdc._standardised(features, train)
+        decisions, weights = pdc.population_logistic_decisions(xs[:, :, :, None], positive, train)
+        n_train = train.sum(axis=-1, keepdims=True)
+        n_positive = (train * positive[:, None]).sum(axis=-1, keepdims=True)
+        balanced = np.where(positive[:, None] > 0, n_train / (2 * n_positive), n_train / (2 * (n_train - n_positive)))
+        residual = train * balanced * (sst.logistic.cdf(decisions[..., 0]) - positive[:, None])
+        np.testing.assert_allclose(weights[:, :, 0] + np.einsum("pfn,pfnk->pfk", residual, xs), 0.0, atol=atol)
+        np.testing.assert_allclose(residual.sum(axis=-1), 0.0, atol=atol)
+
+    def test_logistic_reaches_optimum(self):
+        _, y, _, fold_of = self._problems()
+        self._assert_logistic_optimum(fold_of, y)
+
+    def test_logistic_backtracks_overshooting_steps(self, monkeypatch):
+        # Newton steps three times too long overshoot, and the line search halves them back. Convergence is then
+        # linear, so the step tolerance leaves a larger gradient.
+        _, y, _, fold_of = self._problems()
+        solve = pdc._solve
+        monkeypatch.setattr(pdc, "_solve", lambda a, b: 3 * solve(a, b))
+        self._assert_logistic_optimum(fold_of, y, atol=1e-5)
 
     def test_lda_one_feature_matches_region_decisions(self):
         features, y, _, fold_of = self._problems()
@@ -5302,51 +5342,51 @@ class TestPopulationDecisions:
         decisions, _ = pdc.population_decisions(features[:, :, None], labels, fold_of, "lda")
         np.testing.assert_allclose(decisions, pdc.region_decisions(features, labels, fold_of, "lda"), atol=1e-10)
 
-    def test_sets_are_independent(self):
+    @pytest.mark.parametrize("decoder", pdc.DECODERS)
+    def test_sets_are_independent(self, decoder):
         features, y, _, fold_of = self._problems()
         sets = np.stack([features, features**2, -features], axis=1)
-        decisions, weights = pdc.population_decisions(sets, y[None], fold_of[:1], "lda")
+        decisions, weights = pdc.population_decisions(sets, y[None], fold_of[:1], decoder)
         for s in range(3):
-            alone, alone_weights = pdc.population_decisions(sets[:, [s]], y[None], fold_of[:1], "lda")
-            np.testing.assert_allclose(decisions[..., [s]], alone)
-            np.testing.assert_allclose(weights[:, :, [s]], alone_weights)
+            alone, alone_weights = pdc.population_decisions(sets[:, [s]], y[None], fold_of[:1], decoder)
+            np.testing.assert_allclose(decisions[..., [s]], alone, atol=1e-12)
+            np.testing.assert_allclose(weights[:, :, [s]], alone_weights, atol=1e-12)
 
-    def test_problems_are_independent(self):
+    @pytest.mark.parametrize("decoder", pdc.DECODERS)
+    def test_problems_are_independent(self, decoder):
         features, y, _, fold_of = self._problems()
         shuffled = np.random.default_rng(0).permutation(y)
-        together, _ = pdc.population_decisions(features[:, None], np.stack([y, shuffled]), fold_of, "lda")
-        alone, _ = pdc.population_decisions(features[:, None], shuffled[None], fold_of[1:], "lda")
-        np.testing.assert_allclose(together[1], alone[0])
+        together, _ = pdc.population_decisions(features[:, None], np.stack([y, shuffled]), fold_of, decoder)
+        alone, _ = pdc.population_decisions(features[:, None], shuffled[None], fold_of[1:], decoder)
+        np.testing.assert_allclose(together[1], alone[0], atol=1e-12)
         assert not np.allclose(together[0], together[1])
 
-    def test_chunks_match(self, monkeypatch):
+    @pytest.mark.parametrize("decoder", pdc.DECODERS)
+    def test_chunks_match(self, monkeypatch, decoder):
         features, y, _, fold_of = self._problems()
         sets = np.stack([features, features**2, -features], axis=1)
         labels = np.stack([y, np.random.default_rng(0).permutation(y)])
-        whole = pdc.population_decisions(sets, labels, fold_of, "lda")
+        whole = pdc.population_decisions(sets, labels, fold_of, decoder)
         monkeypatch.setattr(pdc, "_CHUNK_ELEMENTS", 1)
-        chunked = pdc.population_decisions(sets, labels, fold_of, "lda")
-        np.testing.assert_allclose(chunked[0], whole[0])
-        np.testing.assert_allclose(chunked[1], whole[1])
+        chunked = pdc.population_decisions(sets, labels, fold_of, decoder)
+        np.testing.assert_allclose(chunked[0], whole[0], atol=1e-12)
+        np.testing.assert_allclose(chunked[1], whole[1], atol=1e-12)
 
-    def test_constant_features_predict_nothing(self):
-        # Every covariance is zero, so the solve falls back to the pseudo-inverse.
+    @pytest.mark.parametrize("decoder", pdc.DECODERS)
+    def test_constant_features_predict_nothing(self, decoder):
+        # For the discriminant every covariance is zero, so the solve falls back to the pseudo-inverse.
         _, y, _, fold_of = self._problems()
-        decisions, weights = pdc.population_decisions(np.ones((36, 1, 2)), y[None], fold_of[:1], "lda")
+        decisions, weights = pdc.population_decisions(np.ones((36, 1, 2)), y[None], fold_of[:1], decoder)
         np.testing.assert_allclose(decisions, 0.0, atol=1e-12)
         np.testing.assert_allclose(weights, 0.0, atol=1e-12)
 
-    def test_separable_features(self):
+    @pytest.mark.parametrize("decoder", pdc.DECODERS)
+    def test_separable_features(self, decoder):
         _, y, _, fold_of = self._problems()
         features = y[:, None] + 0.01 * np.random.default_rng(0).standard_normal((36, 3))
-        decisions, _ = pdc.population_decisions(features[:, None], y[None], fold_of[:1], "lda")
+        decisions, _ = pdc.population_decisions(features[:, None], y[None], fold_of[:1], decoder)
         assert np.isfinite(decisions).all()
         assert ((decisions[0, :, 0] > 0) == (y == 1)).all()
-
-    def test_logistic_not_vectorised_yet(self):
-        _, y, _, fold_of = self._problems()
-        with pytest.raises(NotImplementedError, match="not vectorised yet"):
-            pdc.population_decisions(np.ones((36, 1, 2)), y[None], fold_of[:1], "logistic")
 
     def test_unknown_decoder_raises(self):
         _, y, _, fold_of = self._problems()
