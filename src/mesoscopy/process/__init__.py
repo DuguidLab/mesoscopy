@@ -38,6 +38,7 @@ import mesoscopy.process.connectivity as pc
 import mesoscopy.process.decoding as pdc
 import mesoscopy.process.metrics as pm
 import mesoscopy.process.perievent as pev
+from mesoscopy import docs_epilog
 from mesoscopy import io
 from mesoscopy import timer
 
@@ -48,7 +49,8 @@ if typing.TYPE_CHECKING:
 
 
 @click.group("process")
-def process_cmd(): ...
+def process_cmd() -> None:
+    """Analyse preprocessed or registered recordings."""
 
 
 @process_cmd.command("smooth")
@@ -61,17 +63,22 @@ def process_cmd(): ...
     "--out_dir",
     type=click.Path(dir_okay=True),
     default="./",
-    help="Output directory for smoothed recording.",
+    help="Output directory for the smoothed recording.",
 )
 @click.option(
     "-s",
     "--sigma",
     type=int,
     default=2,
+    show_default=True,
     help="Standard deviation of the Gaussian kernel, in pixels.",
 )
 def smooth_cmd(path: str, out_dir: str, sigma: int = 2) -> None:
-    """Generate a smoothed DeltaF/F recording using a Laplace of Gaussian filter."""
+    """Smooth a ∆F/F recording.
+
+    PATH is an HDF5 or NWB ∆F/F recording. Set the width of the Laplacian-of-Gaussian filter with --sigma. Writes
+    <session>_smoothed.h5.
+    """
     import mesoscopy.process.smooth as psm
 
     if not Path(out_dir).exists():
@@ -111,10 +118,13 @@ def smooth_cmd(path: str, out_dir: str, sigma: int = 2) -> None:
     "--out_dir",
     type=click.Path(dir_okay=True),
     default="./",
-    help="Output directory for z-scored recording.",
+    help="Output directory for the z-scored recording.",
 )
 def zscore_cmd(path: str, out_dir: str) -> None:
-    """Pixel-wise z-score ∆F/F signal."""
+    """Z-score a ∆F/F recording pixel by pixel.
+
+    PATH is an HDF5 or NWB ∆F/F recording. Writes <session>_zscored.h5, and adds it to PATH when PATH is an NWB file.
+    """
     from pynwb.image import ImageSeries
 
     import mesoscopy.process.zscore as pzs
@@ -170,7 +180,7 @@ def zscore_cmd(path: str, out_dir: str) -> None:
         io.write_nwb(path, nwbfile, io=nwbio)
 
 
-@process_cmd.command("regions")
+@process_cmd.command("regions", epilog=docs_epilog("typical-workflow/"))
 @click.argument(
     "path",
     type=click.Path(exists=True),
@@ -180,7 +190,7 @@ def zscore_cmd(path: str, out_dir: str) -> None:
     "--out_dir",
     type=click.Path(dir_okay=True),
     default="./",
-    help="Output directory for region activity file.",
+    help="Output directory for the region activity file.",
 )
 @click.option(
     "-m",
@@ -188,23 +198,21 @@ def zscore_cmd(path: str, out_dir: str) -> None:
     "mask_paths",
     type=click.Path(exists=True),
     multiple=True,
-    help=(
-        "Path to a custom region mask file (NPY, NPZ or TIFF), drawn in registered frame coordinates. A boolean mask"
-        " is extracted as a single region, named after the file (or, for NPZ files, after each key); an"
-        " integer-labelled mask is extracted as one region per label, named '<name>_<label>'. Masks are used as"
-        " drawn and are not mirrored across hemispheres. May be passed multiple times to combine masks from several"
-        " files. Supplying a mask replaces the ABA region extraction unless --include-aba is given."
-    ),
+    help="Region mask file in NPY, NPZ or TIFF format, drawn on the registered frames. Repeat to add more files.",
 )
 @click.option(
     "--include-aba",
     is_flag=True,
     default=False,
-    help="Extract ABA-defined regions alongside any custom masks. Has no effect if no mask is supplied.",
+    help="Extract the atlas regions alongside the -m masks.",
 )
 # A click command's docstring doubles as its --help text, so it deliberately carries no Raises: section.
 def regions_cmd(path: str, out_dir: str, mask_paths: tuple[str, ...], include_aba: bool) -> None:
-    """Extract ∆F signal averages from ABA-defined regions, custom region masks, or both."""  # noqa: DOC501
+    """Extract the mean ∆F/F of each brain region.
+
+    PATH is a registered HDF5 or NWB recording. Pass -m to use your own region masks instead of the Allen atlas
+    regions, and --include-aba to keep both. Writes <session>_regions.csv with the mean trace of each region.
+    """  # noqa: DOC501
     import pandas as pd
 
     import mesoscopy.process.region as pr
@@ -268,7 +276,7 @@ def regions_cmd(path: str, out_dir: str, mask_paths: tuple[str, ...], include_ab
     click.echo(f"Saved region activity at {outpath}")
 
 
-@process_cmd.command("regression")
+@process_cmd.command("regression", epilog=docs_epilog("how-to/imaging-with-behaviour-analysis/"))
 @click.argument(
     "recording_path",
     type=click.Path(exists=True),
@@ -282,14 +290,15 @@ def regions_cmd(path: str, out_dir: str, mask_paths: tuple[str, ...], include_ab
     "--out_dir",
     type=click.Path(dir_okay=True),
     default="./",
-    help="Output directory for regression results.",
+    help="Output directory for the regression results.",
 )
 @click.option(
     "-a",
     "--alpha",
     type=float,
     default=1.0,
-    help="Ridge regularisation strength. Defaults to 1.0.",
+    show_default=True,
+    help="Ridge regularisation strength.",
 )
 @click.option(
     "-n",
@@ -297,35 +306,27 @@ def regions_cmd(path: str, out_dir: str, mask_paths: tuple[str, ...], include_ab
     "nuisance_regressor_paths",
     type=click.Path(exists=True),
     multiple=True,
-    help=(
-        "Path to an external nuisance regressor file (NPZ or HDF5), e.g. behavioural motion energy. Every"
-        " array/dataset in the file other than 'timestamps' is treated as one nuisance regressor and interpolated"
-        " onto the recording's own timestamps before being z-scored and appended to the regressor matrix. May be"
-        " passed multiple times to add nuisance regressors from several files."
-    ),
+    help="Nuisance regressor file in NPZ or HDF5 format, such as motion energy. Repeat to add more files.",
 )
 @click.option(
     "-f",
     "--fast",
     is_flag=True,
     default=False,
-    help=(
-        "Use fast vectorised implementation of ridge regression. This is an experimental feature and may not work for"
-        " all datasets. Use with caution. Defaults to False."
-    ),
+    help="Use the faster, experimental vectorised solver.",
 )
 @click.option(
     "--npz",
     "file_format",
     flag_value="npz",
     default="npz",
-    help="Save regression results as a compressed NumPy .npz file. Defaults to True.",
+    help="Save the results as a compressed NPZ file. This is the default.",
 )
 @click.option(
     "--h5",
     "file_format",
     flag_value="h5",
-    help="Save regression results as an HDF5 file. Defaults to False.",
+    help="Save the results as an HDF5 file.",
 )
 def regression_cmd(
     recording_path: str,
@@ -336,7 +337,12 @@ def regression_cmd(
     fast: bool,
     file_format: str,
 ) -> None:
-    """Perform pixel-wise ridge regression on a preprocessed ∆F/F recording."""  # noqa: DOC501
+    """Regress behavioural variables onto each ∆F/F pixel.
+
+    RECORDING_PATH is an HDF5 or NWB ∆F/F recording and REGRESSOR_PATH an NPZ or HDF5 file of regressors. Add
+    regressors recorded on another clock with -n. Writes <session>_regression.npz with the coefficients, R² and mean
+    squared error of each pixel.
+    """  # noqa: DOC501
     import mesoscopy.process.regression as regr
 
     if not Path(out_dir).exists():
@@ -443,8 +449,8 @@ def _metrics_options(command: Callable[..., None]) -> Callable[..., None]:
             type=click.Choice(pm.ONSET_METHODS),
             default="sd",
             show_default=True,
-            help="Onset by threshold at a multiple of the baseline SD or a fraction of the amplitude, or by"
-            " extrapolating a line fitted to the rise back to baseline.",
+            help="Onset by a baseline SD threshold, an amplitude fraction threshold, or a line extrapolated from the"
+            " rise.",
         ),
         click.option(
             "--onset-sd",
@@ -480,7 +486,7 @@ def _metrics_options(command: Callable[..., None]) -> Callable[..., None]:
             type=int,
             default=1,
             show_default=True,
-            help="Moving-average window in samples, odd, for peak, onset, decay and offset detection. 1 disables.",
+            help="Odd moving-average window in samples used to find peaks, onsets, decays and offsets. 1 turns it off.",
         ),
         click.option(
             "--decay-fraction",
@@ -494,8 +500,7 @@ def _metrics_options(command: Callable[..., None]) -> Callable[..., None]:
             type=click.IntRange(min=1),
             default=10,
             show_default=True,
-            help="Trial groups with fewer trials get empty session summaries, reliability and mean-trace metrics. The"
-            " all-trials session summaries are always taken.",
+            help="Trial groups with fewer trials get empty session, reliability and mean-trace metrics.",
         ),
     ]
     for option in reversed(options):
@@ -524,8 +529,8 @@ def _reliability_options(command: Callable[..., None]) -> Callable[..., None]:
             "--mask-response/--no-mask-response",
             default=True,
             show_default=True,
-            help="End cue-aligned reliability epochs at each trial's response; trials without one end at the"
-            " median response time.",
+            help="End cue-aligned reliability epochs at each trial's response, or at the median response time for"
+            " trials without one.",
         ),
         click.option(
             "--min-rt",
@@ -656,7 +661,7 @@ def _write_metrics(tables: pm.MetricsTables, out_dir: str, stem: str) -> None:
         click.echo(f"Saved {description} at {path}")
 
 
-@process_cmd.command("peri-event")
+@process_cmd.command("peri-event", epilog=docs_epilog("typical-workflow/"))
 @click.argument(
     "recording_path",
     type=click.Path(exists=True, dir_okay=False),
@@ -670,7 +675,7 @@ def _write_metrics(tables: pm.MetricsTables, out_dir: str, stem: str) -> None:
     "--out_dir",
     type=click.Path(dir_okay=True),
     default="./",
-    help="Output directory for peri-event windows.",
+    help="Output directory for the peri-event windows.",
 )
 @click.option(
     "--event",
@@ -705,19 +710,19 @@ def _write_metrics(tables: pm.MetricsTables, out_dir: str, stem: str) -> None:
     type=click.Choice(["interp", "nearest"]),
     default="interp",
     show_default=True,
-    help="Linear interpolation, or the nearest recorded sample.",
+    help="Resample by linear interpolation or by taking the nearest recorded sample.",
 )
 @click.option(
     "--baseline",
     type=(float, float),
     default=None,
-    help="Baseline window START END, seconds relative to the event; its mean is subtracted per trial.",
+    help="Baseline window START END in seconds from the event, whose mean is subtracted from each trial.",
 )
 @click.option(
     "--with-metrics",
     is_flag=True,
     default=False,
-    help="Also write the response metrics of `process metrics`, joined with TRIALS_PATH. CSV input only.",
+    help="Also write the `process metrics` tables. CSV input only.",
 )
 @_metrics_options
 @_reliability_options
@@ -745,12 +750,12 @@ def perievent_cmd(
     reliability: pm.ReliabilityOptions,
     bootstrap: pm.BootstrapOptions,
 ) -> None:
-    """Extract per-trial windows around a behavioural event from a behaviour-aligned recording.
+    """Cut per-trial windows around a behavioural event.
 
-    RECORDING_PATH is an HDF5 recording with /F and /timestamps_aligned, or a _regions.csv with a time_aligned
-    column. TRIALS_PATH is the *_trials.csv written by visiomode-analysis session. HDF5 input gives HDF5 output;
-    CSV input gives long-format CSV output with the TRIALS_PATH columns joined onto every row. --with-metrics also
-    writes the tables of `process metrics` from the CSV output, using --baseline as the metrics baseline window.
+    RECORDING_PATH is a behaviour-aligned HDF5 recording or *_regions.csv, and TRIALS_PATH the *_trials.csv from
+    visiomode-analysis. Choose the event with --event and the window with --pre and --post. Writes
+    <stem>_event-<event>_perievent.h5 for HDF5 input, or a long-format <stem>_event-<event>_perievent.csv with the
+    trials columns for CSV input.
     """  # noqa: DOC501
     import pandas as pd
 
@@ -954,7 +959,7 @@ def _perievent_csv(
     return kept, out
 
 
-@process_cmd.command("metrics")
+@process_cmd.command("metrics", epilog=docs_epilog("how-to/metrics/"))
 @click.argument(
     "path",
     type=click.Path(exists=True, dir_okay=False),
@@ -964,7 +969,7 @@ def _perievent_csv(
     "--out_dir",
     type=click.Path(dir_okay=True),
     default="./",
-    help="Output directory for metrics tables.",
+    help="Output directory for the metrics tables.",
 )
 @click.option(
     "--baseline",
@@ -978,7 +983,7 @@ def _perievent_csv(
     "trials_path",
     type=click.Path(exists=True, dir_okay=False),
     default=None,
-    help="Trials CSV to join onto the per-trial table by trial_index, for peri-event files without trials columns.",
+    help="Trials CSV to join by trial_index, for peri-event files without trials columns.",
 )
 @_metrics_options
 @_reliability_options
@@ -1000,18 +1005,11 @@ def metrics_cmd(
     reliability: pm.ReliabilityOptions,
     bootstrap: pm.BootstrapOptions,
 ) -> None:
-    """Extract per-trial response metrics and per-session variability from peri-event traces.
+    """Measure trial response metrics from peri-event traces.
 
-    PATH is the long-format *_perievent.csv written by `process peri-event`. Writes <stem>_metrics.csv with onset
-    time, peak time, amplitude, area under the curve, decay time, offset time and duration per trial per region,
-    and <stem>_metrics-session.csv with the mean, SD and CV of each across trials, plus the mean pairwise
-    trial-trace correlation, per region and trial group. Go/no-go sessions are grouped by sdt_type, go/no-go
-    stimulus and lever push, as well as all trials. For go/no-go sessions aligned to the cue, trial start or lever
-    push, the session table also has trial-to-trial reliability metrics over the cue-to-lever epoch.
-
-    Also writes <stem>_metrics-boot.csv with the same metrics taken from the trial-mean trace of each region and
-    trial group, with bootstrap percentile intervals from resampling the trials, and <stem>_traces-boot.csv with
-    the mean traces and their intervals. --bootstrap 0 skips both.
+    PATH is a *_perievent.csv from `process peri-event`. Set the windows with --baseline and --response, and the
+    onset method with --onset. Writes <stem>_metrics.csv per trial, <stem>_metrics-session.csv per trial group, and
+    the bootstrapped mean-trace tables <stem>_metrics-boot.csv and <stem>_traces-boot.csv.
     """  # noqa: DOC501
     import pandas as pd
 
@@ -1058,7 +1056,7 @@ def metrics_cmd(
     _write_metrics(tables, out_dir, Path(path).stem.removesuffix("_perievent"))
 
 
-@process_cmd.command("connectivity")
+@process_cmd.command("connectivity", epilog=docs_epilog("how-to/connectivity/"))
 @click.argument(
     "path",
     type=click.Path(exists=True, dir_okay=False),
@@ -1074,8 +1072,7 @@ def metrics_cmd(
     "--response",
     type=(float, float),
     default=None,
-    help="Response window START END, seconds relative to the event, end inclusive. Defaults to all post-event samples."
-    " Peri-event input only.",
+    help="Response window START END, seconds relative to the event, end inclusive. Defaults to all post-event samples.",
 )
 @click.option(
     "-t",
@@ -1083,37 +1080,34 @@ def metrics_cmd(
     "trials_path",
     type=click.Path(exists=True, dir_okay=False),
     default=None,
-    help="Trials CSV to join by trial_index, for peri-event files without trials columns. Peri-event input only.",
+    help="Trials CSV to join by trial_index, for peri-event files without trials columns.",
 )
 @click.option(
     "--min-trials",
     type=click.IntRange(min=1),
     default=10,
     show_default=True,
-    help="Trial groups with fewer trials get empty metrics. The all-trials metrics are always taken. Peri-event"
-    " input only.",
+    help="Trial groups with fewer trials get empty metrics.",
 )
 @click.option(
     "--mask-response/--no-mask-response",
     default=True,
     show_default=True,
-    help="End cue-aligned epochs at each trial's response; trials without one end at the median response time."
-    " Peri-event input only.",
+    help="End cue-aligned epochs at each trial's response, or at the median response time for trials without one.",
 )
 @click.option(
     "--min-rt",
     type=click.FloatRange(min=0),
     default=0.2,
     show_default=True,
-    help="Drop trials with a response time below this, in seconds. Peri-event input only.",
+    help="Drop trials with a response time below this, in seconds.",
 )
 @click.option(
     "--response-pad",
     type=click.FloatRange(min=0),
     default=0.0,
     show_default=True,
-    help="Extend each epoch past the response by this, in seconds. Cue-aligned epochs still end within the response"
-    " window. Peri-event input only.",
+    help="Extend each epoch past the response by this, in seconds.",
 )
 @click.option(
     "--max-lag",
@@ -1134,7 +1128,7 @@ def metrics_cmd(
     "mutual_info",
     default=True,
     show_default=True,
-    help="Estimate the mutual information of each pair, the slowest part.",
+    help="Estimate the mutual information of each pair, which is the slowest metric.",
 )
 @click.option(
     "--te-history",
@@ -1148,8 +1142,7 @@ def metrics_cmd(
     type=click.IntRange(min=0),
     default=200,
     show_default=True,
-    help="Surrogates for the transfer entropy z-scores: trial shuffles on peri-event input, circular shifts on a"
-    " regions CSV. 0 leaves the z-scores out.",
+    help="Surrogates for the transfer entropy z-scores. 0 leaves the z-scores out.",
 )
 @click.option(
     "--with-te/--no-te",
@@ -1163,22 +1156,21 @@ def metrics_cmd(
     "rolling",
     default=False,
     show_default=True,
-    help="Also take r, r_residual, mi and mi_residual in windows sliding over the whole peri-event window, written"
-    " to <stem>_connectivity-rolling.csv. Peri-event input only.",
+    help="Also write <stem>_connectivity-rolling.csv with connectivity in windows sliding over the peri-event window.",
 )
 @click.option(
     "--rolling-window",
     type=click.FloatRange(min=0, min_open=True),
     default=0.5,
     show_default=True,
-    help="Length of the rolling windows, in seconds, rounded to whole samples.",
+    help="Length of the rolling windows, in seconds.",
 )
 @click.option(
     "--rolling-step",
     type=click.FloatRange(min=0, min_open=True),
     default=0.1,
     show_default=True,
-    help="Time between the starts of consecutive rolling windows, in seconds, rounded to whole samples.",
+    help="Time between the starts of consecutive rolling windows, in seconds.",
 )
 @click.option(
     "--seed",
@@ -1207,22 +1199,12 @@ def connectivity_cmd(
     rolling_step: float,
     seed: int,
 ) -> None:
-    """Measure pairwise connectivity between regions, over the cue-to-response epoch or over whole traces.
+    """Measure pairwise connectivity between regions.
 
-    PATH is the long-format *_perievent.csv written by `process peri-event`, or the *_regions.csv written by
-    `process regions`. Writes <stem>_connectivity.csv with one row per region pair and trial group: the Pearson
-    correlation of the pooled epoch samples, the same after removing the group's mean response, the mean of the
-    per-trial correlations, the mutual information of the pooled samples and of the residuals in bits, the
-    partial correlation given every other region, the lag and value of the peak cross-correlation, and with --with-te
-    the transfer entropy of the residuals in each direction with its z-score against surrogates. Epochs run from
-    the cue to each trial's response, as for the reliability metrics of `process metrics`, extended past the
-    response by --response-pad; without the cue_onset and response_time columns the whole response window is used.
-    Go/no-go sessions are grouped by sdt_type, go/no-go stimulus and lever push, as well as all trials. With
-    --with-rolling it also writes <stem>_connectivity-rolling.csv, with the correlations and mutual information in
-    windows sliding over the whole peri-event window, one row per region pair, trial group and window.
-
-    A regions CSV gives the metrics over the whole recording instead, as the all-trials rows only, without the
-    residual and per-trial columns. The trial options and --with-rolling do not apply.
+    PATH is a *_perievent.csv from `process peri-event`, measured over each trial's cue-to-response epoch, or a
+    *_regions.csv from `process regions`, measured over the whole recording. Add --with-te for transfer entropy and
+    --with-rolling for connectivity in sliding windows. Writes <stem>_connectivity.csv with one row per region pair
+    and trial group.
     """  # noqa: DOC501
     import pandas as pd
 
@@ -1305,7 +1287,7 @@ def connectivity_cmd(
     click.echo(f"Saved rolling connectivity metrics at {output}")
 
 
-@process_cmd.command("decode")
+@process_cmd.command("decode", epilog=docs_epilog("how-to/decoding/"))
 @click.argument(
     "path",
     type=click.Path(exists=True, dir_okay=False),
@@ -1323,7 +1305,7 @@ def connectivity_cmd(
     type=click.Choice(list(pdc.LABELS), case_sensitive=False),
     default="stim",
     show_default=True,
-    help="What to decode. stim is the go against the no-go stimulus, response the lever push against no push.",
+    help="Decode the go/no-go stimulus or the lever push.",
 )
 @click.option(
     "--response",
@@ -1344,7 +1326,7 @@ def connectivity_cmd(
     type=click.IntRange(min=1),
     default=10,
     show_default=True,
-    help="Trials each class needs in a trial group. Groups with fewer get empty scores.",
+    help="Trials each class needs for a trial group to be decoded.",
 )
 @click.option(
     "--mask-response/--no-mask-response",
@@ -1370,57 +1352,57 @@ def connectivity_cmd(
     type=click.FloatRange(min=0),
     default=0.0,
     show_default=True,
-    help="Extend the epoch past the response by this, in seconds, within the response window.",
+    help="Extend the epoch past the response by this, in seconds.",
 )
 @click.option(
     "--folds",
     type=click.IntRange(min=2),
     default=5,
     show_default=True,
-    help="Folds of the stratified cross-validation.",
+    help="Cross-validation folds.",
 )
 @click.option(
     "--repeats",
     type=click.IntRange(min=1),
     default=10,
     show_default=True,
-    help="Repeats of the cross-validation, each with a fresh split.",
+    help="Cross-validation repeats, each with a fresh split.",
 )
 @click.option(
     "--shuffles",
     type=click.IntRange(min=0),
     default=200,
     show_default=True,
-    help="Label shuffles for the chance level and p-values. 0 leaves the columns out.",
+    help="Label shuffles for the chance level and p-values. 0 leaves them out.",
 )
 @click.option(
     "--with-rolling/--no-rolling",
     "rolling",
     default=False,
     show_default=True,
-    help="Also decode in windows sliding over the whole peri-event window, written to"
-    " <stem>_label-<label>_decoding-rolling.csv.",
+    help="Also write <stem>_label-<label>_decoding-rolling.csv with scores in windows sliding over the peri-event"
+    " window.",
 )
 @click.option(
     "--rolling-window",
     type=click.FloatRange(min=0, min_open=True),
     default=0.5,
     show_default=True,
-    help="Length of the rolling windows, in seconds, rounded to whole samples.",
+    help="Length of the rolling windows, in seconds.",
 )
 @click.option(
     "--rolling-step",
     type=click.FloatRange(min=0, min_open=True),
     default=0.1,
     show_default=True,
-    help="Time between the starts of consecutive rolling windows, in seconds, rounded to whole samples.",
+    help="Time between the starts of consecutive rolling windows, in seconds.",
 )
 @click.option(
     "--baseline",
     type=(float, float),
     default=None,
-    help="Window START END, seconds relative to the event, end exclusive, whose mean gives the chance level of the"
-    " rolling table. Defaults to every sample before the event.",
+    help="Window START END, seconds relative to the event, end exclusive, whose mean gives the rolling chance level."
+    " Defaults to every sample before the event.",
 )
 @click.option(
     "--seed",
@@ -1449,15 +1431,11 @@ def decode_cmd(
     baseline: tuple[float, float] | None,
     seed: int,
 ) -> None:
-    """Decode the stimulus or the lever push of each trial from region activity.
+    """Decode the stimulus or lever push from region activity.
 
-    PATH is the long-format *_perievent.csv written by `process peri-event` for a go/no-go session. A logistic
-    regression and a linear discriminant decoder are fitted to each region's mean activity between the cue and the
-    median response time, and to all regions together, under repeated stratified cross-validation, over all trials
-    and within the groups that hold the other variable constant. Writes <stem>_label-<label>_decoding.csv with the
-    scores and their chance level per decoder, region and trial group, and <stem>_label-<label>_decoding-weights.csv
-    with the population weights. With --with-rolling the scores are also taken in windows sliding over the
-    peri-event window and written to <stem>_label-<label>_decoding-rolling.csv.
+    PATH is a go/no-go *_perievent.csv from `process peri-event`. Pick what to decode with --label, and add
+    --with-rolling to decode in sliding windows. Writes <stem>_label-<label>_decoding.csv with the scores per decoder,
+    region and trial group, and <stem>_label-<label>_decoding-weights.csv with the population weights.
     """  # noqa: DOC501
     import pandas as pd
 

@@ -32,7 +32,7 @@ from mesoscopy import io
 
 @click.group("export")
 def export_cmd() -> None:
-    """Export mesoscopy-generated files."""
+    """Export mesoscopy files to other formats."""
 
 
 @export_cmd.command("nwb")
@@ -41,11 +41,14 @@ def export_cmd() -> None:
     "--out-path",
     type=click.Path(dir_okay=False, path_type=str),
     default="",
-    help="Path to save the exported NWB file. "
-    "If not provided, the output file will be named as the input file with '_export.nwb' appended.",
+    help="Path of the exported NWB file. Defaults to <name>_export.nwb next to NWB_PATH.",
 )
 def export_nwb_cmd(**kwargs: typing.Any) -> None:
-    """Create a sharable copy of an NWB file by resolving external data links."""
+    """Make a shareable copy of an NWB file.
+
+    NWB_PATH is an NWB file that links to the HDF5 files mesoscopy writes. Writes a self-contained copy with the
+    linked data copied in.
+    """
     click.echo("Exporting NWB file...")
     export_path = export_nwb(**kwargs)
     click.echo(f"NWB file exported to {export_path}")
@@ -57,11 +60,13 @@ def export_nwb_cmd(**kwargs: typing.Any) -> None:
     "--out-path",
     type=click.Path(dir_okay=True, path_type=str),
     default=".",
-    help="Path to save the exported video file."
-    "If not provided, the output file will be named as the input file with '_deltaf.mp4' appended.",
+    help="Output directory for the video.",
 )
 def export_deltaf_cmd(**kwargs: typing.Any) -> None:
-    """Export delta F frames as a video file."""
+    """Export a ∆F/F recording as a video.
+
+    PATH is an HDF5 or NWB ∆F/F recording. Writes <session>_deltaf.mp4.
+    """
     export_deltaf(**kwargs)
 
 
@@ -71,10 +76,13 @@ def export_deltaf_cmd(**kwargs: typing.Any) -> None:
     "--out-dir",
     type=click.Path(dir_okay=True, path_type=str),
     default=".",
-    help="Directory to save the exported timestamps file.",
+    help="Output directory for the timestamps file.",
 )
 def export_timestamps_cmd(**kwargs: typing.Any) -> None:
-    """Export timestamps as a text file."""
+    """Export a recording's timestamps as text.
+
+    PATH is an HDF5 or NWB recording. Writes <session>_timestamps.txt with one timestamp per line.
+    """
     click.echo("Exporting timestamps...")
     export_timestamps(**kwargs)
     click.echo(f"Timestamps exported to {kwargs['out_dir']}")

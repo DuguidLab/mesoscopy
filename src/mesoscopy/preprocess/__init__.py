@@ -28,6 +28,7 @@ import typing
 import click
 import numpy as np
 
+from mesoscopy import docs_epilog
 from mesoscopy import io
 from mesoscopy import timer
 
@@ -35,7 +36,7 @@ if typing.TYPE_CHECKING:
     from dask import array as da
 
 
-@click.command(name="preprocess")
+@click.command(name="preprocess", epilog=docs_epilog("typical-workflow/"))
 @click.argument(
     "path",
     type=click.Path(exists=True),
@@ -45,60 +46,72 @@ if typing.TYPE_CHECKING:
     "--out_dir",
     type=click.Path(dir_okay=True),
     default="./",
-    help="Output directory for preprocessed recording.",
+    help="Output directory for the preprocessed recording.",
 )
-@click.option("--chunks", default=100, help="Number of chunks to load in memory.")
+@click.option("--chunks", default=100, show_default=True, help="Frames loaded into memory at a time.")
 @click.option(
     "--crop",
     default=0,
-    help="Number of pixels to crop from the edges of the recording.",
+    show_default=True,
+    help="Pixels to crop from each edge.",
 )
-@click.option("--bins", default=2, help="Recording pixel binning factor.")
+@click.option("--bins", default=2, show_default=True, help="Pixel binning factor.")
 @click.option(
     "--channel-means-only",
     is_flag=True,
     show_default=True,
     default=False,
-    help="Extract the channel means and exit without extracting a delta F series.",
+    help="Stop after extracting the channel means.",
 )
 @click.option(
     "--use-means",
     is_flag=True,
     show_default=True,
     default=False,
-    help="Separate channels using means histogram instead of standard deviation.",
+    help="Separate the channels by their mean intensity instead of their standard deviation.",
 )
 @click.option(
     "--flip-channels",
     is_flag=True,
     show_default=True,
     default=False,
-    help="Flip channel order.",
+    help="Swap the two channels after separating them.",
 )
-@click.option("--interim_dir", type=click.Path(dir_okay=True), default="interim/")
+@click.option(
+    "--interim_dir",
+    type=click.Path(dir_okay=True),
+    default="interim/",
+    show_default=True,
+    help="Directory for intermediate files, removed when preprocessing ends.",
+)
 @click.option(
     "--skip-start",
     default=None,
     type=int,
-    help="Number of frames to skip at the start of the recording.",
+    help="Frames to drop from the start of the recording.",
 )
 @click.option(
     "--skip-end",
     default=None,
     type=int,
-    help="Number of frames to skip at the end of the recording.",
+    help="Frames to drop from the end of the recording.",
 )
 @click.option(
     "--no-qa",
     is_flag=True,
     show_default=True,
     default=False,
-    help="Skip automatic quality control checks.",
+    help="Skip the automatic quality control checks.",
 )
 def preprocess_cmd(
     **kwargs: typing.Any,
 ) -> None:
-    """This command will preprocess a single session dual-channel mixed recording to extract a deltaF signal corrected for the haemodynamic response."""
+    """Extract haemodynamics-corrected ∆F/F from a recording.
+
+    PATH is a raw dual-channel HDF5 or NWB recording. Use --crop and --bins to shrink the frames, and --skip-start
+    and --skip-end to drop frames at either end. Writes <session>_preprocessed.h5, and links it into PATH when PATH
+    is an NWB file.
+    """
     run_preprocessing(**kwargs)
 
 

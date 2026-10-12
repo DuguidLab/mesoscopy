@@ -43,26 +43,26 @@ DEFAULT_MAX_OFFSET_S = 600.0  # Maximum allowed offset of the first frame from t
     "--session-start",
     type=str,
     default=None,
-    help="Behaviour session start time, ISO 8601. Mutually exclusive with --behaviour-json.",
+    help="Behaviour session start time in ISO format, instead of --behaviour-json.",
 )
 @click.option(
     "--behaviour-json",
     type=click.Path(exists=True, dir_okay=False),
     default=None,
-    help="Visiomode behaviour session JSON file; its 'timestamp' key gives the session start.",
+    help="Visiomode behaviour session JSON file giving the session start.",
 )
 @click.option(
     "--behaviour-id",
     type=str,
     default=None,
-    help="Behaviour session identifier. Required with --session-start, defaults to the JSON file stem otherwise.",
+    help="Behaviour session identifier, required with --session-start. Defaults to the --behaviour-json file name.",
 )
 @click.option(
     "--max-offset",
     type=float,
     default=DEFAULT_MAX_OFFSET_S,
     show_default=True,
-    help="Largest allowed offset, in seconds, between the first frame and the behaviour session start.",
+    help="Largest allowed offset between the first frame and the session start, in seconds.",
 )
 def align_cmd(
     path: str,
@@ -71,7 +71,11 @@ def align_cmd(
     behaviour_id: str | None,
     max_offset: float,
 ) -> None:
-    """Write behaviour-aligned frame timestamps to a preprocessed or registered HDF5 recording."""  # noqa: DOC501
+    """Align frame timestamps to a behaviour session.
+
+    PATH is a preprocessed or registered HDF5 recording. Give the session start with --behaviour-json, or with
+    --session-start and --behaviour-id. Writes /timestamps_aligned, in seconds from the session start, into PATH.
+    """  # noqa: DOC501
     if (session_start is None) == (behaviour_json is None):
         msg = "Exactly one of --session-start or --behaviour-json is required."
         raise click.UsageError(msg)
@@ -103,7 +107,7 @@ def align_recording(
 
     Args:
         h5_path (str): Path to the HDF5 recording holding an ISO 8601 `/timestamps` dataset.
-        session_start (str | datetime): Behaviour session start time, ISO 8601.
+        session_start (str | datetime): Behaviour session start time, ISO format.
         behaviour_session (str): Behaviour session identifier.
         max_offset_s (float, optional): Largest allowed absolute offset of the first frame from the session start,
             in seconds. Defaults to 600.
