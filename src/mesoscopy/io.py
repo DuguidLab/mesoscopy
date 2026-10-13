@@ -20,9 +20,12 @@
 #  SOFTWARE.
 from __future__ import annotations
 
+import contextlib
 import csv
+import tempfile
 import typing
 from collections import OrderedDict
+from collections.abc import Iterator
 from pathlib import Path
 
 import h5py
@@ -181,6 +184,32 @@ def store_interim(
 
     zarr.save(interim_path, array)
     return zarr.load(interim_path)
+
+
+@contextlib.contextmanager
+def interim_workdir(interim_dir: str | Path, prefix: str = "") -> Iterator[str]:
+    """Create a fresh directory for interim files inside an interim directory, removed on exit.
+
+    Only the fresh directory is removed, so files already in the interim directory are kept. The interim directory
+    itself is removed only if it was created here and is left empty.
+
+    Args:
+        interim_dir (str or PathLike object): Directory to create the fresh directory in. Created if missing.
+        prefix (str, optional): Prefix for the fresh directory name. Defaults to "".
+
+    Yields:
+        str: Path to the fresh directory.
+    """
+    parent = Path(interim_dir)
+    created = not parent.is_dir()
+    parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with tempfile.TemporaryDirectory(prefix=prefix, dir=parent) as workdir:
+            yield workdir
+    finally:
+        if created:
+            with contextlib.suppress(OSError):
+                parent.rmdir()
 
 
 def load_deltaf(path: str, nwb: bool = False) -> tuple[str, np.ndarray, np.ndarray]:
