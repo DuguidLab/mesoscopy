@@ -21,7 +21,6 @@
 from __future__ import annotations
 
 import os
-import shutil
 import time
 import typing
 
@@ -82,7 +81,7 @@ if typing.TYPE_CHECKING:
     type=click.Path(dir_okay=True),
     default="interim/",
     show_default=True,
-    help="Directory for intermediate files, removed when preprocessing ends.",
+    help="Directory under which intermediate files are kept until preprocessing ends.",
 )
 @click.option(
     "--skip-start",
@@ -145,7 +144,7 @@ def run_preprocessing(
         use_means (bool, optional): Use means histogram instead of standard deviation to separate
             channels. Defaults to False.
         flip_channels (bool, optional): Flip extracted channel order. Defaults to False.
-        interim_dir (str, optional): Path to the interim directory. Defaults to "interim/".
+        interim_dir (str, optional): Directory under which intermediate files are kept. Defaults to "interim/".
         skip_start (int, optional): Number of frames to skip at the start of the recording. Defaults to None.
         skip_end (int, optional): Number of frames to skip at the end of the recording. Defaults to None.
         no_qa (bool, optional): Skip automatic quality control checks. Defaults to False.
@@ -161,7 +160,6 @@ def run_preprocessing(
     preprocessing_start = time.time()
 
     os.makedirs(out_dir, exist_ok=True)
-    os.makedirs(interim_dir, exist_ok=True)
 
     click.echo("Loading data...")
 
@@ -195,201 +193,208 @@ def run_preprocessing(
         raw_frames = raw_frames[:, crop:-crop, crop:-crop]
         click.echo(f"Cropping to shape {raw_frames.shape}")
 
-    with timer.Timer(
-        f"Binning frames to shape {raw_frames.shape[1] // bins} by {raw_frames.shape[2] // bins} ({bins}x{bins})"
-    ):
-        binned_frames = calc.bin_array(
-            raw_frames,
-            bins=bins,
-            interim_dir=interim_dir,
-            session_id=session_id,
-        )
-
-    del raw_frames
-
-    # Channel separation
-    # Get the global mean and std values for each frame
-    with timer.Timer("Calculating frame means & standard deviations"):
-        frame_means, frame_stds = calc.frame_statistics(binned_frames)
-
-    # Generate the channel separation filters
-    with timer.Timer("Generating channel separation filters"):
-        gcamp_filter, isosb_filter = calc.channel_separation_filters(
-            frame_means,
-            frame_stds,
-            use_means=use_means,
-            flip_channels=flip_channels,
-        )
-
-    with timer.Timer("Calculating channel mean timeseries"):
-        gcamp_mean, isosb_mean = dask.compute(
-            binned_frames[gcamp_filter].mean(axis=(1, 2), dtype=np.float32),
-            binned_frames[isosb_filter].mean(axis=(1, 2), dtype=np.float32),
-        )
-
-    if channel_means_only:
-        np.savetxt(
-            os.path.join(out_dir, f"{session_id}_gcamp_mean.txt"),
-            gcamp_mean,
-            fmt="%.4f",
-        )
-        np.savetxt(
-            os.path.join(out_dir, f"{session_id}_isosb_mean.txt"),
-            isosb_mean,
-            fmt="%.4f",
-        )
-        click.echo("Channel means saved as txt files. Exiting.")
-        return
-
-    gcamp_channel = binned_frames[gcamp_filter]
-    isosb_channel = binned_frames[isosb_filter]
-
-    with timer.Timer("Generating projection images per channel"):
-        gcamp_projections = calc.projections(gcamp_channel)
-        isosb_projections = calc.projections(isosb_channel)
-
-    # Calculate the dff per channel using a rolling baseline (mean in a 30s window)
-    window_width = 30 * 25
-
-    if window_width > binned_frames.shape[0]:
-        click.echo(
-            f"WARNING: Default window width is larger than the number of frames. Setting window width to {
-                binned_frames.shape[0] // 4
-            }."
-        )
-        window_width = binned_frames.shape[0] // 4
-
-    with timer.Timer("Calculating dF/F per channel"):
-        gcamp_dff = calc.rolling_dff(
-            gcamp_channel,
-            window_width=window_width,
-            channel_name="gcamp",
-            interim_dir=interim_dir,
-            session_id=session_id,
-        )
-        isosb_dff = calc.rolling_dff(
-            isosb_channel,
-            window_width=window_width,
-            channel_name="isosb",
-            interim_dir=interim_dir,
-            session_id=session_id,
-        )
-
-    with timer.Timer("Calculating mean ∂F per frame per channel"):
-        gcamp_signal_mean, isosb_signal_mean = da.compute(gcamp_dff.mean(axis=(1, 2)), isosb_dff.mean(axis=(1, 2)))
-
-    # Max common index (to avoid array overflow)
-    if len(gcamp_mean) != len(isosb_mean):
-        click.echo("WARNING: GCaMP & Isosb channels have mismatching indexes")
-    max_idx = min(len(gcamp_mean), len(isosb_mean))
-
-    click.echo("Extracting corrected F signal (gcamp - isosb)...")
-
-    with timer.Timer("Calculating F signal"):
-        f_signal = da.subtract(
-            gcamp_dff[:max_idx],
-            isosb_dff[:max_idx],
-        )
-
-    with timer.Timer("Calculating mean F timeseries"):
-        f_mean_timeseries = f_signal.mean(axis=(1, 2))
-
-    with timer.Timer("Generating maximum intensity projection for F signal"):
-        f_maxip = calc.projections(f_signal).get("maxip")
-
-    timestamps = da.from_array(np.array(ts[gcamp_filter[:max_idx]], dtype="S25"), chunks="auto")
-
-    # Quality control checks
-    qa_histogram_separation = None
-    qa_timestamp_consistency = None
-    qa_timestamp_jump = None
-    qa_check_noise, qa_noise_levels = None, None
-    qa_check_snr, qa_snr = None, None
-    qa_check_bleaching, qa_bleaching = None, None
-    if not no_qa:
-        click.echo("Running QA checks...")
-
-        qa_histogram_separation = qa.check_histogram_separation(np.array(frame_stds if not use_means else frame_means))
-        if qa_histogram_separation:
-            click.echo("✅ Histogram separation check passed.")
-        else:
-            click.echo("❌ ERROR - histogram separation failed, channels could not be fully separated!")
-
-        qa_timestamp_consistency = qa.check_timestamp_consistency(timestamps)
-        if qa_timestamp_consistency:
-            click.echo("✅ Timestamp consistency check passed, low interval standard deviation.")
-        else:
-            click.echo("❌ ERROR - timestamp consistency check failed, timestamp drift detected!!")
-
-        qa_timestamp_jump = qa.check_timestamp_jumps(timestamps)
-        if qa_timestamp_jump:
-            click.echo("✅ Timestamp jump check passed, no timestamp interval above two standard deviations.")
-        else:
-            click.echo("❌ ERROR - timestamp jump check failed, intervals above two standard deviations detected!")
-
-        qa_check_noise, qa_noise_levels = qa.check_noise(f_signal, return_noise=True)
-        if qa_check_noise:
-            click.echo(f"✅ Noise level check passed, median recording shot noise {np.median(qa_noise_levels):.2f} %.")
-        else:
-            click.echo(
-                "❌ ERROR - noise level check failed, recording has high noise "
-                f"(median {np.median(qa_noise_levels):.2f} %)!"
+    with io.interim_workdir(interim_dir, prefix=f"{session_id}_") as workdir:
+        with timer.Timer(
+            f"Binning frames to shape {raw_frames.shape[1] // bins} by {raw_frames.shape[2] // bins} ({bins}x{bins})"
+        ):
+            binned_frames = calc.bin_array(
+                raw_frames,
+                bins=bins,
+                interim_dir=workdir,
+                session_id=session_id,
             )
 
-        qa_check_snr, qa_snr = qa.check_snr(f_signal, return_snr=True)
-        if qa_check_snr:
-            click.echo(f"✅ SNR check passed (recording SNR is {qa_snr:.2f}).")
-        else:
-            click.echo(f"❌ ERROR - SNR check failed (recording SNR is {qa_snr:.2f})!")
+        del raw_frames
 
-        qa_check_bleaching, qa_bleaching = qa.check_bleaching(f_mean_timeseries, return_slope=True)
-        if qa_check_bleaching:
-            click.echo("✅ Photobleaching check passed.")
-        else:
-            click.echo(f"❌ ERROR - photobleaching check failed (bleaching factor is {qa_bleaching})")
+        # Channel separation
+        # Get the global mean and std values for each frame
+        with timer.Timer("Calculating frame means & standard deviations"):
+            frame_means, frame_stds = calc.frame_statistics(binned_frames)
 
-    outpath = out_dir + os.sep + session_id + "_preprocessed.h5"
-    with timer.Timer(f"Writing data to {outpath}"):
-        # QA results are None when the checks are skipped, and cannot be written.
-        io.write_h5(
-            path=outpath,
-            data=_drop_none(
-                {
-                    "/F": f_signal,
-                    "/timestamps": timestamps,
-                    "/qa/frame_means_timeseries": frame_means,
-                    "/qa/frame_stds_timeseries": frame_stds,
-                    "/qa/gcamp_mean_timeseries": gcamp_mean[:max_idx],
-                    "/qa/isosb_mean_timeseries": isosb_mean[:max_idx],
-                    "/qa/gcamp_dff_timeseries": gcamp_signal_mean[:max_idx],
-                    "/qa/isosb_dff_timeseries": isosb_signal_mean[:max_idx],
-                    "/qa/gcamp_filter": gcamp_filter[:max_idx],
-                    "/qa/isosb_filter": isosb_filter[:max_idx],
-                    "/qa/gcamp_mean_projection": gcamp_projections.get("mean"),
-                    "/qa/gcamp_std_projection": gcamp_projections.get("std"),
-                    "/qa/gcamp_maxip_projection": gcamp_projections.get("maxip"),
-                    "/qa/isosb_mean_projection": isosb_projections.get("mean"),
-                    "/qa/isosb_std_projection": isosb_projections.get("std"),
-                    "/qa/isosb_maxip_projection": isosb_projections.get("maxip"),
-                    "/qa/f_mean_timeseries": f_mean_timeseries,
-                    "/qa/f_maxip": f_maxip,
-                    "/qa/noise_levels": qa_noise_levels,
-                }
-            ),
-            attributes=_drop_none(
-                {
-                    "/qa/checks/histogram_separation": qa_histogram_separation,
-                    "/qa/checks/timestamp_consistency": qa_timestamp_consistency,
-                    "/qa/checks/timestamp_jump": qa_timestamp_jump,
-                    "/qa/checks/noise_check": qa_check_noise,
-                    "/qa/checks/snr_check": qa_check_snr,
-                    "/qa/checks/snr": qa_snr,
-                    "/qa/checks/bleaching_check": qa_check_bleaching,
-                    "/qa/checks/bleaching_factor": qa_bleaching,
-                }
-            ),
-            compression="lzf",
-        )
+        # Generate the channel separation filters
+        with timer.Timer("Generating channel separation filters"):
+            gcamp_filter, isosb_filter = calc.channel_separation_filters(
+                frame_means,
+                frame_stds,
+                use_means=use_means,
+                flip_channels=flip_channels,
+            )
+
+        with timer.Timer("Calculating channel mean timeseries"):
+            gcamp_mean, isosb_mean = dask.compute(
+                binned_frames[gcamp_filter].mean(axis=(1, 2), dtype=np.float32),
+                binned_frames[isosb_filter].mean(axis=(1, 2), dtype=np.float32),
+            )
+
+        if channel_means_only:
+            np.savetxt(
+                os.path.join(out_dir, f"{session_id}_gcamp_mean.txt"),
+                gcamp_mean,
+                fmt="%.4f",
+            )
+            np.savetxt(
+                os.path.join(out_dir, f"{session_id}_isosb_mean.txt"),
+                isosb_mean,
+                fmt="%.4f",
+            )
+            click.echo("Channel means saved as txt files. Exiting.")
+            return
+
+        gcamp_channel = binned_frames[gcamp_filter]
+        isosb_channel = binned_frames[isosb_filter]
+
+        with timer.Timer("Generating projection images per channel"):
+            gcamp_projections = calc.projections(gcamp_channel)
+            isosb_projections = calc.projections(isosb_channel)
+
+        # Calculate the dff per channel using a rolling baseline (mean in a 30s window)
+        window_width = 30 * 25
+
+        if window_width > binned_frames.shape[0]:
+            click.echo(
+                f"WARNING: Default window width is larger than the number of frames. Setting window width to {
+                    binned_frames.shape[0] // 4
+                }."
+            )
+            window_width = binned_frames.shape[0] // 4
+
+        with timer.Timer("Calculating dF/F per channel"):
+            gcamp_dff = calc.rolling_dff(
+                gcamp_channel,
+                window_width=window_width,
+                channel_name="gcamp",
+                interim_dir=workdir,
+                session_id=session_id,
+            )
+            isosb_dff = calc.rolling_dff(
+                isosb_channel,
+                window_width=window_width,
+                channel_name="isosb",
+                interim_dir=workdir,
+                session_id=session_id,
+            )
+
+        with timer.Timer("Calculating mean ∂F per frame per channel"):
+            gcamp_signal_mean, isosb_signal_mean = da.compute(gcamp_dff.mean(axis=(1, 2)), isosb_dff.mean(axis=(1, 2)))
+
+        # Max common index (to avoid array overflow)
+        if len(gcamp_mean) != len(isosb_mean):
+            click.echo("WARNING: GCaMP & Isosb channels have mismatching indexes")
+        max_idx = min(len(gcamp_mean), len(isosb_mean))
+
+        click.echo("Extracting corrected F signal (gcamp - isosb)...")
+
+        with timer.Timer("Calculating F signal"):
+            f_signal = da.subtract(
+                gcamp_dff[:max_idx],
+                isosb_dff[:max_idx],
+            )
+
+        with timer.Timer("Calculating mean F timeseries"):
+            f_mean_timeseries = f_signal.mean(axis=(1, 2))
+
+        with timer.Timer("Generating maximum intensity projection for F signal"):
+            f_maxip = calc.projections(f_signal).get("maxip")
+
+        timestamps = da.from_array(np.array(ts[gcamp_filter[:max_idx]], dtype="S25"), chunks="auto")
+
+        # Quality control checks
+        qa_histogram_separation = None
+        qa_timestamp_consistency = None
+        qa_timestamp_jump = None
+        qa_check_noise, qa_noise_levels = None, None
+        qa_check_snr, qa_snr = None, None
+        qa_check_bleaching, qa_bleaching = None, None
+        if not no_qa:
+            click.echo("Running QA checks...")
+
+            qa_histogram_separation = qa.check_histogram_separation(
+                np.array(frame_stds if not use_means else frame_means)
+            )
+            if qa_histogram_separation:
+                click.echo("✅ Histogram separation check passed.")
+            else:
+                click.echo("❌ ERROR - histogram separation failed, channels could not be fully separated!")
+
+            qa_timestamp_consistency = qa.check_timestamp_consistency(timestamps)
+            if qa_timestamp_consistency:
+                click.echo("✅ Timestamp consistency check passed, low interval standard deviation.")
+            else:
+                click.echo("❌ ERROR - timestamp consistency check failed, timestamp drift detected!!")
+
+            qa_timestamp_jump = qa.check_timestamp_jumps(timestamps)
+            if qa_timestamp_jump:
+                click.echo("✅ Timestamp jump check passed, no timestamp interval above two standard deviations.")
+            else:
+                click.echo("❌ ERROR - timestamp jump check failed, intervals above two standard deviations detected!")
+
+            qa_check_noise, qa_noise_levels = qa.check_noise(f_signal, return_noise=True)
+            if qa_check_noise:
+                click.echo(
+                    f"✅ Noise level check passed, median recording shot noise {np.median(qa_noise_levels):.2f} %."
+                )
+            else:
+                click.echo(
+                    "❌ ERROR - noise level check failed, recording has high noise "
+                    f"(median {np.median(qa_noise_levels):.2f} %)!"
+                )
+
+            qa_check_snr, qa_snr = qa.check_snr(f_signal, return_snr=True)
+            if qa_check_snr:
+                click.echo(f"✅ SNR check passed (recording SNR is {qa_snr:.2f}).")
+            else:
+                click.echo(f"❌ ERROR - SNR check failed (recording SNR is {qa_snr:.2f})!")
+
+            qa_check_bleaching, qa_bleaching = qa.check_bleaching(f_mean_timeseries, return_slope=True)
+            if qa_check_bleaching:
+                click.echo("✅ Photobleaching check passed.")
+            else:
+                click.echo(f"❌ ERROR - photobleaching check failed (bleaching factor is {qa_bleaching})")
+
+        outpath = out_dir + os.sep + session_id + "_preprocessed.h5"
+        with timer.Timer(f"Writing data to {outpath}"):
+            # QA results are None when the checks are skipped, and cannot be written.
+            io.write_h5(
+                path=outpath,
+                data=_drop_none(
+                    {
+                        "/F": f_signal,
+                        "/timestamps": timestamps,
+                        "/qa/frame_means_timeseries": frame_means,
+                        "/qa/frame_stds_timeseries": frame_stds,
+                        "/qa/gcamp_mean_timeseries": gcamp_mean[:max_idx],
+                        "/qa/isosb_mean_timeseries": isosb_mean[:max_idx],
+                        "/qa/gcamp_dff_timeseries": gcamp_signal_mean[:max_idx],
+                        "/qa/isosb_dff_timeseries": isosb_signal_mean[:max_idx],
+                        "/qa/gcamp_filter": gcamp_filter[:max_idx],
+                        "/qa/isosb_filter": isosb_filter[:max_idx],
+                        "/qa/gcamp_mean_projection": gcamp_projections.get("mean"),
+                        "/qa/gcamp_std_projection": gcamp_projections.get("std"),
+                        "/qa/gcamp_maxip_projection": gcamp_projections.get("maxip"),
+                        "/qa/isosb_mean_projection": isosb_projections.get("mean"),
+                        "/qa/isosb_std_projection": isosb_projections.get("std"),
+                        "/qa/isosb_maxip_projection": isosb_projections.get("maxip"),
+                        "/qa/f_mean_timeseries": f_mean_timeseries,
+                        "/qa/f_maxip": f_maxip,
+                        "/qa/noise_levels": qa_noise_levels,
+                    }
+                ),
+                attributes=_drop_none(
+                    {
+                        "/qa/checks/histogram_separation": qa_histogram_separation,
+                        "/qa/checks/timestamp_consistency": qa_timestamp_consistency,
+                        "/qa/checks/timestamp_jump": qa_timestamp_jump,
+                        "/qa/checks/noise_check": qa_check_noise,
+                        "/qa/checks/snr_check": qa_check_snr,
+                        "/qa/checks/snr": qa_snr,
+                        "/qa/checks/bleaching_check": qa_check_bleaching,
+                        "/qa/checks/bleaching_factor": qa_bleaching,
+                    }
+                ),
+                compression="lzf",
+            )
+
+        click.echo("Cleaning up...")
 
     preprocessing_end = time.time()
     click.echo(f"Preprocessing took a total of {(preprocessing_end - preprocessing_start) / 60} mins.")
@@ -398,9 +403,6 @@ def run_preprocessing(
         click.echo("Updating NWB file...")
         update_nwb(path, outpath)
         click.echo(f"Updated NWB file at {path}")
-
-    click.echo("Cleaning up...")
-    shutil.rmtree(interim_dir)
 
 
 def load_raw(raw_path: str, nwb: bool = False) -> tuple[str, da.Array | np.ndarray, da.Array | np.ndarray]:
