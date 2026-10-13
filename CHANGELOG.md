@@ -4,6 +4,10 @@ Versions follow [Semantic Versioning](https://semver.org) (`<major>.<minor>.<pat
 
 ## Unreleased
 
+### Fixed
+
+- `preprocess` removes only the subdirectory of `--interim_dir` it keeps its intermediate files in, instead of `--interim_dir` and everything in it, and also removes it when it fails or stops early with `--channel-means-only` ([#135](https://github.com/DuguidLab/mesoscopy/issues/135)).
+
 ## [0.17.1] - 2026-10-12
 
 ### Changed

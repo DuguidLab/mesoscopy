@@ -1,5 +1,6 @@
 from datetime import datetime
 from importlib import resources
+from pathlib import Path
 from uuid import uuid4
 
 import dask.array as da
@@ -131,6 +132,36 @@ def test_load_interim(tmp_path):
     path = tmp_path / "test.h5"
     data = np.random.rand(300, 142, 142)
     assert io.store_interim(data, str(path)).any()
+
+
+def test_interim_workdir_removes_created_dir(tmp_path):
+    interim = tmp_path / "interim"
+    with io.interim_workdir(interim, prefix="session_") as workdir:
+        assert Path(workdir).parent == interim
+        assert Path(workdir).name.startswith("session_")
+        (Path(workdir) / "binned.zarr").touch()
+    assert not interim.exists()
+
+
+def test_interim_workdir_keeps_existing_dir(tmp_path):
+    (tmp_path / "recording.h5").touch()
+    with io.interim_workdir(tmp_path) as workdir:
+        (Path(workdir) / "binned.zarr").touch()
+    assert [p.name for p in tmp_path.iterdir()] == ["recording.h5"]
+
+
+def test_interim_workdir_keeps_created_dir_with_other_files(tmp_path):
+    interim = tmp_path / "interim"
+    with io.interim_workdir(interim):
+        (interim / "other.txt").touch()
+    assert [p.name for p in interim.iterdir()] == ["other.txt"]
+
+
+def test_interim_workdir_cleans_up_on_error(tmp_path):
+    interim = tmp_path / "interim"
+    with pytest.raises(RuntimeError), io.interim_workdir(interim):
+        raise RuntimeError
+    assert not interim.exists()
 
 
 def test_read_points_fiji():

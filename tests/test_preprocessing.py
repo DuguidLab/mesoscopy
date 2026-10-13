@@ -1,4 +1,6 @@
 import pathlib
+import shutil
+from unittest import mock
 
 import h5py
 import numpy as np
@@ -262,6 +264,48 @@ def test_preprocess_nwb_channelmeansonly(nwbfile, output_dir):
     )
 
 
+def test_preprocess_h5_interim_in_output_dir(raw_h5, tmp_path):
+    """An interim directory holding the input and output keeps both."""
+    session_dir = tmp_path / "session"
+    session_dir.mkdir()
+    shutil.copy(raw_h5, session_dir)
+
+    preprocess.run_preprocessing(
+        path=str(session_dir / "preproc_test.h5"), out_dir=str(session_dir), interim_dir=str(session_dir)
+    )
+
+    assert sorted(p.name for p in session_dir.iterdir()) == ["preproc_test.h5", "preproc_test_preprocessed.h5"]
+    with h5py.File(session_dir / "preproc_test_preprocessed.h5", "r") as f:
+        assert "/F" in f
+
+
+def test_preprocess_nwb_interim_in_output_dir(nwbfile):
+    """An interim directory holding the NWB input and output keeps both, and the NWB file links to the output."""
+    session_dir = pathlib.Path(nwbfile).parent
+
+    preprocess.run_preprocessing(path=nwbfile, out_dir=str(session_dir), interim_dir=str(session_dir))
+
+    assert sorted(p.name for p in session_dir.iterdir()) == ["session_1234_preprocessed.h5", "test.nwb"]
+    with h5py.File(nwbfile, "r") as f:
+        link = f["/processing/ophys/DeltaFSeries"].get("data", getlink=True)
+    assert (session_dir / link.filename).is_file()
+
+
+def test_preprocess_channelmeansonly_removes_interim(raw_h5, output_dir, tmp_path):
+    interim = tmp_path / "interim"
+    preprocess.run_preprocessing(path=raw_h5, out_dir=output_dir, interim_dir=str(interim), channel_means_only=True)
+    assert not interim.exists()
+
+
+def test_preprocess_failure_removes_interim(raw_h5, output_dir, tmp_path, monkeypatch):
+    # Fails after the binned frames are written to the interim directory.
+    monkeypatch.setattr(compute, "channel_separation_filters", mock.Mock(side_effect=RuntimeError))
+    interim = tmp_path / "interim"
+    with pytest.raises(RuntimeError):
+        preprocess.run_preprocessing(path=raw_h5, out_dir=output_dir, interim_dir=str(interim))
+    assert not interim.exists()
+
+
 def test_cmd_parity(raw_h5, output_dir):
     """Check if click preprocess cmd caller works"""
     runner = CliRunner()
@@ -275,7 +319,6 @@ def test_cmd_parity(raw_h5, output_dir):
 def test_cmd_no_qa_writes_the_output(raw_h5, output_dir, tmp_path):
     """Skipped QA checks leave None results, which must not reach the HDF5 writer."""
     runner = CliRunner()
-    # The interim directory is removed on completion, so it must not be the output directory.
     result = runner.invoke(
         mesoscopy.cli,
         args=f"preprocess --no-qa --out_dir {output_dir} --interim_dir {tmp_path / 'interim'} {raw_h5}",
